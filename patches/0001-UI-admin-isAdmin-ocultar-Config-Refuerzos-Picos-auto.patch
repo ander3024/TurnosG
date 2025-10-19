@@ -1,3 +1,13 @@
+From 355d636068396ffd91ad9c0f46cbea2f97c13ca7 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Andr=C3=A9s=20Fern=C3=A1ndez?= <andres@careucom.com>
+Date: Sun, 19 Oct 2025 18:45:18 +0000
+Subject: [PATCH] UI(admin): isAdmin + ocultar Config/Refuerzos/Picos
+ (autopatch)
+
+---
+ src/App.jsx | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
 diff --git a/src/App.jsx b/src/App.jsx
 index e455ebb..73b3f1f 100644
 --- a/src/App.jsx
@@ -23,3 +33,6 @@ index e455ebb..73b3f1f 100644
            <PropuestaCierre
              state={state}
              startDate={startDate}
+-- 
+2.45.2
+
