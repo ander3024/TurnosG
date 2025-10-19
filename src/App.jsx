@@ -267,6 +267,7 @@ function scoreConciliacionBreakdown({assignments, people, startDate, weeks, conc
     byWeek.push({ week: w+1, cortes, islasTrabajo, islasLibre, score });
   }
 
+  
   return { total, byWeek };
 }
 
