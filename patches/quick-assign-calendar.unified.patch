@@ -1,0 +1,22 @@
+diff --git a/src/App.jsx b/src/App.jsx
+index f91b3ec..63923b2 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -708,7 +708,7 @@ export default function App(){
+         {/* Calendarios y reportes */}
+         <section className="lg:col-span-2 space-y-6">
+           <Card title="Cuadrante (click en día para ampliar)">
+-            <CalendarView startDate={startDate} weeks={state.weeks} assignments={ASS} people={state.people} onOpenDay={(ds)=>setModalDay(ds)} />
++            <CalendarView startDate={startDate} weeks={state.weeks} assignments={ASS} people={state.people} onOpenDay={(ds)=>setModalDay(ds)} isAdmin={isAdmin} onQuickAssign={forceAssign} />
+           </Card>
+ 
+           <Card title="Vista semanal por persona">
+@@ -954,7 +954,7 @@ function FestivosPanel({ state, up }){
+ }
+ 
+ // ===== Calendarios =====
+-function CalendarView({ startDate, weeks, assignments, people, onOpenDay }){ const todayStr = toDateValue(new Date());
++function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmin, onQuickAssign }){ const todayStr = toDateValue(new Date());
+   const days=[]; for(let w=0;w<weeks;w++) for(let d=0;d<7;d++) days.push(addDays(startDate, w*7+d));
+   const personMap=new Map(people.map(p=>[p.id,p]));
+   return (
