@@ -1048,7 +1048,7 @@ function TimeOffPanel({ state, setState, controls, isAdmin, currentUser }){
         <div className="col-span-4"><label className="text-xs">Hasta</label><input type="date" value={newTO.end} onChange={(e)=>setNewTO({...newTO,end:e.target.value})} className="w-full px-2 py-1 rounded border"/></div>
         <div className="col-span-4"><label className="text-xs">Tipo</label>
           <select value={newTO.type} onChange={(e)=>setNewTO({...newTO,type:e.target.value})} className="w-full px-2 py-1 rounded border">
-            <option value="vacaciones">Vacaciones</option disabled={!isAdmin}>
+            <option value="vacaciones">Vacaciones</option>
             <option value="libranza">Libranza</option>
             <option value="viaje">Viaje (día entero)</option>
           </select>
@@ -1538,7 +1538,7 @@ function AdminUsersAndPerms({ auth }) {
             <div><label className="text-xs">Rol</label>
               <select className="w-full border rounded px-2 py-1"
                       value={creating.role} onChange={e=>setCreating({...creating,role:e.target.value})}>
-                <option value="user">user</option disabled={!isAdmin}>
+                <option value="user">user</option>
                 <option value="admin">admin</option>
               </select>
             </div>
