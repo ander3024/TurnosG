@@ -467,6 +467,9 @@ export default function App(){
   }
   function doLogout(){ setAuth({ token:"", user:null }); }
 
+  // --- permisos UI ---
+  const isAdmin = auth.user?.role === 'admin';
+
   // ---------- Estado principal ----------
   const defaultStart = startOfWeekMonday(new Date());
   const [state,setState]=usePersistentState({
@@ -706,8 +709,8 @@ export default function App(){
 
           <TimeOffPanel state={state} setState={setState} controls={controls} />
           <SwapsPanel state={state} setState={setState} assignments={ASS} />
-          <RefuerzosPanel state={state} up={up} />
-          <GeneradorPicos state={state} up={up} />
+          {isAdmin && <RefuerzosPanel state={state} up={up} />}
+          {isAdmin && <GeneradorPicos state={state} up={up} />}
           <PropuestaCierre
             state={state}
             startDate={startDate}
