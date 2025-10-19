@@ -1,0 +1,50 @@
+From dac58b2f7008372693da20a7f9d57f8e340eb750 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Andr=C3=A9s=20Fern=C3=A1ndez?= <andres@careucom.com>
+Date: Sun, 19 Oct 2025 20:42:43 +0000
+Subject: [PATCH] fix: DayModal (isAdmin+disabled), guards en Swaps y chip
+ 'Refuerzo' en semanal
+
+---
+ src/App.jsx | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/src/App.jsx b/src/App.jsx
+index 63923b2..bbfa322 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -774,6 +774,7 @@ export default function App(){
+           assignments={ASS[modalDay]||[]}
+           people={state.people}
+           onOverride={forceAssign}
++          isAdmin={isAdmin}
+           onClose={()=>setModalDay(null)}
+         />
+       )}
+@@ -1014,6 +1015,7 @@ function WeeklyView({ startDate, weeks, assignments, people }){
+                   {cell.length===0? <span className="text-slate-400">—</span> : cell.map((c,i)=>{ const span=formatSpan(c.shift.start,c.shift.end); const dur=minutesDiff(c.shift.start,c.shift.end)/60; return (
+                     <div key={i} className="rounded-lg border px-2 py-1 mb-1" style={{borderColor:`${p.color}55`,background:`${p.color}10`}}>
+                       <div className="text-[11px] font-medium">{c.shift.label||'Turno'}</div>
++                      {((c.shift.label||"").toLowerCase().includes("refuerzo")) <div className="text-[11px] font-medium">{c.shift.label||'Turno'}</div><div className="text-[11px] font-medium">{c.shift.label||'Turno'}</div> <span className="ml-1 px-1 border rounded text-[10px]">Refuerzo</span>}
+                       <div className="text-[12px]">{span} <span className="text-[11px] text-slate-500">({dur}h)</span></div>
+                     </div>
+                   ); })}
+@@ -1124,6 +1126,7 @@ function SwapsPanel({ state, setState, assignments, isAdmin, currentUser }){
+   function denySwap(i){ setState(prev=>({...prev, swaps: prev.swaps.map((r,idx)=> idx===i? {...r,status:'denegada'}:r)})); }
+     if (!isAdmin) return;
+   function archiveSwap(i){ setState(prev=>({...prev, swaps: prev.swaps.map((r,idx)=> idx===i? {...r,status:'archivada'}:r)})); }
++    if (!isAdmin) return;
+   function deleteSwap(i){ setState(prev=>({...prev, swaps: prev.swaps.filter((_,idx)=> idx!==i)})); }
+ 
+   return (
+@@ -1418,7 +1421,7 @@ function DayModal({ dateStr, date, assignments, people, onOverride, onClose, isA
+                     <select
+                       className="border rounded px-2 py-1 text-sm"
+                       value={c.personId || ''}
+-                      onChange={e=> onOverride(dateStr, i, e.target.value || null)}
++                      onChange={e=> (isAdmin onChange={e=> onOverride(dateStr, i, e.target.value || null)}onChange={e=> onOverride(dateStr, i, e.target.value || null)} onOverride(dateStr, i, e.target.value || null))}
+                     >
+                       <option value="">— Sin override —</option>
+                       {people.map(pp=> <option key={pp.id} value={pp.id}>{pp.name}</option>)}
+-- 
+2.45.2
+
