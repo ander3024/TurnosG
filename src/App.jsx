@@ -1027,7 +1027,7 @@ function WeeklyView({ startDate, weeks, assignments, people, timeOffs }){
                       ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[11px] bg-amber-50 border-amber-300 text-amber-800">
                           {(() => {
                             const t = getTOType(h.dateStr, p.id);
-                            return t===vacaciones ? Vacaciones : t===libranza ? Libranza : t===viaje ? Viaje : Ausencia;
+                            return t==='vacaciones' ? Vacaciones : t==='libranza' ? Libranza : t==='viaje' ? Viaje : Ausencia;
                           })()}
                         </span>
                       : <span className="text-slate-400">—</span>
