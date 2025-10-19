@@ -935,6 +935,7 @@ function showToast(msg){ setUI(prev=>({...prev, toast:msg})); setTimeout(()=>set
   next[dateStr] = next[dateStr] || {};
   next[dateStr][key] = personId || null; // si pasas '', quita override
   up(['overrides'], next);
+  up(['audit'], [ ...(state.audit||[]), { ts:new Date().toISOString(), actor:(auth.user?.email||'unknown'), action:'override', dateStr, assignmentIndex, personId } ]);
 }
 
 
@@ -1290,7 +1291,7 @@ if (!auth.user || !auth.token) {
           </Card>
 
           <TimeOffPanel state={state} setState={setState} controls={controls} isAdmin={isAdmin} currentUser={auth.user} />
-          <SwapsPanel state={state} setState={setState} assignments={ASS} />
+          <SwapsPanel state={state} setState={setState} assignments={ASS}  isAdmin={isAdmin} currentUser={auth.user} />
           {isAdmin && <RefuerzosPanel state={state} up={up} />}
           {isAdmin && <GeneradorPicos state={state} up={up} />}
           <PropuestaCierre
@@ -2078,7 +2079,9 @@ function SwapsPanel({ state, setState, assignments, isAdmin, currentUser }){
     setState(prev=> ({...prev, audit:[...(prev.audit||[]), {ts:new Date().toISOString(), actor:(currentUser?.email||'unknown'), action:'swap:aprobada', index:i}] }));
   }
   function denySwap(i){ setState(prev=>({...prev, swaps: prev.swaps.map((r,idx)=> idx===i? {...r,status:'denegada'}:r)})); }
+    if (!isAdmin) return;
   function archiveSwap(i){ setState(prev=>({...prev, swaps: prev.swaps.map((r,idx)=> idx===i? {...r,status:'archivada'}:r)})); }
+    setState(prev=> ({...prev, audit:[...(prev.audit||[]), {ts:new Date().toISOString(), actor:(currentUser?.email||'unknown'), action:'swap:denegada', index:i}] }));
   function deleteSwap(i){ setState(prev=>({...prev, swaps: prev.swaps.filter((_,idx)=> idx!==i)})); }
 
   return (
@@ -2397,7 +2400,7 @@ function ResumenPanel({ controls, annualTarget, onExportICS }){
   );
 }
 // ===== Modal Día =====
-function DayModal({ dateStr, date, assignments, people, onOverride, onClose }){
+function DayModal({ dateStr, date, assignments, people, onOverride, onClose, isAdmin }){
   const pmap=new Map(people.map(p=>[p.id,p]));
   const sorted=assignments.map(x=>x); // ya vienen ordenados por ASS
   return (
@@ -2435,7 +2438,7 @@ function DayModal({ dateStr, date, assignments, people, onOverride, onClose }){
                       className="border rounded px-2 py-1 text-sm"
                       value={c.personId || ''}
                       onChange={e=> onOverride(dateStr, i, e.target.value || null)}
-                    >
+                     disabled={!isAdmin}>
                       <option value="">— Sin override —</option>
                       {(people || []).map(pp=> <option key={pp.id} value={pp.id}>{pp.name}</option>)}
                     </select>
