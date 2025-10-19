@@ -33,7 +33,7 @@ diff --git a/src/App.jsx b/src/App.jsx
 +            title="Calcular semanas hasta el 31/12"
 +            onClick={()=>{
 +              const s = parseDateValue(state.startDate);
-+              const end = new Date(s.getFullYear(), 11, 31); // 31 diciembre del año de inicio
++              const end = new Date(s.getFullYear(), 11, 31); // 31/12 del año de inicio
 +              const days = Math.max(1, Math.floor((end - s)/(24*3600*1000)) + 1);
 +              const w = Math.ceil(days/7);
 +              up(['weeks'], w);
