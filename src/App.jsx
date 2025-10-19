@@ -509,7 +509,8 @@ export default function App(){
 
   // ---------- Cloud (SQLite) ----------
   const [cloud, setCloud] = useState({ spaceId:"turnos-2025", readToken:"", writeToken:"WRT-1234", apiKey:"" });
-  async function cloudLoad() {
+  async function cloudLoad() { setUI(prev=>({...prev, sync:"loading"}));
+    if (!isAdmin && !cloud.readToken) { showToast("Falta ReadToken"); setUI(prev=>({...prev, sync:"error"})); return; }
     try{
       const extra={}; if(cloud.apiKey) extra["X-API-Key"]=cloud.apiKey; if(cloud.readToken) extra["X-Read-Token"]=cloud.readToken;
       const data = await api(`/state/${encodeURIComponent(cloud.spaceId)}`, { method:"GET" }, auth.token, extra);
@@ -519,16 +520,16 @@ export default function App(){
       if (typeof payload.applyConciliation === 'undefined') payload.applyConciliation = true;
       setState(prev=>({ ...prev, ...payload }));
       setUI(prev=>({...prev, sync:"ok"})); showToast("Cargado de nube");
-    }catch(e){ setUI(prev=>({...prev, sync:"error"})); showToast("Error al cargar: "+e.message); }
+    }catch(e){ setUI(prev=>({...prev, sync:"error"})); showToast((String(e.message||"")).startsWith("403")?"403: ReadToken inválido o sin permisos":"Error al cargar: "+e.message); }
   }
-  async function cloudSave() {
+  async function cloudSave() { setUI(prev=>({...prev, sync:"loading"}));
     try{
       const headers={ "Content-Type":"application/json", "X-Write-Token": cloud.writeToken };
       if(cloud.apiKey) headers["X-API-Key"]=cloud.apiKey;
       const payload = state; // si quieres excluir PINs: const { security, ...payload } = state;
       const out = await api(`/state/${encodeURIComponent(cloud.spaceId)}`, { method:"PUT", headers, body: JSON.stringify({ payload, read_token: cloud.readToken || null }) }, auth.token);
       setUI(prev=>({...prev, sync:"ok"})); showToast("Guardado en nube");
-    }catch(e){ setUI(prev=>({...prev, sync:"error"})); showToast("Error al cargar: "+e.message); }
+    }catch(e){ setUI(prev=>({...prev, sync:"error"})); showToast((String(e.message||"")).startsWith("403")?"403: ReadToken inválido o sin permisos":"Error al cargar: "+e.message); }
   }
 
   // ---------- Utilidades de estado ----------
