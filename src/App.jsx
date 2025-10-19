@@ -981,7 +981,7 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="text-[10px] text-slate-500">{dateStr}</div>
-                  <button className="text-xs px-2 py-0.5 rounded border hover:bg-slate-100" onClick={()=>onOpenDay(dateStr)}>Ampliar</button>
+                  <button className="h-6 w-6 grid place-items-center rounded-full border hover:bg-slate-100 text-xs" title="Ampliar día" aria-label="Ampliar día" onClick={()=>onOpenDay(dateStr)}>🔍</button>
                 </div>
               </div>
               <div className="space-y-1.5">
