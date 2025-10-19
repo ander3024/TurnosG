@@ -720,7 +720,7 @@ export default function App(){
                 <button onClick={()=>window.print()} className="px-3 py-1.5 rounded-lg border">Imprimir / PDF</button>
               </div>
             </div>
-            <WeeklyView startDate={weeklyStart} weeks={1} assignments={ASS} people={state.people} />
+            <WeeklyView startDate={weeklyStart} weeks={1} assignments={ASS} people={state.people} timeOffs={state.timeOffs} />
           </Card>
 
           <TimeOffPanel state={state} setState={setState} controls={controls} isAdmin={isAdmin} currentUser={auth.user} />
@@ -995,8 +995,18 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
     </div>
   );
 }
-function WeeklyView({ startDate, weeks, assignments, people }){
+function WeeklyView({ startDate, weeks, assignments, people, timeOffs }){
   const header=[]; for(let d=0; d<7*weeks; d++){ const date=addDays(startDate,d); header.push({ dateStr:toDateValue(date), label: date.toLocaleDateString(undefined,{weekday:'short'})+' '+date.getDate() }); }
+  // Helpers: TO aprobadas
+  const hasApprovedTO = (dateStr, personId) => {
+    const d = parseDateValue(dateStr);
+    return (timeOffs||[]).some(to => to.personId===personId && to.status==="aprobada" && parseDateValue(to.start) <= d && d <= parseDateValue(to.end));
+  };
+  const getTOType = (dateStr, personId) => {
+    const d = parseDateValue(dateStr);
+    const hit = (timeOffs||[]).find(to => to.personId===personId && to.status==="aprobada" && parseDateValue(to.start) <= d && d <= parseDateValue(to.end));
+    return hit ? hit.type : null;
+  };
   return (
     <div className="overflow-x-auto print-only:block">
       <table className="w-full text-sm border-collapse">
