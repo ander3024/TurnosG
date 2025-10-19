@@ -1022,7 +1022,17 @@ function WeeklyView({ startDate, weeks, assignments, people, timeOffs }){
               <td className="p-2 align-top"><div className="inline-flex items-center gap-2"><span className="h-3 w-3 rounded" style={{background:p.color}}/> {p.name}</div></td>
               {header.map(h=>{ const cell=(assignments[h.dateStr]||[]).filter(c=>c.personId===p.id).sort((a,b)=> minutesFromHHMM(a.shift.start)-minutesFromHHMM(b.shift.start)); return (
                 <td key={h.dateStr} className="p-2 align-top">
-                  {cell.length===0? <span className="text-slate-400">—</span> : cell.map((c,i)=>{ const span=formatSpan(c.shift.start,c.shift.end); const dur=minutesDiff(c.shift.start,c.shift.end)/60; return (
+                  {cell.length===0 ? (
+                    (hasApprovedTO(h.dateStr, p.id)
+                      ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[11px] bg-amber-50 border-amber-300 text-amber-800">
+                          {(() => {
+                            const t = getTOType(h.dateStr, p.id);
+                            return t===vacaciones ? Vacaciones : t===libranza ? Libranza : t===viaje ? Viaje : Ausencia;
+                          })()}
+                        </span>
+                      : <span className="text-slate-400">—</span>
+                    )
+                  : cell.map((c,i)=>{ const span=formatSpan(c.shift.start,c.shift.end); const dur=minutesDiff(c.shift.start,c.shift.end)/60; return (
                     <div key={i} className="rounded-lg border px-2 py-1 mb-1" style={{borderColor:`${p.color}55`,background:`${p.color}10`}}>
                       <div className="text-[11px] font-medium">{c.shift.label||'Turno'}</div>
                       {((c.shift.label||"").toLowerCase().includes("refuerzo")) && <span className="ml-1 px-1 border rounded text-[10px]">Refuerzo</span>}
