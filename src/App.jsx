@@ -793,6 +793,14 @@ function ConfigBasica({ state, up }){
         <label className="col-span-2 text-sm">Fecha de inicio (lunes recomendado)</label>
         <input type="date" value={state.startDate} onChange={(e)=>up(['startDate'],e.target.value)} className="col-span-2 px-3 py-2 rounded-lg border"/>
         <div><label className="text-sm">Semanas a mostrar</label><input type="number" min={1} max={52} value={state.weeks} onChange={(e)=>up(['weeks'],Number(e.target.value))} className="w-full px-3 py-2 rounded-lg border"/></div>
+        <div className="col-span-2">
+          <button
+            type="button"
+            className="px-3 py-2 rounded-lg border"
+            title="Calcular semanas hasta el 31/12"
+            onClick={() => { const s = parseDateValue(state.startDate); const end = new Date(s.getFullYear(), 11, 31); const days = Math.max(1, Math.floor((end - s)/(24*3600*1000)) + 1); const w = Math.ceil(days/7); up(['weeks'], w); }}
+          >Hasta fin de año</button>
+        </div>
         <div><label className="text-sm">Horas objetivo/año</label><input type="number" min={1400} max={2200} value={state.annualTargetHours} onChange={(e)=>up(['annualTargetHours'],Number(e.target.value))} className="w-full px-3 py-2 rounded-lg border"/></div>
         <div><label className="text-sm">Vacaciones (días laborables)</label><input type="number" min={0} max={60} value={state.vacationDaysNatural} onChange={(e)=>up(['vacationDaysNatural'],Number(e.target.value))} className="w-full px-3 py-2 rounded-lg border"/></div>
         <div><label className="text-sm">Horas por día de VIAJE</label><input type="number" min={0} max={12} value={state.travelDefaultHours} onChange={(e)=>up(['travelDefaultHours'],Number(e.target.value))} className="w-full px-3 py-2 rounded-lg border"/></div>
