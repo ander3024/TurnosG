@@ -1,0 +1,180 @@
+From 32117c9dc57f5190649e4b66ec2e7e7a71220ada Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Andr=C3=A9s=20Fern=C3=A1ndez?= <andres@careucom.com>
+Date: Sun, 19 Oct 2025 16:16:26 +0000
+Subject: [PATCH] UI: limitar funciones a admin (permisos visibles)
+
+---
+ changes.patch | 161 ++++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 161 insertions(+)
+ create mode 100644 changes.patch
+
+diff --git a/changes.patch b/changes.patch
+new file mode 100644
+index 0000000..a555e3e
+--- /dev/null
++++ b/changes.patch
+@@ -0,0 +1,161 @@
++*** a/src/App.jsx
++--- b/src/App.jsx
++@@
++ export default function App(){
++   // ---------- Auth (JWT) ----------
++@@
++   function doLogout(){ setAuth({ token:"", user:null }); }
++ 
+++  // --- helpers de permisos en UI ---
+++  const isAdmin = auth.user?.role === 'admin';
+++
++   // ---------- Estado principal ----------
++@@
++-  return (
+++  return (
++     <div className="min-h-screen bg-slate-50 text-slate-900">
++@@
++-            {/* Controles Nube */}
++-            <input className="border rounded px-2 py-1 w-32" placeholder="Space ID"
++-              value={cloud.spaceId} onChange={e=>setCloud({...cloud,spaceId:e.target.value})}/>
++-            <input className="border rounded px-2 py-1 w-28" placeholder="ReadToken"
++-              value={cloud.readToken} onChange={e=>setCloud({...cloud,readToken:e.target.value})}/>
++-            <input className="border rounded px-2 py-1 w-28" placeholder="WriteToken"
++-              value={cloud.writeToken} onChange={e=>setCloud({...cloud,writeToken:e.target.value})}/>
++-            <button onClick={cloudLoad} className="px-3 py-1.5 rounded-lg border">Cargar nube</button>
++-            <button onClick={cloudSave} className="px-3 py-1.5 rounded-lg border">Guardar nube</button>
+++            {/* Controles Nube */}
+++            {isAdmin ? (
+++              <>
+++                <input className="border rounded px-2 py-1 w-32" placeholder="Space ID"
+++                  value={cloud.spaceId} onChange={e=>setCloud({...cloud,spaceId:e.target.value})}/>
+++                <input className="border rounded px-2 py-1 w-28" placeholder="ReadToken"
+++                  value={cloud.readToken} onChange={e=>setCloud({...cloud,readToken:e.target.value})}/>
+++                <input className="border rounded px-2 py-1 w-28" placeholder="WriteToken"
+++                  value={cloud.writeToken} onChange={e=>setCloud({...cloud,writeToken:e.target.value})}/>
+++                <button onClick={cloudLoad} className="px-3 py-1.5 rounded-lg border">Cargar nube</button>
+++                <button onClick={cloudSave} className="px-3 py-1.5 rounded-lg border">Guardar nube</button>
+++              </>
+++            ) : (
+++              <>
+++                <input className="border rounded px-2 py-1 w-32" placeholder="Space ID"
+++                  value={cloud.spaceId} onChange={e=>setCloud({...cloud,spaceId:e.target.value})}/>
+++                <button onClick={cloudLoad} className="px-3 py-1.5 rounded-lg border">Cargar nube</button>
+++              </>
+++            )}
++@@
++-      <main className="w-full max-w-[1800px] mx-auto px-6 py-6 grid lg:grid-cols-3 gap-6">
++-        {/* Configuración */}
++-        <section className="lg:col-span-1 space-y-6">
++-          <ConfigBasica state={state} up={up} />
++-          <ReglasPanel state={state} up={up} />
++-          <ConciliacionPanel state={state} up={up} />
++-          <PersonasPanel state={state} upPerson={upPerson} />
++-          <TurnosPanel state={state} up={up} />
++-          <FestivosPanel state={state} up={up} />
++-        </section>
+++      <main className="w-full max-w-[1800px] mx-auto px-6 py-6 grid lg:grid-cols-3 gap-6">
+++        {/* Configuración (solo admin) */}
+++        {isAdmin && (
+++          <section className="lg:col-span-1 space-y-6">
+++            <ConfigBasica state={state} up={up} />
+++            <ReglasPanel state={state} up={up} />
+++            <ConciliacionPanel state={state} up={up} />
+++            <PersonasPanel state={state} upPerson={upPerson} />
+++            <TurnosPanel state={state} up={up} />
+++            <FestivosPanel state={state} up={up} />
+++          </section>
+++        )}
+++        {!isAdmin && <section className="lg:col-span-1" />}
++@@
++-          <TimeOffPanel state={state} setState={setState} controls={controls} />
++-          <SwapsPanel state={state} setState={setState} assignments={ASS} />
++-          <RefuerzosPanel state={state} up={up} />
++-          <GeneradorPicos state={state} up={up} />
+++          <TimeOffPanel state={state} setState={setState} controls={controls} isAdmin={isAdmin} currentUser={auth.user} />
+++          <SwapsPanel state={state} setState={setState} assignments={ASS} isAdmin={isAdmin} currentUser={auth.user} />
+++          {isAdmin && <RefuerzosPanel state={state} up={up} />}
+++          {isAdmin && <GeneradorPicos state={state} up={up} />}
++@@
++-            onToggleApply={(v)=>up(['applyConciliation'], v)}
+++            onToggleApply={(v)=> isAdmin && up(['applyConciliation'], v)}
++@@
++-        {auth.user.role === 'admin' && (
+++        {isAdmin && (
++           <section className="lg:col-span-3 space-y-6">
++             <AdminUsersAndPerms auth={auth} />
++           </section>
++         )}
++@@
++-          <DayModal
+++          <DayModal
++           dateStr={modalDay}
++           date={parseDateValue(modalDay)}
++-          assignments={ASS[modalDay]||[]}
++-          people={state.people}
++-          onOverride={forceAssign}
+++          assignments={ASS[modalDay]||[]}
+++          people={state.people}
+++          onOverride={forceAssign}
+++          isAdmin={isAdmin}
++           onClose={()=>setModalDay(null)}
++         />
++       )}
++@@
++-function TimeOffPanel({ state, setState, controls }){
+++function TimeOffPanel({ state, setState, controls, isAdmin, currentUser }){
++@@
++   function removeTimeOff(idx){ setState(prev=>({...prev, timeOffs: prev.timeOffs.filter((_,i)=>i!==idx)})); }
++-  function setTOStatus(idx,status){ setState(prev=>({...prev, timeOffs: prev.timeOffs.map((t,i)=> i===idx? {...t,status}:t)})); }
+++  function setTOStatus(idx,status){
+++    if (!isAdmin) return; // solo admin aprueba/deniega
+++    setState(prev=>({...prev, timeOffs: prev.timeOffs.map((t,i)=> i===idx? {...t,status}:t)}));
+++  }
++@@
++-              {t.status!=='aprobada' && <button onClick={()=>setTOStatus(idx,'aprobada')} className="text-emerald-700 hover:underline">Aprobar</button>}
++-              {t.status!=='denegada' && <button onClick={()=>setTOStatus(idx,'denegada')} className="text-rose-700 hover:underline">Denegar</button>}
++-              <button onClick={()=>removeTimeOff(idx)} className="text-red-600 hover:underline">Eliminar</button>
+++              {isAdmin && t.status!=='aprobada' && <button onClick={()=>setTOStatus(idx,'aprobada')} className="text-emerald-700 hover:underline">Aprobar</button>}
+++              {isAdmin && t.status!=='denegada' && <button onClick={()=>setTOStatus(idx,'denegada')} className="text-rose-700 hover:underline">Denegar</button>}
+++              {isAdmin && <button onClick={()=>removeTimeOff(idx)} className="text-red-600 hover:underline">Eliminar</button>}
++             </div>
++           </div>
++         ))}
++       </div>
++     </Card>
++   );
++ }
++@@
++-function SwapsPanel({ state, setState, assignments }){
+++function SwapsPanel({ state, setState, assignments, isAdmin, currentUser }){
++@@
++-  function approveSwap(i){
+++  function approveSwap(i){
+++    if (!isAdmin) return; // solo admin aprueba
++     const sw=state.swaps[i];
++@@
++-  function denySwap(i){ setState(prev=>({...prev, swaps: prev.swaps.map((r,idx)=> idx===i? {...r,status:'denegada'}:r)})); }
++-  function archiveSwap(i){ setState(prev=>({...prev, swaps: prev.swaps.map((r,idx)=> idx===i? {...r,status:'archivada'}:r)})); }
+++  function denySwap(i){ if (!isAdmin) return; setState(prev=>({...prev, swaps: prev.swaps.map((r,idx)=> idx===i? {...r,status:'denegada'}:r)})); }
+++  function archiveSwap(i){ if (!isAdmin) return; setState(prev=>({...prev, swaps: prev.swaps.map((r,idx)=> idx===i? {...r,status:'archivada'}:r)})); }
++@@
++-                  {sw.status!=='aprobada' && <button className="text-emerald-700 hover:underline" onClick={()=>approveSwap(idx)}>Aprobar</button>}
++-                  {sw.status!=='denegada' && <button className="text-rose-700 hover:underline" onClick={()=>denySwap(idx)}>Denegar</button>}
++-                  {sw.status!=='archivada' && <button className="text-slate-600 hover:underline" onClick={()=>archiveSwap(idx)}>Archivar</button>}
+++                  {isAdmin && sw.status!=='aprobada' && <button className="text-emerald-700 hover:underline" onClick={()=>approveSwap(idx)}>Aprobar</button>}
+++                  {isAdmin && sw.status!=='denegada' && <button className="text-rose-700 hover:underline" onClick={()=>denySwap(idx)}>Denegar</button>}
+++                  {isAdmin && sw.status!=='archivada' && <button className="text-slate-600 hover:underline" onClick={()=>archiveSwap(idx)}>Archivar</button>}
++                   <button className="text-red-600 hover:underline" onClick={()=>deleteSwap(idx)}>Eliminar</button>
++@@
++-function DayModal({ dateStr, date, assignments, people, onOverride, onClose }){
+++function DayModal({ dateStr, date, assignments, people, onOverride, onClose, isAdmin }){
++@@
++-                    <select
+++                    <select
++                       className="border rounded px-2 py-1 text-sm"
++-                      value={c.personId || ''}
++-                      onChange={e=> onOverride(dateStr, i, e.target.value || null)}
+++                      value={c.personId || ''}
+++                      onChange={e=> isAdmin && onOverride(dateStr, i, e.target.value || null)}
+++                      disabled={!isAdmin}
++                     >
+-- 
+2.45.2
+
