@@ -1,0 +1,82 @@
+From e2be5cb51a65d798d8fa1523d74d5105025c1f24 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Andr=C3=A9s=20Fern=C3=A1ndez?= <andres@careucom.com>
+Date: Sun, 19 Oct 2025 19:21:41 +0000
+Subject: [PATCH] UI(visual): banner/toast de nube + 'Ir a hoy' + hoy resaltado
+
+---
+ src/App.jsx | 24 +++++++++++++++++++-----
+ 1 file changed, 19 insertions(+), 5 deletions(-)
+
+diff --git a/src/App.jsx b/src/App.jsx
+index f3ca901..b767fb2 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -466,6 +466,11 @@ export default function App(){
+     setAuth({ token:data.token, user:data.user });
+   }
+   function doLogout(){ setAuth({ token:"", user:null }); }
++  
++  // --- ui feedback (banner + toast) ---
++  const [ui, setUI] = useState({ sync:null, toast:null });
++  function showToast(msg){ setUI(prev=>({...prev, toast:msg})); setTimeout(()=>setUI(prev=>({...prev, toast:null})), 2000); }
++
+ 
+   // --- permisos UI ---
+   const isAdmin = auth.user?.role === 'admin';
+@@ -513,8 +518,8 @@ export default function App(){
+       if (!payload.conciliacion) payload.conciliacion = safeConciliacion();
+       if (typeof payload.applyConciliation === 'undefined') payload.applyConciliation = true;
+       setState(prev=>({ ...prev, ...payload }));
+-      alert("Cargado desde nube.");
+-    }catch(e){ alert(e.message); }
++      setUI(prev=>({...prev, sync:"ok"})); showToast("Cargado de nube");
++    }catch(e){ setUI(prev=>({...prev, sync:"error"})); showToast("Error al cargar: "+e.message); }
+   }
+   async function cloudSave() {
+     try{
+@@ -522,8 +527,8 @@ export default function App(){
+       if(cloud.apiKey) headers["X-API-Key"]=cloud.apiKey;
+       const payload = state; // si quieres excluir PINs: const { security, ...payload } = state;
+       const out = await api(`/state/${encodeURIComponent(cloud.spaceId)}`, { method:"PUT", headers, body: JSON.stringify({ payload, read_token: cloud.readToken || null }) }, auth.token);
+-      alert(`Guardado en nube. ETag: ${out.etag}`);
+-    }catch(e){ alert(e.message); }
++      setUI(prev=>({...prev, sync:"ok"})); showToast("Guardado en nube");
++    }catch(e){ setUI(prev=>({...prev, sync:"error"})); showToast("Error al cargar: "+e.message); }
+   }
+ 
+   // ---------- Utilidades de estado ----------
+@@ -584,6 +589,11 @@ export default function App(){
+   // ---------- Hooks que deben ejecutarse SIEMPRE ----------
+   const [payroll,setPayroll]=useState({ from: state.startDate, to: toDateValue(addDays(startDate, state.weeks*7-1)) });
+   const [weekIndex,setWeekIndex]=useState(0);
++  function goToday(){
++    const t = startOfWeekMonday(new Date());
++    const idx = Math.max(0, Math.min(state.weeks-1, Math.floor((t - startDate)/(7*24*3600*1000))));
++    setWeekIndex(idx);
++  }
+   const weeklyStart=useMemo(()=> addDays(startDate, weekIndex*7), [startDate, weekIndex]);
+   const canPrev=weekIndex>0, canNext=weekIndex<state.weeks-1;
+   const [modalDay,setModalDay]=useState(null);
+@@ -674,6 +684,10 @@ export default function App(){
+             <button onClick={cloudLoad} className="px-3 py-1.5 rounded-lg border">Cargar nube</button>
+             <button onClick={cloudSave} className="px-3 py-1.5 rounded-lg border">Guardar nube</button>
+ 
++            {ui.sync==="loading" && <span className="px-2 py-1 rounded bg-amber-100 border border-amber-300">Sincronizando…</span>}
++            {ui.sync==="ok" && <span className="px-2 py-1 rounded bg-emerald-100 border border-emerald-300">¡Listo!</span>}
++            {ui.sync==="error" && <span className="px-2 py-1 rounded bg-rose-100 border border-rose-300">Error</span>}
++            {ui.toast && (<div className="fixed right-4 bottom-4 z-50 bg-black text-white px-3 py-2 rounded-lg shadow">{ui.toast}</div>)}
+             <button onClick={doLogout} className="px-2 py-1 rounded border">Salir</button>
+           </div>
+         </div>
+@@ -939,7 +953,7 @@ function FestivosPanel({ state, up }){
+ }
+ 
+ // ===== Calendarios =====
+-function CalendarView({ startDate, weeks, assignments, people, onOpenDay }){
++function CalendarView({ startDate, weeks, assignments, people, onOpenDay }){ const todayStr = toDateValue(new Date());
+   const days=[]; for(let w=0;w<weeks;w++) for(let d=0;d<7;d++) days.push(addDays(startDate, w*7+d));
+   const personMap=new Map(people.map(p=>[p.id,p]));
+   return (
+-- 
+2.45.2
+
