@@ -713,7 +713,7 @@ export default function App(){
 
           <Card title="Vista semanal por persona">
             <div className="flex items-center justify-between mb-2">
-              <div className="text-sm">Semana {weekIndex+1} / {state.weeks}</div>
+              <div className="text-sm">Semana {weekIndex+1} / {state.weeks} · {weekRangeLabel}</div>
               <div className="flex items-center gap-2">
                 <button disabled={!canPrev} onClick={()=>setWeekIndex(w=>Math.max(0,w-1))} className={`px-2 py-1 rounded border ${canPrev? 'hover:bg-slate-100':'opacity-50 cursor-not-allowed'}`}>◀︎</button>
                 <button disabled={!canNext} onClick={()=>setWeekIndex(w=>Math.min(state.weeks-1,w+1))} className={`px-2 py-1 rounded border ${canNext? 'hover:bg-slate-100':'opacity-50 cursor-not-allowed'}`}>▶︎</button>
