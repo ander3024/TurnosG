@@ -1038,7 +1038,7 @@ function WeeklyView({ startDate, weeks, assignments, people, timeOffs }){
                       {((c.shift.label||"").toLowerCase().includes("refuerzo")) && <span className="ml-1 px-1 border rounded text-[10px]">Refuerzo</span>}
                       <div className="text-[12px]">{span} <span className="text-[11px] text-slate-500">({dur}h)</span></div>
                     </div>
-                  ); }) }
+                  ); }) )
                 </td>
               ); }) )}
             </tr>
