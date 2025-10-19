@@ -1032,7 +1032,7 @@ function WeeklyView({ startDate, weeks, assignments, people, timeOffs }){
                         </span>
                       : <span className="text-slate-400">—</span>
                     )
-                  : cell.map((c,i)=>{ const span=formatSpan(c.shift.start,c.shift.end); const dur=minutesDiff(c.shift.start,c.shift.end)/60; return (
+                  ) : ( cell.map((c,i)=>{ const span=formatSpan(c.shift.start,c.shift.end); const dur=minutesDiff(c.shift.start,c.shift.end)/60; return (
                     <div key={i} className="rounded-lg border px-2 py-1 mb-1" style={{borderColor:`${p.color}55`,background:`${p.color}10`}}>
                       <div className="text-[11px] font-medium">{c.shift.label||'Turno'}</div>
                       {((c.shift.label||"").toLowerCase().includes("refuerzo")) && <span className="ml-1 px-1 border rounded text-[10px]">Refuerzo</span>}
@@ -1040,7 +1040,7 @@ function WeeklyView({ startDate, weeks, assignments, people, timeOffs }){
                     </div>
                   ); }) )}
                 </td>
-              ); })}
+              ); }) )}
             </tr>
           ))}
         </tbody>
