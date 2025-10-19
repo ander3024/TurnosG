@@ -1,0 +1,34 @@
+diff --git a/src/App.jsx b/src/App.jsx
+index 73b3f1f..e32fcca 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -707,7 +707,7 @@ export default function App(){
+             <WeeklyView startDate={weeklyStart} weeks={1} assignments={ASS} people={state.people} />
+           </Card>
+ 
+-          <TimeOffPanel state={state} setState={setState} controls={controls} />
++          <TimeOffPanel state={state} setState={setState} controls={controls} isAdmin={isAdmin} currentUser={auth.user} />
+           <SwapsPanel state={state} setState={setState} assignments={ASS} />
+           {isAdmin && <RefuerzosPanel state={state} up={up} />}
+           {isAdmin && <GeneradorPicos state={state} up={up} />}
+@@ -1012,7 +1012,7 @@ function WeeklyView({ startDate, weeks, assignments, people }){
+ }
+ 
+ // ===== Vacaciones / Libranzas / Viajes =====
+-function TimeOffPanel({ state, setState, controls }){
++function TimeOffPanel({ state, setState, controls, isAdmin, currentUser }){
+   const [newTO,setNewTO]=useState({ personId: state.people[0]?.id||"P1", start: state.startDate, end: state.startDate, type:'vacaciones', note:'', hoursPerDay: state.travelDefaultHours, status: 'pendiente' });
+ 
+   function addTimeOff(){
+@@ -1026,7 +1026,10 @@ function TimeOffPanel({ state, setState, controls }){
+     setNewTO({...newTO, note:''});
+   }
+   function removeTimeOff(idx){ setState(prev=>({...prev, timeOffs: prev.timeOffs.filter((_,i)=>i!==idx)})); }
+-  function setTOStatus(idx,status){ setState(prev=>({...prev, timeOffs: prev.timeOffs.map((t,i)=> i===idx? {...t,status}:t)})); }
++  function setTOStatus(idx,status){
++    if (!isAdmin) return;
++    setState(prev=>({...prev, timeOffs: prev.timeOffs.map((t,i)=> i===idx? {...t,status}:t)}));
++  }
+ 
+   return (
+     <Card title="Vacaciones / Libranzas / Viajes">
