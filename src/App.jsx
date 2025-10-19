@@ -930,7 +930,7 @@ function FestivosPanel({ state, up }){
   return (
     <Card title="Festivos (2025)">
       <div className="grid grid-cols-12 gap-2">
-        <div className="col-span-7"><label className="text-xs">Provincia</label><select value={state.province} onChange={(e)=>up(['province'],e.target.value)} className="w-full px-2 py-1 rounded border">{Object.keys(HOLIDAYS_2025).map(p=> <option key={p} value={p}>{p}</option>)}</select></div>
+        <div className="col-span-7"><label className="text-xs">Provincia</label><select value={state.province} onChange={(e)=>up(['province'],e.target.value)} className="w-full px-2 py-1 rounded border">{Object.keys(HOLIDAYS_2025).map(p=> <option key={p} value={p}>{p}</option>)}</select></div disabled={!isAdmin}>
         <div className="col-span-5 flex items-end"><label className="text-xs flex items-center gap-2"><input type="checkbox" checked={state.consumeVacationOnHoliday} onChange={(e)=>up(['consumeVacationOnHoliday'],e.target.checked)} /> Consumir vacaciones en festivos</label></div>
         <div className="col-span-12 text-xs bg-slate-50 border rounded p-2">{(HOLIDAYS_2025[state.province]||[]).join(', ') || 'Sin datos'}</div>
       </div>
@@ -1040,14 +1040,14 @@ function TimeOffPanel({ state, setState, controls, isAdmin, currentUser }){
     <Card title="Vacaciones / Libranzas / Viajes">
       <div className="grid grid-cols-12 gap-2 mb-3">
         <div className="col-span-4"><label className="text-xs">Persona</label>
-          <select value={newTO.personId} onChange={(e)=>setNewTO({...newTO,personId:e.target.value})} className="w-full px-2 py-1 rounded border">
+          <select value={newTO.personId} onChange={(e)=>setNewTO({...newTO,personId:e.target.value})} className="w-full px-2 py-1 rounded border" disabled={!isAdmin}>
             {state.people.map(p=> <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
         </div>
         <div className="col-span-4"><label className="text-xs">Desde</label><input type="date" value={newTO.start} onChange={(e)=>setNewTO({...newTO,start:e.target.value})} className="w-full px-2 py-1 rounded border"/></div>
         <div className="col-span-4"><label className="text-xs">Hasta</label><input type="date" value={newTO.end} onChange={(e)=>setNewTO({...newTO,end:e.target.value})} className="w-full px-2 py-1 rounded border"/></div>
         <div className="col-span-4"><label className="text-xs">Tipo</label>
-          <select value={newTO.type} onChange={(e)=>setNewTO({...newTO,type:e.target.value})} className="w-full px-2 py-1 rounded border">
+          <select value={newTO.type} onChange={(e)=>setNewTO({...newTO,type:e.target.value})} className="w-full px-2 py-1 rounded border" disabled={!isAdmin}>
             <option value="vacaciones">Vacaciones</option>
             <option value="libranza">Libranza</option>
             <option value="viaje">Viaje (día entero)</option>
@@ -1105,12 +1105,10 @@ function SwapsPanel({ state, setState, assignments, isAdmin, currentUser }){
     overrides[sw.dateA][keyA]=B.personId; overrides[sw.dateB][keyB]=A.personId;
     const swaps=state.swaps.map((r,idx)=> idx===i? {...r,status:'aprobada'}:r);
     setState(prev=>({...prev, overrides, swaps }));
-    setState(prev=> ({...prev, audit:[...(prev.audit||[]), {ts:new Date().toISOString(), actor:(currentUser?.email||'unknown'), action:'swap:aprobada', index:i}] }));
   }
   function denySwap(i){ setState(prev=>({...prev, swaps: prev.swaps.map((r,idx)=> idx===i? {...r,status:'denegada'}:r)})); }
     if (!isAdmin) return;
   function archiveSwap(i){ setState(prev=>({...prev, swaps: prev.swaps.map((r,idx)=> idx===i? {...r,status:'archivada'}:r)})); }
-    setState(prev=> ({...prev, audit:[...(prev.audit||[]), {ts:new Date().toISOString(), actor:(currentUser?.email||'unknown'), action:'swap:denegada', index:i}] }));
   function deleteSwap(i){ setState(prev=>({...prev, swaps: prev.swaps.filter((_,idx)=> idx!==i)})); }
 
   return (
