@@ -774,6 +774,7 @@ export default function App(){
           assignments={ASS[modalDay]||[]}
           people={state.people}
           onOverride={forceAssign}
+          isAdmin={isAdmin}
           onClose={()=>setModalDay(null)}
         />
       )}
@@ -1124,6 +1125,7 @@ function SwapsPanel({ state, setState, assignments, isAdmin, currentUser }){
   function denySwap(i){ setState(prev=>({...prev, swaps: prev.swaps.map((r,idx)=> idx===i? {...r,status:'denegada'}:r)})); }
     if (!isAdmin) return;
   function archiveSwap(i){ setState(prev=>({...prev, swaps: prev.swaps.map((r,idx)=> idx===i? {...r,status:'archivada'}:r)})); }
+    if (!isAdmin) return;
   function deleteSwap(i){ setState(prev=>({...prev, swaps: prev.swaps.filter((_,idx)=> idx!==i)})); }
 
   return (
@@ -1418,7 +1420,7 @@ function DayModal({ dateStr, date, assignments, people, onOverride, onClose, isA
                     <select
                       className="border rounded px-2 py-1 text-sm"
                       value={c.personId || ''}
-                      onChange={e=> onOverride(dateStr, i, e.target.value || null)}
+                      onChange={e=> isAdmin onChange={e=> onOverride(dateStr, i, e.target.value || null)}onChange={e=> onOverride(dateStr, i, e.target.value || null)} onOverride(dateStr, i, e.target.value || null)}
                     >
                       <option value="">— Sin override —</option>
                       {people.map(pp=> <option key={pp.id} value={pp.id}>{pp.name}</option>)}
