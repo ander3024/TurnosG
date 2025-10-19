@@ -1420,7 +1420,8 @@ function DayModal({ dateStr, date, assignments, people, onOverride, onClose, isA
                     <select
                       className="border rounded px-2 py-1 text-sm"
                       value={c.personId || ''}
-                      onChange={e=> isAdmin onChange={e=> onOverride(dateStr, i, e.target.value || null)}onChange={e=> onOverride(dateStr, i, e.target.value || null)} onOverride(dateStr, i, e.target.value || null)}
+                      onChange={e=> (isAdmin && onOverride(dateStr, i, e.target.value || null))}
+                      disabled={!isAdmin}
                     >
                       <option value="">— Sin override —</option>
                       {people.map(pp=> <option key={pp.id} value={pp.id}>{pp.name}</option>)}
