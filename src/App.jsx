@@ -771,7 +771,6 @@ export default function App(){
           
           <OffPolicyPanel state={state} up={up} />
           <VacationPolicyPanel state={state} up={up} />
-          <VacationPolicyPanel state={state} up={up} />
 <ConciliacionPanel state={state} up={up} />
           <PersonasPanel state={state} upPerson={upPerson} />
           <TurnosPanel state={state} up={up} />
