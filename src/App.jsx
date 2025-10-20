@@ -115,16 +115,46 @@ function generateSchedule({ startDate, weeks, people, weekdayShifts, weekendShif
   const weekendLoad=new Map(people.map(p=>[p.id,0]));
   const timeOffIndex=indexTimeOff(timeOffs);
 
-  for(let w=0; w<weeks; w++){
+  
+  // --- OFF condicionado por vacaciones (configurable) ---
+  const OFFP = (typeof window !== "undefined" && window.__OFF_POLICY__) ? window.__OFF_POLICY__ : {};
+  const VAC = (timeOffs||[]).filter(t=> t.type==='vacaciones' && t.status==='aprobada');
+  function weekRange(startDate, w){
+    const ws = addDays(startDate, w*7);
+    const we = addDays(ws, 6);
+    return { ws, we };
+  }
+  function weekOverlapsVac(w){
+    const { ws, we } = weekRange(startDate, w);
+    return VAC.some(t => !(parseDateValue(t.end) < ws || parseDateValue(t.start) > we));
+  }
+for(let w=0; w<weeks; w++){
     const weekStart=addDays(startDate,w*7);
     const offId=computeOffPersonId(people,w);
-    const working=people.filter(p=>p.id!==offId);
-    const nextOff=computeOffPersonId(people,w+1);
+
+    // ¿Aplicar limitación de OFF esta semana?
+    const limitDays = (OFFP.limitOffDays && OFFP.limitOffDays.length) ? OFFP.limitOffDays : [3,4,5];
+    const hasVac = OFFP.enableLimitOffOnVacationWeek ? weekOverlapsVac(w) : false;
+    let adjVac = false;
+    if (OFFP.enableBlockFullOffAdjacentWeeks){
+      const win = Math.max(1, OFFP.adjacencyWindow || 1);
+      for (let k=1; k<=win; k++){
+        if (w-k>=0 && weekOverlapsVac(w-k)) { adjVac = true; break; }
+        if (w+k<weeks && weekOverlapsVac(w+k)) { adjVac = true; break; }
+      }
+    }
+    const offLimitedThisWeek = !!(hasVac || adjVac);
+const nextOff=computeOffPersonId(people,w+1);
     const weeklyMinutes = new Map(people.map(p=>[p.id,0]));
 
     for(let d=0; d<7; d++){
       const date=addDays(weekStart,d); const dateStr=toDateValue(date); const isWE=isWeekend(date);
-      let required = isWE? [{...weekendShift}] : [...weekdayShifts];
+      
+      // decide si el offId puede librar HOY:
+      const dayIdx = date.getDay(); // 0=Dom..6=Sáb
+      const offAllowedToday = offLimitedThisWeek ? limitDays.includes(dayIdx) : true;
+      const working = people.filter(p => p.id !== offId || !offAllowedToday);
+let required = isWE? [{...weekendShift}] : [...weekdayShifts];
 
       // Refuerzos en calendario de eventos
       const active=events.filter(ev=> parseDateValue(ev.start)<=date && date<=parseDateValue(ev.end));
@@ -493,7 +523,14 @@ export default function App(){
     rules: { enforce:true, maxDailyHours:9, maxWeeklyHours:40, minRestHours:12 },
     applyConciliation: true,
     conciliacion: { penalizaDiaIslaTrabajo:3, penalizaDiaIslaLibre:2, penalizaCortesSemana:1 },
-  });
+  
+    offPolicy: {
+      enableLimitOffOnVacationWeek: true,
+      limitOffDays: [3,4,5], // X(3), J(4), V(5) -> getDay(): 0=Dom..6=Sáb
+      enableBlockFullOffAdjacentWeeks: true,
+      adjacencyWindow: 1
+    },
+});
 
   function forceAssign(dateStr, assignmentIndex, personId){
   const a = ASS[dateStr]?.[assignmentIndex];
@@ -699,7 +736,9 @@ export default function App(){
         <section className="lg:col-span-1 space-y-6">
           <ConfigBasica state={state} up={up} />
           <ReglasPanel state={state} up={up} />
-          <ConciliacionPanel state={state} up={up} />
+          
+          <OffPolicyPanel state={state} up={up} />
+<ConciliacionPanel state={state} up={up} />
           <PersonasPanel state={state} upPerson={upPerson} />
           <TurnosPanel state={state} up={up} />
           <FestivosPanel state={state} up={up} />
@@ -1396,11 +1435,20 @@ function buildControls({
   // Conflictos (por si en el futuro los marcas)
   const totalConflicts = dates.reduce((acc,ds)=> acc + (assignments[ds]||[]).filter(a=>a.conflict).length, 0);
 
-  return { rows:summary, totalConflicts, vacationsUsedNatural, vacationUsedNaturalByPerson: vacByPerson };
+  // Etiqueta de periodo visible en resumen
+  const periodStart = startDate;
+  const periodEnd   = addDays(startDate, weeks*7 - 1);
+  const fmt = d => d.toLocaleDateString(undefined,{ day:"2-digit", month:"short", year:"numeric"});
+  const periodLabel = `${fmt(periodStart)} – ${fmt(periodEnd)} · ${weeks} sem`;
+
+  return { rows:summary, totalConflicts, vacationsUsedNatural, vacationUsedNaturalByPerson: vacByPerson, periodLabel };
 }
 function ResumenPanel({ controls, annualTarget, onExportICS }){
   return (
     <Card title="Resumen de horas vs objetivo y proyección anual">
+      <div className="text-xs text-slate-600 mb-2">
+        Periodo mostrado: {controls.periodLabel}. Proyección = horas del periodo × (52 / semanas mostradas).
+      </div>
       <table className="w-full text-sm border-separate border-spacing-y-1">
         <thead><tr className="text-left text-slate-600"><th className="py-1">Persona</th><th className="py-1">Jornadas L–V</th><th className="py-1">Jornadas S–D</th><th className="py-1">Horas (periodo)</th><th className="py-1">Proyección anual</th><th className="py-1">Δ vs {annualTarget}h</th><th className="py-1">Horas pendientes/sobrantes</th><th className="py-1">ICS</th></tr></thead>
         <tbody>
@@ -1412,7 +1460,15 @@ function ResumenPanel({ controls, annualTarget, onExportICS }){
               <td className="py-1 px-2">{r.hours.toFixed(1)}</td>
               <td className="py-1 px-2">{r.annualProjection.toFixed(0)}</td>
               <td className={`py-1 px-2 ${r.delta>0?'text-amber-700': r.delta<0?'text-blue-700':''}`}>{r.delta.toFixed(0)}</td>
-              <td className={`py-1 px-2 ${r.remaining>0?'text-blue-700': r.remaining<0?'text-amber-700':''}`}>{r.remaining.toFixed(0)}</td>
+              <td className={`py-1 px-2 ${r.remaining>0?'text-blue-700': r.remaining<0?'text-amber-700':''}`}>
+                <div className="text-right">{r.remaining.toFixed(0)}</div>
+                <div className="h-1.5 w-full bg-slate-100 rounded mt-1">
+                  <div className="h-1.5 rounded" style={{
+                    width: `${Math.min(100, Math.max(0, (r.annualProjection/annualTarget)*100))}%`,
+                    background: r.annualProjection>=annualTarget ? '#f59e0b55' : '#3b82f655'
+                  }}/>
+                </div>
+              </td>
               <td className="py-1 px-2"><button className="px-2 py-0.5 rounded border" onClick={()=>onExportICS(r.id)}>Descargar</button></td>
             </tr>
           ))}
@@ -1661,3 +1717,54 @@ function AdminUsersAndPerms({ auth }) {
 }
 
 export { }
+
+
+function OffPolicyPanel({ state, up }){
+  const p = state.offPolicy || {};
+  const days = [
+    {k:1, lbl:'L'}, {k:2,lbl:'M'}, {k:3,lbl:'X'}, {k:4,lbl:'J'}, {k:5,lbl:'V'}, {k:6,lbl:'S'}, {k:0,lbl:'D'}
+  ];
+  function toggleDay(k){
+    const set = new Set(p.limitOffDays || []);
+    if (set.has(k)) set.delete(k); else set.add(k);
+    up(['offPolicy','limitOffDays'], Array.from(set).sort());
+  }
+  return (
+    <Card title="Semana OFF condicionada por vacaciones">
+      <div className="grid grid-cols-12 gap-3 text-sm">
+        <label className="col-span-12 flex items-center gap-2">
+          <input type="checkbox"
+                 checked={!!p.enableLimitOffOnVacationWeek}
+                 onChange={e=>up(['offPolicy','enableLimitOffOnVacationWeek'], e.target.checked)} />
+          Si hay <b>vacaciones</b> en la semana, el OFF solo se respeta en los días seleccionados.
+        </label>
+        <div className="col-span-12">
+          <div className="text-xs mb-1">Días OFF permitidos (por defecto X-J-V):</div>
+          <div className="flex flex-wrap gap-2">
+            {days.map(d=>(
+              <label key={d.k} className={`px-2 py-1 rounded border cursor-pointer ${ (p.limitOffDays||[3,4,5]).includes(d.k) ? 'bg-slate-100' : ''}`}>
+                <input type="checkbox" className="mr-1"
+                       checked={(p.limitOffDays||[3,4,5]).includes(d.k)}
+                       onChange={()=>toggleDay(d.k)} />
+                {d.lbl}
+              </label>
+            ))}
+          </div>
+        </div>
+        <label className="col-span-12 flex items-center gap-2">
+          <input type="checkbox"
+                 checked={!!p.enableBlockFullOffAdjacentWeeks}
+                 onChange={e=>up(['offPolicy','enableBlockFullOffAdjacentWeeks'], e.target.checked)} />
+          Limitar también si hay vacaciones en la <b>semana anterior o posterior</b>.
+        </label>
+        <div className="col-span-6">
+          <label className="text-xs block mb-1">Ventana adyacente (semanas)</label>
+          <input type="number" min={1} max={4}
+                 value={p.adjacencyWindow||1}
+                 onChange={e=>up(['offPolicy','adjacencyWindow'], Number(e.target.value))}
+                 className="w-full border rounded px-2 py-1" />
+        </div>
+      </div>
+    </Card>
+  );
+}
