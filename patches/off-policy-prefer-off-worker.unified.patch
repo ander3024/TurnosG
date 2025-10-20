@@ -1,0 +1,40 @@
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -188,6 +188,7 @@ function generateSchedule({ startDate, weeks, people, weekdayShifts, weekendShif
+       const dayIdx = date.getDay(); // 0=Dom..6=Sáb
+       const offAllowedToday = offLimitedThisWeek ? limitDays.includes(dayIdx) : true;
+       const working = people.filter(p => p.id !== offId || !offAllowedToday);
++      const mustWorkOffToday = !offAllowedToday; // si hoy no puede librar, le damos prioridad
+ 
+       let required = isWE? [{...weekendShift}] : [...weekdayShifts];
+ 
+@@ -226,12 +227,22 @@ function generateSchedule({ startDate, weeks, people, weekdayShifts, weekendShif
+         // Reglas duras
+         pool = pool.filter(p => respectsRules({
+           personId:p.id, date, shift,
+           assignmentsSoFar: assignments,
+           weeklyMinutes, rules
+         }));
+ 
+         // Overrides y preferencia finde
+-        let chosen=null; const forced=overrides?.[dateStr]?.[key];
+-        if(forced && pool.some(p=>p.id===forced)) chosen=forced;
++        let chosen=null; const forced=overrides?.[dateStr]?.[key];
++        if(forced && pool.some(p=>p.id===forced)) {
++          chosen=forced;
++        }
++        // ⬇️ NUEVO: si hoy el OFF NO puede librar, priorizarle en este turno
++        if(!chosen && mustWorkOffToday && pool.some(p=>p.id===offId)){
++          chosen = offId;
++        }
++        // (mantenemos el resto de preferencias igual)
+-        else if(isWE && s===0 && weekendFixedId && pool.some(p=>p.id===weekendFixedId)) chosen=weekendFixedId;
++        else if(isWE && s===0 && weekendFixedId && pool.some(p=>p.id===weekendFixedId)) {
++          chosen=weekendFixedId;
++        }
+         else if(isWE && s===0 && !weekendFixedId){
+           const prefer=pool.find(p=>p.id===nextOff);
+           chosen=prefer?.id || pickBestCandidate(pool,{isWeekend:isWE,weekdaysLoad,weekendLoad,priorityMap});
+         } else {
+           chosen=pickBestCandidate(pool,{isWeekend:isWE,weekdaysLoad,weekendLoad,priorityMap});
+         }
