@@ -528,15 +528,13 @@ export default function App(){
     conciliacion: { penalizaDiaIslaTrabajo:3, penalizaDiaIslaLibre:2, penalizaCortesSemana:1 },
   
     offPolicy: {
-      enableLimitOffOnVacationWeek: true,
-      limitOffDays: [3,4,5], // X(3), J(4), V(5) -> getDay(): 0=Dom..6=Sáb
+      enableLimitOffOnVacationDays: true,
+      limitOffDays: [3,4,5], // X(3), J(4), V(5)
       enableBlockFullOffAdjacentWeeks: true,
-      adjacencyWindow: 1
-    .'
-      , enableCoverOnVacationDays: true
-      , coverDays: [3,4,5]
-    }',
-    vacationPolicy: { mode:'allow', months:[7,8] },
+      adjacencyWindow: 1,
+      enableCoverOnVacationDays: true,
+      coverDays: [3,4,5]
+    },
 });
 
   function forceAssign(dateStr, assignmentIndex, personId){
@@ -1703,7 +1701,7 @@ function AdminUsersAndPerms({ auth }) {
                      value={creating.password} onChange={e=>setCreating({...creating,password:e.target.value})}/>
             </div>
             <button className="w-full px-3 py-1.5 rounded-lg border" disabled={loading}>
-              {loading? 'Creando...':'Crear usuario'}
+              {loading? 'Creando..:'Crear usuario'}
             </button>
           </form>
         </div>
