@@ -566,6 +566,8 @@ export default function App(){
       enableCoverOnVacationDays: true,
       coverDays: [3,4,5]
     },
+},
+    managed:{ lastConciliationBatchId:null }
 });
 
   function forceAssign(dateStr, assignmentIndex, personId){
@@ -844,9 +846,19 @@ export default function App(){
             weeks={state.weeks}
             people={state.people}
             assignments={ASS}
-            onApply={(evs)=> up(['events'], [...state.events, ...evs])}
+            
+            onApply={(evs, mode='append', batchId=null) => {
+              const tag = (e)=> ({...e, meta:{ ...(e.meta||{}), source:'conciliacion', batchId }});
+              const tagged = (evs||[]).map(tag);
+              const base = mode==='replace'
+                ? (state.events||[]).filter(e=> !(e?.meta?.source==='conciliacion'))
+                : (state.events||[]);
+              const next = [...base, ...tagged];
+              up(['events'], next);
+              if (batchId) up(['managed','lastConciliationBatchId'], batchId);
+            }}
             annualTarget={state.annualTargetHours}
-          />
+/>
 
             <ScoreDebugPanel
             assignments={ASS}
@@ -1389,8 +1401,11 @@ function GeneradorPicos({ state, up }){
   );
 }
 
+
 function PropuestaCierre({ state, startDate, weeks, people, assignments, onApply, annualTarget }){
   const [sugs,setSugs] = useState(null);
+  const [mode,setMode] = useState('replace'); // 'replace' | 'append'
+
   function calcular(){
     const { propuestas, eventosSugeridos } = proponerCierreHoras({
       assignments, people, startDate, weeks, annualTarget,
@@ -1402,6 +1417,48 @@ function PropuestaCierre({ state, startDate, weeks, people, assignments, onApply
     });
     setSugs({ propuestas, eventosSugeridos });
   }
+
+  function aplicar(){
+    if (!sugs) return;
+    const batchId = new Date().toISOString();
+    onApply(sugs.eventosSugeridos, mode, batchId);
+    alert(`${sugs.eventosSugeridos.length} refuerzos aplicados (${mode==='replace'?'reemplazando los anteriores':'añadiendo'}).`);
+    setSugs(null);
+  }
+
+  function eliminar(){
+    // Reemplazar por vacío -> limpia todos los refuerzos conciliación
+    onApply([], 'replace', null);
+    alert('Refuerzos de conciliación eliminados.');
+  }
+
+  return (
+    <Card title="Refuerzo de conciliación (gestionado)">
+      <div className="flex items-center gap-2 mb-2">
+        <button onClick={calcular} className="px-3 py-1.5 rounded-lg border">Calcular propuesta</button>
+        <select value={mode} onChange={e=>setMode(e.target.value)} className="border rounded px-2 py-1">
+          <option value="replace">Aplicar (reemplazar anterior)</option>
+          <option value="append">Aplicar (añadir)</option>
+        </select>
+        <button onClick={aplicar} disabled={!sugs} className={`px-3 py-1.5 rounded-lg border ${sugs?'':'opacity-50 cursor-not-allowed'}`}>Aplicar</button>
+        <button onClick={eliminar} className="px-3 py-1.5 rounded-lg border text-rose-700">Eliminar refuerzos</button>
+      </div>
+
+      {!sugs && <div className="text-sm text-slate-500">Pulsa “Calcular propuesta” para ver sugerencias.</div>}
+      {sugs && (
+        <div className="text-sm">
+          <div className="mb-2">Se propondrán {sugs.eventosSugeridos.length} días de refuerzo (L–V) para personas con déficit de horas.</div>
+          <div className="max-h-40 overflow-auto border rounded p-2 text-xs bg-white">
+            {sugs.propuestas.map((p,i)=> (
+              <div key={i}>{p.dateStr} · {people.find(x=>x.id===p.personId)?.name} · {p.shift.start}–{p.shift.end}</div>
+            ))}
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
   function aplicar(){
     if (!sugs) return;
     onApply(sugs.eventosSugeridos);
