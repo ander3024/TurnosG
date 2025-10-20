@@ -1415,10 +1415,19 @@ function GeneradorPicos({ state, up }){
 function PropuestaCierre({ state, startDate, weeks, people, assignments, onApply, annualTarget }){
   const [sugs,setSugs] = useState(null);
   const [mode,setMode] = useState('replace'); // 'replace' | 'append'
+  const [horizon, setHorizon] = useState('fin'); // 'visible' | 'fin'
 
   function calcular(){
+    // weeks horizonte
+    let weeksH = weeks;
+    if (horizon==='fin'){
+      const y = startDate.getFullYear();
+      const end = new Date(y, 11, 31);
+      const days = Math.max(1, Math.floor((end - startDate)/(24*3600*1000)) + 1);
+      weeksH = Math.ceil(days/7);
+    }
     const { propuestas, eventosSugeridos } = proponerCierreHoras({
-      assignments, people, startDate, weeks, annualTarget,
+      assignments, people, startDate, weeks: weeksH, annualTarget,
       baseShift: state.refuerzoWeekdayShift,
       weekdayShifts: state.weekdayShifts,
       weekendShift: state.weekendShift,
@@ -1444,6 +1453,13 @@ function PropuestaCierre({ state, startDate, weeks, people, assignments, onApply
   return (
     <Card title="Refuerzo de conciliación (gestionado)">
       <div className="flex items-center gap-2 mb-2">
+        <label className="text-sm ml-2 flex items-center gap-2">
+          Horizonte:
+          <select value={horizon} onChange={e=>setHorizon(e.target.value)} className="border rounded px-2 py-1">
+            <option value="fin">Hasta fin de año</option>
+            <option value="visible">Semanas visibles</option>
+          </select>
+        </label>
         <button onClick={calcular} className="px-3 py-1.5 rounded-lg border">Calcular propuesta</button>
         <select value={mode} onChange={e=>setMode(e.target.value)} className="border rounded px-2 py-1">
           <option value="replace">Aplicar (reemplazar anterior)</option>
