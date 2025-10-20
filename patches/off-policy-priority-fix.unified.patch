@@ -1,0 +1,34 @@
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -1,7 +1,7 @@
+ /* …context… */
+@@ -180,9 +180,13 @@ function generateSchedule({ startDate, weeks, people, weekdayShifts, weekendShift, timeOffs, events, refuerzoWeekdayShift, priorityMap, overrides, rules }){
+       const date=addDays(weekStart,d); const dateStr=toDateValue(date); const isWE=isWeekend(date);
+       // decide si el offId puede librar HOY:
+       const dayIdx = date.getDay(); // 0=Dom..6=Sáb
+       const offAllowedToday = offLimitedThisWeek ? limitDays.includes(dayIdx) : true;
+       const working = people.filter(p => p.id !== offId || !offAllowedToday);
++      // si hoy NO puede librar, debe trabajar: darle prioridad
++      const mustWorkOffToday = !offAllowedToday;
+
+       let required = isWE? [{...weekendShift}] : [...weekdayShifts];
+ /* …context… */
+@@ -220,10 +224,16 @@
+         // Overrides y preferencia finde
+-        let chosen=null; const forced=overrides?.[dateStr]?.[key];
+-        if(forced && pool.some(p=>p.id===forced)) chosen=forced;
++        let chosen=null; const forced=overrides?.[dateStr]?.[key];
++        if(forced && pool.some(p=>p.id===forced)) {
++          chosen=forced;
++        }
++        // Prioridad al OFF si hoy no puede librar
++        if(!chosen && mustWorkOffToday && pool.some(p=>p.id===offId)){
++          chosen = offId;
++        }
+         else if(isWE && s===0 && weekendFixedId && pool.some(p=>p.id===weekendFixedId)) chosen=weekendFixedId;
+         else if(isWE && s===0 && !weekendFixedId){
+           const prefer=pool.find(p=>p.id===nextOff);
+           chosen=prefer?.id || pickBestCandidate(pool,{isWeekend:isWE,weekdaysLoad,weekendLoad,priorityMap});
+         } else {
+           chosen=pickBestCandidate(pool,{isWeekend:isWE,weekdaysLoad,weekendLoad,priorityMap});
+         }
