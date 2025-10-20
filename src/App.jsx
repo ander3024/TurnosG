@@ -566,11 +566,10 @@ export default function App(){
       enableCoverOnVacationDays: true,
       coverDays: [3,4,5]
     },
-},
+,
     managed:{ lastConciliationBatchId:null }
 });
-
-  function forceAssign(dateStr, assignmentIndex, personId){
+function forceAssign(dateStr, assignmentIndex, personId){
   const a = ASS[dateStr]?.[assignmentIndex];
   if(!a) return;
   const key = `${a.shift.start}-${a.shift.end}-${a.shift.label||`T${assignmentIndex+1}`}`;
