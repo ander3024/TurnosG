@@ -47,7 +47,15 @@ function usePersistentState(defaultValue){
 // ===================== Helpers varios =====================
 function expandRange(s,e){ const S=parseDateValue(s), E=parseDateValue(e); const out=[]; for(let d=new Date(S); d<=E; d=addDays(d,1)) out.push(toDateValue(d)); return out; }
 function isHolidayDate(dateStr, province){ const list=HOLIDAYS_2025[province]||[]; return list.includes(dateStr); }
-function countVacationDaysConsideringHolidays(s,e,province,consume){ const dates=expandRange(s,e); return dates.reduce((acc,d)=> acc + ((consume || !isHolidayDate(d,province))?1:0), 0); }
+function countVacationDaysConsideringHolidays(s,e,province,consume){
+  const dates=expandRange(s,e);
+  return dates.reduce((acc,d)=>{
+    const dt = parseDateValue(d);
+    if (isWeekend(dt)) return acc;                            // excluye S-D
+    if (!consume && isHolidayDate(d,province)) return acc;    // excluye festivo si no consumen
+    return acc+1;
+  },0);
+}
 function indexTimeOff(timeOffs){
   const map=new Map();
   for(const t of timeOffs){
@@ -811,7 +819,7 @@ export default function App(){
                 <button onClick={()=>window.print()} className="px-3 py-1.5 rounded-lg border">Imprimir / PDF</button>
               </div>
             </div>
-            <WeeklyView startDate={weeklyStart} weeks={1} assignments={ASS} people={state.people} timeOffs={state.timeOffs} />
+            <WeeklyView startDate={weeklyStart} weeks={1} assignments={ASS} people={state.people} timeOffs={state.timeOffs} province={state.province} consumeVacationOnHoliday={state.consumeVacationOnHoliday} />
           </Card>
 
           <TimeOffPanel state={state} setState={setState} controls={controls} isAdmin={isAdmin} currentUser={auth.user} />
@@ -1094,18 +1102,34 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
     </div>
   );
 }
-function WeeklyView({ startDate, weeks, assignments, people, timeOffs }){
+function WeeklyView({ startDate, weeks, assignments, people, timeOffs, province, consumeVacationOnHoliday }){
   const header=[]; for(let d=0; d<7*weeks; d++){ const date=addDays(startDate,d); header.push({ dateStr:toDateValue(date), label: date.toLocaleDateString(undefined,{weekday:'short'})+' '+date.getDate() }); }
-  // Helpers: TO aprobadas
-  const hasApprovedTO = (dateStr, personId) => {
-    const d = parseDateValue(dateStr);
-    return (timeOffs||[]).some(to => to.personId===personId && to.status==="aprobada" && parseDateValue(to.start) <= d && d <= parseDateValue(to.end));
-  };
-  const getTOType = (dateStr, personId) => {
-    const d = parseDateValue(dateStr);
-    const hit = (timeOffs||[]).find(to => to.personId===personId && to.status==="aprobada" && parseDateValue(to.start) <= d && d <= parseDateValue(to.end));
-    return hit ? hit.type : null;
-  };
+  // Helpers: vacaciones/libranzas/viajes (efectivo = L–V y festivo según política)
+const isEffective = (dateStr) => {
+  const d = parseDateValue(dateStr);
+  if (isWeekend(d)) return false;
+  if (!consumeVacationOnHoliday && isHolidayDate(dateStr, province)) return false;
+  return true;
+};
+const hasApprovedTO = (dateStr, personId) => {
+  if (!isEffective(dateStr)) return false;
+  const d = parseDateValue(dateStr);
+  return (timeOffs||[]).some(to =>
+    to.personId===personId &&
+    to.status==="aprobada" &&
+    parseDateValue(to.start) <= d && d <= parseDateValue(to.end)
+  );
+};
+const getTOType = (dateStr, personId) => {
+  if (!isEffective(dateStr)) return null;
+  const d = parseDateValue(dateStr);
+  const hit = (timeOffs||[]).find(to =>
+    to.personId===personId &&
+    to.status==="aprobada" &&
+    parseDateValue(to.start) <= d && d <= parseDateValue(to.end)
+  );
+  return hit ? hit.type : null;
+};
   return (
     <div className="overflow-x-auto print-only:block">
       <table className="w-full text-sm border-collapse">
