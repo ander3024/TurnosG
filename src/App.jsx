@@ -233,14 +233,25 @@ let required = isWE? [{...weekendShift}] : [...weekdayShifts];
         // Overrides y preferencia finde
         let chosen=null; const forced=overrides?.[dateStr]?.[key];
         if(forced && pool.some(p=>p.id===forced)) chosen=forced;
-        if(!chosen && shouldForceWork && pool.some(p=>p.id===offId)) chosen = offId;
-        if(!chosen && ((()=>{ const cd=(OFFP.coverDays&&OFFP.coverDays.length)?OFFP.coverDays:(OFFP.limitOffDays||[3,4,5]); return !!(OFFP.enableCoverOnVacationDays && (VAC||[]).some(t=>parseDateValue(t.start)<=date && date<=parseDateValue(t.end)) && cd.includes(dayIdx)); })()) && pool.some(p=>p.id===offId)) chosen = offId;
-        if(!chosen && mustWorkOffToday && pool.some(p=>p.id===offId)) chosen = offId;
-        else if(isWE && s===0 && weekendFixedId && pool.some(p=>p.id===weekendFixedId)) chosen=weekendFixedId;
-        else if(isWE && s===0 && !weekendFixedId){
+
+        const offAlreadyToday = dayAssignments.some(a=>a.personId===offId);
+
+        // Cobertura parcial: OFF como mucho 1 turno/día
+        if(!chosen && shouldForceWork){
+          if(!offAlreadyToday && pool.some(p=>p.id===offId)){
+            chosen = offId; // el OFF cubre su único turno del día
+          }else{
+            // excluir al OFF para repartir el resto de turnos
+            pool = pool.filter(p=>p.id!==offId);
+          }
+        }
+
+        if(!chosen && isWE && s===0 && weekendFixedId && pool.some(p=>p.id===weekendFixedId)) {
+          chosen=weekendFixedId;
+        } else if(!chosen && isWE && s===0 && !weekendFixedId){
           const prefer=pool.find(p=>p.id===nextOff);
           chosen=prefer?.id || pickBestCandidate(pool,{isWeekend:isWE,weekdaysLoad,weekendLoad,priorityMap});
-        } else {
+        } else if(!chosen){
           chosen=pickBestCandidate(pool,{isWeekend:isWE,weekdaysLoad,weekendLoad,priorityMap});
         }
 
