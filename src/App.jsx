@@ -446,12 +446,14 @@ function proponerCierreHoras({
     const cell = assignments[ds] || [];
     return cell.length}
 
-  // recorrido por necesidad
+
+  // Reglas de reparto (meses permitidos y topes por semana/mes)
+// recorrido por necesidad
   for (const fp of faltantes){
     let need = fp.need; if (need <= 0) continue;
 
     for (let w=0; w<weeks && need>0; w++){
-      for (let d=0; d<6 && need>0; d++){ // L–S (mantiene conciliación; evita domingos)
+      for (let d=0; d<(policy.includeSaturdays?6:5) && need>0; d++){ // L–V o L–S
         const ds = toDateValue(addDays(startDate, w*7+d));
         const isWE = isWeekend(parseDateValue(ds));
 
