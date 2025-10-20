@@ -459,14 +459,19 @@ function peopleAvailableThatDay({people, startDate, dateStr, timeOffs}){
 }
 
 // Propuesta para cerrar horas CON CAPACIDAD (no generará días "pendientes")
-function proponerCierreHoras({ assignments, people, startDate, weeks, annualTarget,
-  baseShift={start:'12:00',end:'20:00'},
-  weekdayShifts = [{start:'10:00',end:'18:00'}], // por si no pasas, usa 1 turno por defecto
-  weekendShift = {start:'10:00',end:'22:00'},
+function proponerCierreHoras({
+  assignments,
+  people,
+  startDate,
+  weeks,
+  annualTarget,
+  baseShift = {start:'12:00', end:'20:00'},
+  weekdayShifts = [{start:'10:00', end:'18:00'}],
+  weekendShift = {start:'10:00', end:'22:00'},
   events = [],
   timeOffs = [],
   policy = { allowedMonths:[1,2,3,4,5,9,10,11,12], maxPerWeekPerPerson:1, maxPerMonthPerPerson:4 }
-){
+}){
   // minutos ya trabajados en el periodo
   const minPorPersona = horasPeriodoPorPersona(assignments, people);
   // ordena por quien más necesita
