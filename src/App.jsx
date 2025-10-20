@@ -108,7 +108,7 @@ function pickBestCandidate(pool,{isWeekend,weekdaysLoad,weekendLoad,priorityMap}
   return scored[0].id;
 }
 
-function generateSchedule({ startDate, weeks, people, weekdayShifts, weekendShift, timeOffs, events, refuerzoWeekdayShift, priorityMap, overrides, rules }){
+function generateSchedule({ startDate, weeks, people, weekdayShifts, weekendShift, timeOffs, events, refuerzoWeekdayShift, priorityMap, overrides, rules, offPolicy }){
   const assignments={};
   const hoursPerPersonMin=new Map(people.map(p=>[p.id,0]));
   const weekdaysLoad=new Map(people.map(p=>[p.id,0]));
@@ -117,8 +117,7 @@ function generateSchedule({ startDate, weeks, people, weekdayShifts, weekendShif
 
   
   // --- OFF condicionado por vacaciones (configurable) ---
-  const OFFP = (typeof window !== "undefined" && window.__OFF_POLICY__) ? window.__OFF_POLICY__ : {};
-  const VAC = (timeOffs||[]).filter(t=> t.type==='vacaciones' && t.status!=='denegada');
+  const OFFP = offPolicy || {};const VAC = (timeOffs||[]).filter(t=> t.type==='vacaciones' && t.status!=='denegada');
   function weekRange(startDate, w){
     const ws = addDays(startDate, w*7);
     const we = addDays(ws, 6);
@@ -619,12 +618,7 @@ export default function App(){
 
   // ---------- Generación de cuadrante ----------
   const startDate=useMemo(()=>parseDateValue(state.startDate),[state.startDate]);
-  const base=useMemo(()=> generateSchedule({
-      startDate, weeks:state.weeks, people:state.people,
-      weekdayShifts:state.weekdayShifts, weekendShift:state.weekendShift,
-      timeOffs:state.timeOffs, events:state.events, refuerzoWeekdayShift:state.refuerzoWeekdayShift,
-      overrides: state.overrides, rules: state.rules
-    }), [state, startDate]);
+  const base=useMemo(()=> generateSchedule({ startDate, weeks:state.weeks, people:state.people, weekdayShifts:state.weekdayShifts, weekendShift:state.weekendShift, timeOffs:state.timeOffs, events:state.events, refuerzoWeekdayShift:state.refuerzoWeekdayShift, overrides: state.overrides, rules: state.rules, offPolicy: state.offPolicy }), [state, startDate]);
 
   const baseControls=useMemo(()=> buildControls({
       assignments:base.assignments, people:state.people,
@@ -637,12 +631,7 @@ export default function App(){
   const priorityMap=useMemo(()=>{ const m=new Map(); baseControls.rows.forEach(r=> m.set(r.id, Math.max(0,r.remaining))); return m; },[baseControls]);
 
   const { assignments } = useMemo(()=> state.rebalance
-    ? generateSchedule({
-        startDate, weeks:state.weeks, people:state.people,
-        weekdayShifts:state.weekdayShifts, weekendShift:state.weekendShift,
-        timeOffs:state.timeOffs, events:state.events, refuerzoWeekdayShift:state.refuerzoWeekdayShift,
-        priorityMap, overrides: state.overrides, rules: state.rules
-      })
+    ? generateSchedule({ startDate, weeks:state.weeks, people:state.people, weekdayShifts:state.weekdayShifts, weekendShift:state.weekendShift, timeOffs:state.timeOffs, events:state.events, refuerzoWeekdayShift:state.refuerzoWeekdayShift, priorityMap, overrides: state.overrides, rules: state.rules, offPolicy: state.offPolicy })
     : base, [state, startDate, base, priorityMap]);
 
   // Aplica mejorador de conciliación (evita días-isla y reduce cortes)
