@@ -153,11 +153,13 @@ const nextOff=computeOffPersonId(people,w+1);
       // decide si el offId puede librar HOY:
       const dayIdx = date.getDay(); // 0=Dom..6=Sáb
       const offAllowedToday = offLimitedThisWeek ? limitDays.includes(dayIdx) : true;
-      const working = people.filter(p => p.id !== offId || !offAllowedToday);
       const vacationOnDate = (VAC||[]).some(t => parseDateValue(t.start) <= date && date <= parseDateValue(t.end));
       const coverDays = (OFFP.coverDays && OFFP.coverDays.length) ? OFFP.coverDays : (OFFP.limitOffDays||[3,4,5]);
       const mustCoverToday = !!(OFFP.enableCoverOnVacationDays && vacationOnDate && coverDays.includes(dayIdx));
       const mustWorkOffToday = !offAllowedToday;
+      const shouldForceWork = mustCoverToday || mustWorkOffToday;
+      const working = people.filter(p => p.id !== offId || shouldForceWork);
+
 let required = isWE? [{...weekendShift}] : [...weekdayShifts];
 
       // Refuerzos en calendario de eventos
@@ -206,6 +208,7 @@ let required = isWE? [{...weekendShift}] : [...weekdayShifts];
         // Overrides y preferencia finde
         let chosen=null; const forced=overrides?.[dateStr]?.[key];
         if(forced && pool.some(p=>p.id===forced)) chosen=forced;
+        if(!chosen && shouldForceWork && pool.some(p=>p.id===offId)) chosen = offId;
         if(!chosen && ((()=>{ const cd=(OFFP.coverDays&&OFFP.coverDays.length)?OFFP.coverDays:(OFFP.limitOffDays||[3,4,5]); return !!(OFFP.enableCoverOnVacationDays && (VAC||[]).some(t=>parseDateValue(t.start)<=date && date<=parseDateValue(t.end)) && cd.includes(dayIdx)); })()) && pool.some(p=>p.id===offId)) chosen = offId;
         if(!chosen && mustWorkOffToday && pool.some(p=>p.id===offId)) chosen = offId;
         else if(isWE && s===0 && weekendFixedId && pool.some(p=>p.id===weekendFixedId)) chosen=weekendFixedId;
