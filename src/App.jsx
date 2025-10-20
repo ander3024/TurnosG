@@ -532,6 +532,7 @@ export default function App(){
       enableBlockFullOffAdjacentWeeks: true,
       adjacencyWindow: 1
     },
+    vacationPolicy: { mode:'allow', months:[7,8] },
 });
 
   function forceAssign(dateStr, assignmentIndex, personId){
@@ -768,6 +769,7 @@ export default function App(){
           <ReglasPanel state={state} up={up} />
           
           <OffPolicyPanel state={state} up={up} />
+          <VacationPolicyPanel state={state} up={up} />
 <ConciliacionPanel state={state} up={up} />
           <PersonasPanel state={state} upPerson={upPerson} />
           <TurnosPanel state={state} up={up} />
@@ -1807,6 +1809,52 @@ function OffPolicyPanel({ state, up }){
             }}
             className="w-full border rounded px-2 py-1"
           />
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function VacationPolicyPanel({ state, up }){
+  const vp = state.vacationPolicy || { mode:'allow', months:[] };
+  const months = [
+    {k:1,'lbl':'Ene'},{k:2,'lbl':'Feb'},{k:3,'lbl':'Mar'},{k:4,'lbl':'Abr'},
+    {k:5,'lbl':'May'},{k:6,'lbl':'Jun'},{k:7,'lbl':'Jul'},{k:8,'lbl':'Ago'},
+    {k:9,'lbl':'Sep'},{k:10,'lbl':'Oct'},{k:11,'lbl':'Nov'},{k:12,'lbl':'Dic'}
+  ];
+  function setMode(mode){ up(['vacationPolicy'], { ...vp, mode }); }
+  function toggleMonth(m){
+    const set = new Set(vp.months || []);
+    if (set.has(m)) set.delete(m); else set.add(m);
+    up(['vacationPolicy'], { ...vp, months: Array.from(set).sort((a,b)=>a-b) });
+  }
+  return (
+    <Card title="Política de Vacaciones (meses)">
+      <div className="grid grid-cols-12 gap-3 text-sm">
+        <div className="col-span-12 flex items-center gap-4">
+          <label className="inline-flex items-center gap-2">
+            <input type="radio" name="vp-mode" checked={(vp.mode||'allow')==='allow'} onChange={()=>setMode('allow')} />
+            Permitir SOLO en los meses seleccionados
+          </label>
+          <label className="inline-flex items-center gap-2">
+            <input type="radio" name="vp-mode" checked={vp.mode==='block'} onChange={()=>setMode('block')} />
+            Bloquear los meses seleccionados
+          </label>
+        </div>
+        <div className="col-span-12">
+          <div className="flex flex-wrap gap-2">
+            {months.map(m=>(
+              <label key={m.k} className={`px-2 py-1 rounded border cursor-pointer ${ (vp.months||[]).includes(m.k) ? 'bg-slate-100' : ''}`}>
+                <input type="checkbox" className="mr-1"
+                  checked={(vp.months||[]).includes(m.k)}
+                  onChange={()=>toggleMonth(m.k)} />
+                {m.lbl}
+              </label>
+            ))}
+          </div>
+          <div className="text-[11px] text-slate-500 mt-2">
+            * Modo <b>Permitir</b>: sólo se aceptan vacaciones en esos meses. <b>Bloquear</b>: se impiden en esos meses.
+          </div>
         </div>
       </div>
     </Card>
