@@ -1140,14 +1140,12 @@ function TimeOffPanel({ state, setState, controls, isAdmin, currentUser }){
   function onChangeStart(v){
     if(newTO.type!=="vacaciones"){ setNewTO({...newTO,start:v}); return; }
     const s = vpIsMonthAllowed(v,vp)? v : snapToAllowedMonth(v,vp);
-    if(s!==v) alert("Fecha ajustada al mes permitido por política");
-    setNewTO({...newTO,start:s});
+     setNewTO({...newTO,start:s});
   }
   function onChangeEnd(v){
     if(newTO.type!=="vacaciones"){ setNewTO({...newTO,end:v}); return; }
     const e = vpIsMonthAllowed(v,vp)? v : snapToAllowedMonth(v,vp);
-    if(e!==v) alert("Fecha ajustada al mes permitido por política");
-    setNewTO({...newTO,end:e});
+     setNewTO({...newTO,end:e});
   }
 function addTimeOff(){
     const rec={...newTO};
