@@ -632,7 +632,7 @@ export default function App(){
       enableCoverOnVacationDays: true,
       coverDays: [3,4,5]
     },
-    refuerzoPolicy:{ allowedMonths:[1,2,3,4,5,9,10,11,12], maxPerWeekPerPerson:1, maxPerMonthPerPerson:4 },
+    refuerzoPolicy:{ allowedMonths:[1,2,3,4,5,9,10,11,12], includeSaturdays:false, maxPerWeekPerPerson:1, maxPerMonthPerPerson:4, horizonDefault:'fin', maxPerWeekPerPerson:1, maxPerMonthPerPerson:4 },
     managed:{ lastConciliationBatchId:null }
 });
 function forceAssign(dateStr, assignmentIndex, personId){
@@ -878,6 +878,7 @@ function forceAssign(dateStr, assignmentIndex, personId){
           
           <OffPolicyPanel state={state} up={up} />
           <VacationPolicyPanel state={state} up={up} />
+          <RefuerzoPolicyPanel state={state} up={up} />
 <ConciliacionPanel state={state} up={up} />
           <PersonasPanel state={state} upPerson={upPerson} />
           <TurnosPanel state={state} up={up} />
@@ -2080,4 +2081,70 @@ function snapToAllowedMonth(dateStr, vp){
     }
   }
   return dateStr;
+}
+
+
+function RefuerzoPolicyPanel({ state, up }){
+  const pol = state.refuerzoPolicy || { allowedMonths:[], includeSaturdays:false, maxPerWeekPerPerson:1, maxPerMonthPerPerson:4, horizonDefault:'fin' };
+  const months = [
+    {k:1,'lbl':'Ene'},{k:2,'lbl':'Feb'},{k:3,'lbl':'Mar'},{k:4,'lbl':'Abr'},
+    {k:5,'lbl':'May'},{k:6,'lbl':'Jun'},{k:7,'lbl':'Jul'},{k:8,'lbl':'Ago'},
+    {k:9,'lbl':'Sep'},{k:10,'lbl':'Oct'},{k:11,'lbl':'Nov'},{k:12,'lbl':'Dic'}
+  ];
+  function toggleMonth(m){
+    const set = new Set(pol.allowedMonths||[]);
+    if (set.has(m)) set.delete(m); else set.add(m);
+    up(['refuerzoPolicy'], { ...pol, allowedMonths: Array.from(set).sort((a,b)=>a-b) });
+  }
+  return (
+    <Card title="Política de Refuerzos (distribución)">
+      <div className="grid grid-cols-12 gap-3 text-sm">
+        <div className="col-span-12">
+          <div className="text-xs mb-1">Meses en los que SÍ se pueden proponer refuerzos:</div>
+          <div className="flex flex-wrap gap-2">
+            {months.map(m=>(
+              <label key={m.k} className={`px-2 py-1 rounded border cursor-pointer ${(pol.allowedMonths||[]).includes(m.k)?'bg-slate-100':''}`}>
+                <input type="checkbox" className="mr-1"
+                  checked={(pol.allowedMonths||[]).includes(m.k)}
+                  onChange={()=>toggleMonth(m.k)} />
+                {m.lbl}
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <div className="col-span-6">
+          <label className="text-xs block mb-1">Máx refuerzos / semana / persona</label>
+          <input type="number" min={0} max={14}
+            value={pol.maxPerWeekPerPerson||0}
+            onChange={e=>up(['refuerzoPolicy'], { ...pol, maxPerWeekPerPerson: Math.max(0, Number(e.target.value)||0) })}
+            className="w-full border rounded px-2 py-1" />
+        </div>
+        <div className="col-span-6">
+          <label className="text-xs block mb-1">Máx refuerzos / mes / persona</label>
+          <input type="number" min={0} max={31}
+            value={pol.maxPerMonthPerPerson||0}
+            onChange={e=>up(['refuerzoPolicy'], { ...pol, maxPerMonthPerPerson: Math.max(0, Number(e.target.value)||0) })}
+            className="w-full border rounded px-2 py-1" />
+        </div>
+
+        <label className="col-span-12 flex items-center gap-2">
+          <input type="checkbox"
+            checked={!!pol.includeSaturdays}
+            onChange={e=>up(['refuerzoPolicy'], { ...pol, includeSaturdays: e.target.checked })} />
+          Incluir sábados en refuerzos
+        </label>
+
+        <div className="col-span-12">
+          <label className="text-xs block mb-1">Horizonte por defecto</label>
+          <select value={pol.horizonDefault||'fin'}
+            onChange={e=>up(['refuerzoPolicy'], { ...pol, horizonDefault: e.target.value })}
+            className="border rounded px-2 py-1">
+            <option value="fin">Hasta fin de año</option>
+            <option value="visible">Semanas visibles</option>
+          </select>
+        </div>
+      </div>
+    </Card>
+  );
 }
