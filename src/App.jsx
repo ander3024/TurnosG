@@ -564,7 +564,8 @@ export default function App(){
       const payload = { ...data.payload };
       if (!payload.conciliacion) payload.conciliacion = safeConciliacion();
       if (typeof payload.applyConciliation === 'undefined') payload.applyConciliation = true;
-      // Defaults de offPolicy si no existen en la nube
+            if (!payload.vacationPolicy) { payload.vacationPolicy = { mode:'allow', months:[7,8] }; }
+// Defaults de offPolicy si no existen en la nube
       if (!payload.offPolicy) {
         payload.offPolicy = {
           enableLimitOffOnVacationWeek: true,
@@ -769,6 +770,7 @@ export default function App(){
           <ReglasPanel state={state} up={up} />
           
           <OffPolicyPanel state={state} up={up} />
+          <VacationPolicyPanel state={state} up={up} />
           <VacationPolicyPanel state={state} up={up} />
 <ConciliacionPanel state={state} up={up} />
           <PersonasPanel state={state} upPerson={upPerson} />
@@ -1133,7 +1135,22 @@ function WeeklyView({ startDate, weeks, assignments, people, timeOffs }){
 function TimeOffPanel({ state, setState, controls, isAdmin, currentUser }){
   const [newTO,setNewTO]=useState({ personId: state.people[0]?.id||"P1", start: state.startDate, end: state.startDate, type:'vacaciones', note:'', hoursPerDay: state.travelDefaultHours, status: 'pendiente' });
 
-  function addTimeOff(){
+    const vp = state.vacationPolicy||{};
+  const violStart = newTO.type==="vacaciones" && !vpIsMonthAllowed(newTO.start, vp);
+  const violEnd   = newTO.type==="vacaciones" && !vpIsMonthAllowed(newTO.end, vp);
+  function onChangeStart(v){
+    if(newTO.type!=="vacaciones"){ setNewTO({...newTO,start:v}); return; }
+    const s = vpIsMonthAllowed(v,vp)? v : snapToAllowedMonth(v,vp);
+    if(s!==v) alert("Fecha ajustada al mes permitido por política");
+    setNewTO({...newTO,start:s});
+  }
+  function onChangeEnd(v){
+    if(newTO.type!=="vacaciones"){ setNewTO({...newTO,end:v}); return; }
+    const e = vpIsMonthAllowed(v,vp)? v : snapToAllowedMonth(v,vp);
+    if(e!==v) alert("Fecha ajustada al mes permitido por política");
+    setNewTO({...newTO,end:e});
+  }
+function addTimeOff(){
     const rec={...newTO};
     if(rec.type==='vacaciones' && rec.status==='aprobada'){
       const adding=countVacationDaysConsideringHolidays(rec.start,rec.end,state.province,state.consumeVacationOnHoliday);
@@ -1161,8 +1178,8 @@ function TimeOffPanel({ state, setState, controls, isAdmin, currentUser }){
             {state.people.map(p=> <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
         </div>
-        <div className="col-span-4"><label className="text-xs">Desde</label><input type="date" value={newTO.start} onChange={(e)=>setNewTO({...newTO,start:e.target.value})} className="w-full px-2 py-1 rounded border"/></div>
-        <div className="col-span-4"><label className="text-xs">Hasta</label><input type="date" value={newTO.end} onChange={(e)=>setNewTO({...newTO,end:e.target.value})} className="w-full px-2 py-1 rounded border"/></div>
+        <div className="col-span-4"><label className="text-xs">Desde</label><input type="date" value={newTO.start} onChange={(e)=>onChangeStart(e.target.value)} className={`w-full px-2 py-1 rounded border ${violStart? "border-rose-400 bg-rose-50":""}`} title={`${violStart? "Mes no permitido por política":""}`}/></div>
+        <div className="col-span-4"><label className="text-xs">Hasta</label><input type="date" value={newTO.end} onChange={(e)=>onChangeEnd(e.target.value)} className={`w-full px-2 py-1 rounded border ${violEnd? "border-rose-400 bg-rose-50":""}`} title={`${violEnd? "Mes no permitido por política":""}`}/></div>
         <div className="col-span-4"><label className="text-xs">Tipo</label>
           <select value={newTO.type} onChange={(e)=>setNewTO({...newTO,type:e.target.value})} className="w-full px-2 py-1 rounded border">
             <option value="vacaciones">Vacaciones</option>
@@ -1174,7 +1191,7 @@ function TimeOffPanel({ state, setState, controls, isAdmin, currentUser }){
           <div className="col-span-4"><label className="text-xs">Horas por día</label><input type="number" min={0} max={12} value={newTO.hoursPerDay} onChange={(e)=>setNewTO({...newTO,hoursPerDay:Number(e.target.value)})} className="w-full px-2 py-1 rounded border"/></div>
         )}
         <div className="col-span-8"><label className="text-xs">Nota</label><input value={newTO.note} onChange={(e)=>setNewTO({...newTO,note:e.target.value})} className="w-full px-2 py-1 rounded border"/></div>
-        <div className="col-span-12"><button onClick={addTimeOff} className="px-3 py-1.5 rounded-lg border w-full">Añadir / Solicitar</button></div>
+        <div className="col-span-12"><button onClick={addTimeOff} disabled={newTO.type==="vacaciones" && !vpRangeAllowed(newTO.start,newTO.end,vp)} className={`px-3 py-1.5 rounded-lg border w-full ${(newTO.type==="vacaciones" && !vpRangeAllowed(newTO.start,newTO.end,vp))?"opacity-50 cursor-not-allowed":""}`} title={`${(newTO.type==="vacaciones" && !vpRangeAllowed(newTO.start,newTO.end,vp))?"Rango fuera de meses permitidos":""}`}>Añadir / Solicitar</button></div>
       </div>
 
       <div className="text-xs bg-slate-100 border p-2 rounded-lg mb-2">
@@ -1859,4 +1876,42 @@ function VacationPolicyPanel({ state, up }){
       </div>
     </Card>
   );
+}
+
+// ==== Helpers política de vacaciones (meses) ====
+// vp: { mode:'allow'|'block', months:[1..12] }
+function vpIsMonthAllowed(dateStr, vp){
+  const m = parseDateValue(dateStr).getMonth()+1;
+  if (!vp || !Array.isArray(vp.months) || !vp.months.length) return true;
+  const allow = (vp.mode||'allow')==='allow';
+  return allow ? vp.months.includes(m) : !vp.months.includes(m);
+}
+function vpRangeAllowed(start, end, vp){
+  return expandRange(start,end).every(ds => vpIsMonthAllowed(ds, vp));
+}
+function snapToAllowedMonth(dateStr, vp){
+  if (!vp || !vp.months || !vp.months.length) return dateStr;
+  const d = parseDateValue(dateStr);
+  const y = d.getFullYear();
+  const allow = (vp.mode||'allow')==='allow';
+  const set = new Set(vp.months);
+  function cand(month){
+    const day = Math.min(d.getDate(), new Date(y, month, 0).getDate());
+    return toDateValue(new Date(y, month-1, day));
+  }
+  const curM = d.getMonth()+1;
+  const ok = allow ? set.has(curM) : !set.has(curM);
+  if (ok) return dateStr;
+  for (let delta=1; delta<=12; delta++){
+    const up   = ((curM-1+delta)%12)+1;
+    const down = ((curM-1-delta+120)%12)+1;
+    if (allow){
+      if (set.has(up))   return cand(up);
+      if (set.has(down)) return cand(down);
+    } else {
+      if (!set.has(up))   return cand(up);
+      if (!set.has(down)) return cand(down);
+    }
+  }
+  return dateStr;
 }
