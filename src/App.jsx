@@ -527,7 +527,7 @@ export default function App(){
     applyConciliation: true,
     conciliacion: { penalizaDiaIslaTrabajo:3, penalizaDiaIslaLibre:2, penalizaCortesSemana:1 },
   
-    'offPolicy: {'.
+    offPolicy: {
       enableLimitOffOnVacationWeek: true,
       limitOffDays: [3,4,5], // X(3), J(4), V(5) -> getDay(): 0=Dom..6=Sáb
       enableBlockFullOffAdjacentWeeks: true,
@@ -578,6 +578,10 @@ export default function App(){
           adjacencyWindow: 1
         };
       }
+      // Completa claves de offPolicy si faltan
+      if (payload.offPolicy && payload.offPolicy.enableCoverOnVacationDays===undefined) payload.offPolicy.enableCoverOnVacationDays = true;
+      if (payload.offPolicy && (!payload.offPolicy.coverDays || !payload.offPolicy.coverDays.length)) payload.offPolicy.coverDays = payload.offPolicy.limitOffDays || [3,4,5];
+
       if (typeof window !== "undefined") window.__OFF_POLICY__ = payload.offPolicy || {};
       setState(prev=>({ ...prev, ...payload }));
       setUI(prev=>({...prev, sync:"ok"})); showToast("Cargado de nube");
