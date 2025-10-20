@@ -1421,8 +1421,9 @@ function PropuestaCierre({ state, startDate, weeks, people, assignments, onApply
     // weeks horizonte
     let weeksH = weeks;
     if (horizon==='fin'){
-      const y = startDate.getFullYear();
-      const end = new Date(y, 11, 31);
+      // hasta 31/12 del año de la ÚLTIMA semana visible
+      const last = new Date(startDate.getTime() + (weeks*7-1)*24*3600*1000); // fin del rango visible
+      const end  = new Date(last.getFullYear(), 11, 31);
       const days = Math.max(1, Math.floor((end - startDate)/(24*3600*1000)) + 1);
       weeksH = Math.ceil(days/7);
     }
