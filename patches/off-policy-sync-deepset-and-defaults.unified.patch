@@ -1,0 +1,51 @@
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -213,6 +213,17 @@ export default function App(){
+   up(['audit'], [ ...(state.audit||[]), { ts:new Date().toISOString(), actor:(auth.user?.email||'unknown'), action:'override', dateStr, assignmentIndex, personId } ]);
+ }
+ 
++  // Sincroniza offPolicy con window para que generateSchedule lea la política activa
++  useEffect(() => {
++    if (typeof window !== "undefined") {
++      window.__OFF_POLICY__ = state.offPolicy || {};
++    }
++  }, [state.offPolicy]);
+ 
+   // ---------- Cloud (SQLite) ----------
+   const [cloud, setCloud] = useState({ spaceId:"turnos-2025", readToken:"", writeToken:"WRT-1234", apiKey:"" });
+@@ -226,6 +237,16 @@ export default function App(){
+       const payload = { ...data.payload };
+       if (!payload.conciliacion) payload.conciliacion = safeConciliacion();
+       if (typeof payload.applyConciliation === 'undefined') payload.applyConciliation = true;
++      // Defaults de offPolicy si no existen en la nube
++      if (!payload.offPolicy) {
++        payload.offPolicy = {
++          enableLimitOffOnVacationWeek: true,
++          limitOffDays: [3,4,5], // X-J-V
++          enableBlockFullOffAdjacentWeeks: true,
++          adjacencyWindow: 1
++        };
++      }
++      if (typeof window !== "undefined") window.__OFF_POLICY__ = payload.offPolicy || {};
+       setState(prev=>({ ...prev, ...payload }));
+       setUI(prev=>({...prev, sync:"ok"})); showToast("Cargado de nube");
+     }catch(e){ setUI(prev=>({...prev, sync:"error"})); showToast((String(e.message||"")).startsWith("403")?"403: ReadToken inválido o sin permisos":"Error al cargar: "+e.message); }
+@@ -239,7 +260,18 @@ export default function App(){
+   }
+ 
+   // ---------- Utilidades de estado ----------
+-  function up(path,value){ setState(prev=>{ const next=structuredClone(prev); let o=next; for(let i=0;i<path.length-1;i++) o=o[path[i]]; o[path[path.length-1]]=value; return next; }); }
++  // deep-set seguro (crea objetos intermedios)
++  function up(path,value){
++    setState(prev=>{
++      const next = structuredClone(prev);
++      let o = next;
++      for (let i=0;i<path.length-1;i++){
++        const k = path[i];
++        if (typeof o[k] !== 'object' || o[k] === null) o[k] = {};
++        o = o[k];
++      }
++      o[path[path.length-1]] = value; return next;
++    });
++  }
+   function upPerson(id,patch){ setState(prev=>({...prev, people: prev.people.map(p=> p.id===id? {...p,...patch}:p)})); }
