@@ -685,13 +685,25 @@ export default function App(){
 
   // ---------- Hooks que deben ejecutarse SIEMPRE ----------
   const [payroll,setPayroll]=useState({ from: state.startDate, to: toDateValue(addDays(startDate, state.weeks*7-1)) });
-  const [weekIndex,setWeekIndex]=useState(0);
+  const [weekIndex,setWeekIndex]=useState(()=>{
+    const t = startOfWeekMonday(new Date());
+    const s = parseDateValue(state.startDate);
+    const idx = Math.max(0, Math.min(state.weeks-1, Math.floor((t - s)/(7*24*3600*1000))));
+    return Number.isFinite(idx)? idx : 0;
+  });
   function goToday(){
     const t = startOfWeekMonday(new Date());
     const idx = Math.max(0, Math.min(state.weeks-1, Math.floor((t - startDate)/(7*24*3600*1000))));
     setWeekIndex(idx);
   }
   const weeklyStart=useMemo(()=> addDays(startDate, weekIndex*7), [startDate, weekIndex]);
+  useEffect(()=>{
+    const t = startOfWeekMonday(new Date());
+    const s = parseDateValue(state.startDate);
+    const idx = Math.max(0, Math.min(state.weeks-1, Math.floor((t - s)/(7*24*3600*1000))));
+    if (Number.isFinite(idx) && idx !== weekIndex) setWeekIndex(idx);
+  }, [state.startDate, state.weeks]);
+
   const canPrev=weekIndex>0, canNext=weekIndex<state.weeks-1;
   const [modalDay,setModalDay]=useState(null);
 
