@@ -108,7 +108,7 @@ function pickBestCandidate(pool,{isWeekend,weekdaysLoad,weekendLoad,priorityMap}
   return scored[0].id;
 }
 
-function generateSchedule({ startDate, weeks, people, weekdayShifts, weekendShift, timeOffs, events, refuerzoWeekdayShift, priorityMap, overrides, rules, offPolicy }){
+function generateSchedule({ startDate, weeks, people, weekdayShifts, weekendShift, timeOffs, events, refuerzoWeekdayShift, priorityMap, overrides, rules, offPolicy, province, consumeVacationOnHoliday }){
   const assignments={};
   const hoursPerPersonMin=new Map(people.map(p=>[p.id,0]));
   const weekdaysLoad=new Map(people.map(p=>[p.id,0]));
@@ -117,14 +117,35 @@ function generateSchedule({ startDate, weeks, people, weekdayShifts, weekendShif
 
   
   // --- OFF condicionado por vacaciones (configurable) ---
-  const OFFP = offPolicy || {};const VAC = (timeOffs||[]).filter(t=> t.type==='vacaciones' && t.status!=='denegada');
-  function weekRange(startDate, w){
-    const ws = addDays(startDate, w*7);
-    const we = addDays(ws, 6);
-    return { ws, we };
+  const OFFP = offPolicy || {};
+  // vacaciones declaradas (pendiente/aprobada, no denegada)
+  const VAC = (timeOffs||[]).filter(t=> t.type==='vacaciones' && t.status!=='denegada');
+
+  function isHoliday(dateStr){
+    const list = HOLIDAYS_2025[province] || [];
+    return list.includes(dateStr);
+  }
+  function isEffectiveVacationDate(date){
+    // Solo L–V; fines de semana fuera
+    if (isWeekend(date)) return false;
+    const ds = toDateValue(date);
+    // Si no consumen en festivo, excluye festivos
+    if (!consumeVacationOnHoliday && isHoliday(ds)) return false;
+    return true;
+  }
+  function hasEffectiveVacationOnDate(date){
+    // Hay alguna vacación que cubra este día y el día es “efectivo”
+    return isEffectiveVacationDate(date) && VAC.some(t => parseDateValue(t.start) <= date && date <= parseDateValue(t.end));
   }
   function weekOverlapsVac(w){
-    const { ws, we } = weekRange(startDate, w);
+    const ws = addDays(startDate, w*7);
+    // ¿Algún día L–V (y no festivo si no consumen) con vacaciones?
+    for (let i=0;i<7;i++){
+      const d = addDays(ws,i);
+      if (hasEffectiveVacationOnDate(d)) return true;
+    }
+    return false;
+  } = weekRange(startDate, w);
     return VAC.some(t => !(parseDateValue(t.end) < ws || parseDateValue(t.start) > we));
   }
 for(let w=0; w<weeks; w++){
@@ -152,7 +173,7 @@ const nextOff=computeOffPersonId(people,w+1);
       // decide si el offId puede librar HOY:
       const dayIdx = date.getDay(); // 0=Dom..6=Sáb
       const offAllowedToday = offLimitedThisWeek ? limitDays.includes(dayIdx) : true;
-      const vacationOnDate = (VAC||[]).some(t => parseDateValue(t.start) <= date && date <= parseDateValue(t.end));
+      const vacationOnDate = hasEffectiveVacationOnDate(date);
       const coverDays = (OFFP.coverDays && OFFP.coverDays.length) ? OFFP.coverDays : (OFFP.limitOffDays||[3,4,5]);
       const mustCoverToday = !!(OFFP.enableCoverOnVacationDays && vacationOnDate && coverDays.includes(dayIdx));
       const mustWorkOffToday = !offAllowedToday;
@@ -618,7 +639,7 @@ export default function App(){
 
   // ---------- Generación de cuadrante ----------
   const startDate=useMemo(()=>parseDateValue(state.startDate),[state.startDate]);
-  const base=useMemo(()=> generateSchedule({ startDate, weeks:state.weeks, people:state.people, weekdayShifts:state.weekdayShifts, weekendShift:state.weekendShift, timeOffs:state.timeOffs, events:state.events, refuerzoWeekdayShift:state.refuerzoWeekdayShift, overrides: state.overrides, rules: state.rules, offPolicy: state.offPolicy }), [state, startDate]);
+  const base=useMemo(()=> generateSchedule({ startDate, weeks:state.weeks, people:state.people, weekdayShifts:state.weekdayShifts, weekendShift:state.weekendShift, timeOffs:state.timeOffs, events:state.events, refuerzoWeekdayShift:state.refuerzoWeekdayShift, overrides: state.overrides, rules: state.rules, offPolicy: state.offPolicy, province: state.province, consumeVacationOnHoliday: state.consumeVacationOnHoliday }), [state, startDate]);
 
   const baseControls=useMemo(()=> buildControls({
       assignments:base.assignments, people:state.people,
@@ -631,7 +652,7 @@ export default function App(){
   const priorityMap=useMemo(()=>{ const m=new Map(); baseControls.rows.forEach(r=> m.set(r.id, Math.max(0,r.remaining))); return m; },[baseControls]);
 
   const { assignments } = useMemo(()=> state.rebalance
-    ? generateSchedule({ startDate, weeks:state.weeks, people:state.people, weekdayShifts:state.weekdayShifts, weekendShift:state.weekendShift, timeOffs:state.timeOffs, events:state.events, refuerzoWeekdayShift:state.refuerzoWeekdayShift, priorityMap, overrides: state.overrides, rules: state.rules, offPolicy: state.offPolicy })
+    ? generateSchedule({ startDate, weeks:state.weeks, people:state.people, weekdayShifts:state.weekdayShifts, weekendShift:state.weekendShift, timeOffs:state.timeOffs, events:state.events, refuerzoWeekdayShift:state.refuerzoWeekdayShift, priorityMap, overrides: state.overrides, rules: state.rules, offPolicy: state.offPolicy, province: state.province, consumeVacationOnHoliday: state.consumeVacationOnHoliday })
     : base, [state, startDate, base, priorityMap]);
 
   // Aplica mejorador de conciliación (evita días-isla y reduce cortes)
