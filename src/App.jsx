@@ -154,6 +154,7 @@ const nextOff=computeOffPersonId(people,w+1);
       const dayIdx = date.getDay(); // 0=Dom..6=Sáb
       const offAllowedToday = offLimitedThisWeek ? limitDays.includes(dayIdx) : true;
       const working = people.filter(p => p.id !== offId || !offAllowedToday);
+      const mustWorkOffToday = !offAllowedToday;
 let required = isWE? [{...weekendShift}] : [...weekdayShifts];
 
       // Refuerzos en calendario de eventos
@@ -202,6 +203,7 @@ let required = isWE? [{...weekendShift}] : [...weekdayShifts];
         // Overrides y preferencia finde
         let chosen=null; const forced=overrides?.[dateStr]?.[key];
         if(forced && pool.some(p=>p.id===forced)) chosen=forced;
+        if(!chosen && mustWorkOffToday && pool.some(p=>p.id===offId)) chosen = offId;
         else if(isWE && s===0 && weekendFixedId && pool.some(p=>p.id===weekendFixedId)) chosen=weekendFixedId;
         else if(isWE && s===0 && !weekendFixedId){
           const prefer=pool.find(p=>p.id===nextOff);
