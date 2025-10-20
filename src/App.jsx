@@ -607,6 +607,7 @@ function forceAssign(dateStr, assignmentIndex, personId){
       const payload = { ...data.payload };
       if (!payload.conciliacion) payload.conciliacion = safeConciliacion();
       if (typeof payload.applyConciliation === 'undefined') payload.applyConciliation = true;
+
       // Defaults de refuerzoPolicy si falta
       if (!payload.refuerzoPolicy) {
         payload.refuerzoPolicy = {
@@ -617,22 +618,21 @@ function forceAssign(dateStr, assignmentIndex, personId){
           horizonDefault:'fin'
         };
       }
-            if (!payload.vacationPolicy) { payload.vacationPolicy = { mode:'allow', months:[7,8] }}
-// Defaults de offPolicy si no existen en la nube
-      }
-}
+
+      // Defaults de offPolicy si falta
       if (!payload.offPolicy) {
         payload.offPolicy = {
           enableLimitOffOnVacationWeek: true,
-          limitOffDays: [3,4,5], // X-J-V
+          limitOffDays: [3,4,5],
           enableBlockFullOffAdjacentWeeks: true,
-          adjacencyWindow: 1
-        }}
-      // Completa claves de offPolicy si faltan
-      if (payload.offPolicy && payload.offPolicy.enableCoverOnVacationDays===undefined) payload.offPolicy.enableCoverOnVacationDays = true;
-      if (payload.offPolicy && (!payload.offPolicy.coverDays || !payload.offPolicy.coverDays.length)) payload.offPolicy.coverDays = payload.offPolicy.limitOffDays || [3,4,5];
+          adjacencyWindow: 1,
+          enableCoverOnVacationDays: true,
+          coverDays: [3,4,5]
+        };
+      }
 
       if (typeof window !== "undefined") window.__OFF_POLICY__ = payload.offPolicy || {};
+
       setState(prev=>({ ...prev, ...payload }));
       setUI(prev=>({...prev, sync:"ok"})); showToast("Cargado de nube")}catch(e){ setUI(prev=>({...prev, sync:"error"})); showToast((String(e.message||"")).startsWith("403")?"403: ReadToken inválido o sin permisos":"Error al cargar: "+e.message)}
   }
