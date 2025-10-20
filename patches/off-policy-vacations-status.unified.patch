@@ -1,0 +1,16 @@
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -100,9 +100,9 @@ function generateSchedule({ startDate, weeks, people, weekdayShifts, weekendShift, timeOffs, events, refuerzoWeekdayShift, priorityMap, overrides, rules }){
+   const weekdaysLoad=new Map(people.map(p=>[p.id,0]));
+   const weekendLoad=new Map(people.map(p=>[p.id,0]));
+   const timeOffIndex=indexTimeOff(timeOffs);
+
+-  // --- OFF condicionado por vacaciones (configurable) ---
++  // --- OFF condicionado por vacaciones (configurable) ---
+   const OFFP = (typeof window !== "undefined" && window.__OFF_POLICY__) ? window.__OFF_POLICY__ : {};
+-  const VAC = (timeOffs||[]).filter(t=> t.type==='vacaciones' && t.status==='aprobada');
++  const VAC = (timeOffs||[]).filter(t=> t.type==='vacaciones' && t.status!=='denegada'); // cuenta “pendiente” y “aprobada”
+
+   function weekRange(startDate, w){
+     const ws = addDays(startDate, w*7);
+     const we = addDays(ws, 6);
