@@ -1701,7 +1701,7 @@ function AdminUsersAndPerms({ auth }) {
                      value={creating.password} onChange={e=>setCreating({...creating,password:e.target.value})}/>
             </div>
             <button className="w-full px-3 py-1.5 rounded-lg border" disabled={loading}>
-              {loading? 'Creando..:'Crear usuario'}
+              {loading ? 'Creando...' : 'Crear usuario'}
             </button>
           </form>
         </div>
