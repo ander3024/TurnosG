@@ -203,6 +203,7 @@ let required = isWE? [{...weekendShift}] : [...weekdayShifts];
         // Overrides y preferencia finde
         let chosen=null; const forced=overrides?.[dateStr]?.[key];
         if(forced && pool.some(p=>p.id===forced)) chosen=forced;
+        if(!chosen && mustCoverToday && pool.some(p=>p.id===offId)) chosen = offId;
         if(!chosen && mustWorkOffToday && pool.some(p=>p.id===offId)) chosen = offId;
         else if(isWE && s===0 && weekendFixedId && pool.some(p=>p.id===weekendFixedId)) chosen=weekendFixedId;
         else if(isWE && s===0 && !weekendFixedId){
@@ -526,12 +527,15 @@ export default function App(){
     applyConciliation: true,
     conciliacion: { penalizaDiaIslaTrabajo:3, penalizaDiaIslaLibre:2, penalizaCortesSemana:1 },
   
-    offPolicy: {
+    'offPolicy: {'.
       enableLimitOffOnVacationWeek: true,
       limitOffDays: [3,4,5], // X(3), J(4), V(5) -> getDay(): 0=Dom..6=Sáb
       enableBlockFullOffAdjacentWeeks: true,
       adjacencyWindow: 1
-    },
+    .'
+      , enableCoverOnVacationDays: true
+      , coverDays: [3,4,5]
+    }',
     vacationPolicy: { mode:'allow', months:[7,8] },
 });
 
