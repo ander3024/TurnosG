@@ -346,6 +346,7 @@ function scoreConciliacionBreakdown({assignments, people, startDate, weeks, conc
 }
 
 // Mejoras locales (micro-swaps en el mismo día)
+
 function improveConciliation({assignments, people, startDate, weeks, overrides, conciliacion}){
   conciliacion = safeConciliacion(conciliacion);
   const best = JSON.parse(JSON.stringify(assignments));
@@ -355,24 +356,40 @@ function improveConciliation({assignments, people, startDate, weeks, overrides, 
     for (let d=0; d<7; d++){
       const dateStr = toDateValue(addDays(startDate, w*7+d));
       const cell = best[dateStr] || [];
+
+      // persona OFF de esa semana
+      const offW = computeOffPersonId(people, w);
+
       for (let i=0;i<cell.length;i++){
         const A = cell[i];
         if (!A.personId) continue;
-        const key=`${A.shift.start}-${A.shift.end}-${A.shift.label||`T${i+1}`}`;
+        const key = `${A.shift.start}-${A.shift.end}-${A.shift.label||`T${i+1}`}`;
         if (overrides?.[dateStr]?.[key]) continue;
 
         for (const p2 of people){
           if (p2.id === A.personId) continue;
+          if (p2.id === offW) continue; // respeta semana OFF
+
+          // NO DOBLAR: si p2 ya tiene otro turno ese día, salta
+          const alreadyToday = cell.some((x,idx)=> idx!==i && x.personId === p2.id);
+          if (alreadyToday) continue;
+
           const oldPid = A.personId;
           A.personId = p2.id;
+
           const newScore = scoreConciliacion({assignments:best, people, startDate, weeks, conciliacion});
-          if (newScore < bestScore){ bestScore = newScore; } else { A.personId = oldPid; }
+          if (newScore < bestScore){
+            bestScore = newScore;
+          } else {
+            A.personId = oldPid;
+          }
         }
       }
     }
   }
   return best;
 }
+
 
 // Picos
 function thanksgivingDate(year){ let d = new Date(year,10,1); while(d.getDay()!==4) d.setDate(d.getDate()+1); d.setDate(d.getDate()+21); return d; }
@@ -442,14 +459,14 @@ function peopleAvailableThatDay({people, startDate, dateStr, timeOffs}){
 }
 
 // Propuesta para cerrar horas CON CAPACIDAD (no generará días "pendientes")
-function proponerCierreHoras({
-  assignments, people, startDate, weeks, annualTarget,
+function proponerCierreHoras({ assignments, people, startDate, weeks, annualTarget,
   baseShift={start:'12:00',end:'20:00'},
   weekdayShifts = [{start:'10:00',end:'18:00'}], // por si no pasas, usa 1 turno por defecto
   weekendShift = {start:'10:00',end:'22:00'},
   events = [],
-  timeOffs = []
-}){
+  timeOffs = [],
+  policy = { allowedMonths:[1,2,3,4,5,9,10,11,12], maxPerWeekPerPerson:1, maxPerMonthPerPerson:4 }
+){
   // minutos ya trabajados en el periodo
   const minPorPersona = horasPeriodoPorPersona(assignments, people);
   // ordena por quien más necesita
@@ -500,13 +517,46 @@ function proponerCierreHoras({
         const capacidadLibre = personasDisponibles - (yaAsignados + yaPropuestos);
         if (capacidadLibre <= 0) continue; // no cabe ni uno más
 
+        // filtro por mes permitido
+        const mm = parseDateValue(ds).getMonth()+1;
+        if (allowedSet.size && !allowedSet.has(mm)) continue;
+
+        // topes por semana/persona y mes/persona
+        const wkK = weekKey(ds, fp.id);
+        const moK = monthKey(ds, fp.id);
+        const wCnt = weekCount.get(wkK)||0;
+        const mCnt = monthCount.get(moK)||0;
+        if (wCnt >= (policy.maxPerWeekPerPerson||1)) continue;
+        if (mCnt >= (policy.maxPerMonthPerPerson||4)) continue;
+
         // ok, proponemos 1 refuerzo ese día para esta persona
+
         propuestas.push({ dateStr: ds, personId: fp.id, shift: baseShift, label: 'Refuerzo conciliación' });
+        weekCount.set(wkK, wCnt+1);
+        monthCount.set(moK, mCnt+1);
         proposedPerDay.set(ds, yaPropuestos + 1);
 
         need -= minutesDiff(baseShift.start, baseShift.end);
       }
     }
+  }
+
+
+  const allowedSet = new Set(policy.allowedMonths||[]);
+  const weekCount = new Map(); // key: personId|YYYY-WW -> count
+  const monthCount = new Map(); // key: personId|YYYY-MM -> count
+  function weekKey(ds, pid){
+    const d = parseDateValue(ds);
+    const y = d.getFullYear();
+    const jan4 = new Date(y,0,4);
+    const week1 = new Date(jan4.getFullYear(),0,4 - ((jan4.getDay()+6)%7));
+    const wk = Math.floor((d - week1)/(7*24*3600*1000)) + 1;
+    return pid+'|'+y+'-'+wk;
+  }
+  function monthKey(ds, pid){
+    const d = parseDateValue(ds);
+    const y = d.getFullYear(), m = (d.getMonth()+1+'').padStart(2,'0');
+    return pid+'|'+y+'-'+m;
   }
 
   // Convertimos propuestas en eventos por día: count propuestos -> weekdaysExtraSlots
@@ -577,6 +627,7 @@ export default function App(){
       enableCoverOnVacationDays: true,
       coverDays: [3,4,5]
     },
+    refuerzoPolicy:{ allowedMonths:[1,2,3,4,5,9,10,11,12], maxPerWeekPerPerson:1, maxPerMonthPerPerson:4 },
     managed:{ lastConciliationBatchId:null }
 });
 function forceAssign(dateStr, assignmentIndex, personId){
@@ -610,6 +661,7 @@ function forceAssign(dateStr, assignmentIndex, personId){
       if (typeof payload.applyConciliation === 'undefined') payload.applyConciliation = true;
             if (!payload.vacationPolicy) { payload.vacationPolicy = { mode:'allow', months:[7,8] }; }
 // Defaults de offPolicy si no existen en la nube
+      if (!payload.refuerzoPolicy) { payload.refuerzoPolicy = { allowedMonths:[1,2,3,4,5,9,10,11,12], maxPerWeekPerPerson:1, maxPerMonthPerPerson:4 }; }
       if (!payload.offPolicy) {
         payload.offPolicy = {
           enableLimitOffOnVacationWeek: true,
@@ -1433,7 +1485,8 @@ function PropuestaCierre({ state, startDate, weeks, people, assignments, onApply
       weekdayShifts: state.weekdayShifts,
       weekendShift: state.weekendShift,
       events: state.events,
-      timeOffs: state.timeOffs
+      timeOffs: state.timeOffs,
+      policy: state.refuerzoPolicy
     });
     setSugs({ propuestas, eventosSugeridos });
   }
