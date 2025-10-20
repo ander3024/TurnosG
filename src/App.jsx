@@ -118,7 +118,7 @@ function generateSchedule({ startDate, weeks, people, weekdayShifts, weekendShif
   
   // --- OFF condicionado por vacaciones (configurable) ---
   const OFFP = offPolicy || {};
-  // vacaciones declaradas (pendiente/aprobada, no denegada)
+  // Vacaciones declaradas (pendiente / aprobada; excluye denegadas)
   const VAC = (timeOffs||[]).filter(t=> t.type==='vacaciones' && t.status!=='denegada');
 
   function isHoliday(dateStr){
@@ -126,7 +126,7 @@ function generateSchedule({ startDate, weeks, people, weekdayShifts, weekendShif
     return list.includes(dateStr);
   }
   function isEffectiveVacationDate(date){
-    // Solo L–V; fines de semana fuera
+    // Solo laborables L–V
     if (isWeekend(date)) return false;
     const ds = toDateValue(date);
     // Si no consumen en festivo, excluye festivos
@@ -134,19 +134,16 @@ function generateSchedule({ startDate, weeks, people, weekdayShifts, weekendShif
     return true;
   }
   function hasEffectiveVacationOnDate(date){
-    // Hay alguna vacación que cubra este día y el día es “efectivo”
-    return isEffectiveVacationDate(date) && VAC.some(t => parseDateValue(t.start) <= date && date <= parseDateValue(t.end));
+    if (!isEffectiveVacationDate(date)) return false;
+    return VAC.some(t => parseDateValue(t.start) <= date && date <= parseDateValue(t.end));
   }
   function weekOverlapsVac(w){
     const ws = addDays(startDate, w*7);
-    // ¿Algún día L–V (y no festivo si no consumen) con vacaciones?
     for (let i=0;i<7;i++){
-      const d = addDays(ws,i);
+      const d = addDays(ws, i);
       if (hasEffectiveVacationOnDate(d)) return true;
     }
     return false;
-  } = weekRange(startDate, w);
-    return VAC.some(t => !(parseDateValue(t.end) < ws || parseDateValue(t.start) > we));
   }
 for(let w=0; w<weeks; w++){
     const weekStart=addDays(startDate,w*7);
@@ -173,7 +170,7 @@ const nextOff=computeOffPersonId(people,w+1);
       // decide si el offId puede librar HOY:
       const dayIdx = date.getDay(); // 0=Dom..6=Sáb
       const offAllowedToday = offLimitedThisWeek ? limitDays.includes(dayIdx) : true;
-      const vacationOnDate = hasEffectiveVacationOnDate(date);
+            const vacationOnDate = hasEffectiveVacationOnDate(date);
       const coverDays = (OFFP.coverDays && OFFP.coverDays.length) ? OFFP.coverDays : (OFFP.limitOffDays||[3,4,5]);
       const mustCoverToday = !!(OFFP.enableCoverOnVacationDays && vacationOnDate && coverDays.includes(dayIdx));
       const mustWorkOffToday = !offAllowedToday;
