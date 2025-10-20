@@ -1727,7 +1727,9 @@ function OffPolicyPanel({ state, up }){
   function toggleDay(k){
     const set = new Set(p.limitOffDays || []);
     if (set.has(k)) set.delete(k); else set.add(k);
-    up(['offPolicy','limitOffDays'], Array.from(set).sort());
+    // Reemplazo defensivo del objeto completo
+    const curr = state.offPolicy || { enableLimitOffOnVacationWeek:true, limitOffDays:[3,4,5], enableBlockFullOffAdjacentWeeks:true, adjacencyWindow:1 };
+    up(['offPolicy'], { ...curr, limitOffDays: Array.from(set).sort() });
   }
   return (
     <Card title="Semana OFF condicionada por vacaciones">
@@ -1735,7 +1737,10 @@ function OffPolicyPanel({ state, up }){
         <label className="col-span-12 flex items-center gap-2">
           <input type="checkbox"
                  checked={!!p.enableLimitOffOnVacationWeek}
-                 onChange={e=>up(['offPolicy','enableLimitOffOnVacationWeek'], e.target.checked)} />
+                 onChange={e=>{
+                   const curr = state.offPolicy || { enableLimitOffOnVacationWeek:true, limitOffDays:[3,4,5], enableBlockFullOffAdjacentWeeks:true, adjacencyWindow:1 };
+                   up(['offPolicy'], { ...curr, enableLimitOffOnVacationWeek: e.target.checked });
+                 }} />
           Si hay <b>vacaciones</b> en la semana, el OFF solo se respeta en los días seleccionados.
         </label>
         <div className="col-span-12">
@@ -1754,15 +1759,24 @@ function OffPolicyPanel({ state, up }){
         <label className="col-span-12 flex items-center gap-2">
           <input type="checkbox"
                  checked={!!p.enableBlockFullOffAdjacentWeeks}
-                 onChange={e=>up(['offPolicy','enableBlockFullOffAdjacentWeeks'], e.target.checked)} />
+                 onChange={e=>{
+                   const curr = state.offPolicy || { enableLimitOffOnVacationWeek:true, limitOffDays:[3,4,5], enableBlockFullOffAdjacentWeeks:true, adjacencyWindow:1 };
+                   up(['offPolicy'], { ...curr, enableBlockFullOffAdjacentWeeks: e.target.checked });
+                 }} />
           Limitar también si hay vacaciones en la <b>semana anterior o posterior</b>.
         </label>
         <div className="col-span-6">
           <label className="text-xs block mb-1">Ventana adyacente (semanas)</label>
-          <input type="number" min={1} max={4}
-                 value={p.adjacencyWindow||1}
-                 onChange={e=>up(['offPolicy','adjacencyWindow'], Number(e.target.value))}
-                 className="w-full border rounded px-2 py-1" />
+          <input
+            type="number" min={1} max={4}
+            value={p.adjacencyWindow||1}
+            onChange={e=>{
+              const v = Number(e.target.value);
+              const curr = state.offPolicy || { enableLimitOffOnVacationWeek:true, limitOffDays:[3,4,5], enableBlockFullOffAdjacentWeeks:true, adjacencyWindow:1 };
+              up(['offPolicy'], { ...curr, adjacencyWindow: isNaN(v) ? 1 : Math.max(1, Math.min(4, v)) });
+            }}
+            className="w-full border rounded px-2 py-1"
+          />
         </div>
       </div>
     </Card>
