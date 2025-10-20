@@ -566,7 +566,6 @@ export default function App(){
       enableCoverOnVacationDays: true,
       coverDays: [3,4,5]
     },
-,
     managed:{ lastConciliationBatchId:null }
 });
 function forceAssign(dateStr, assignmentIndex, personId){
