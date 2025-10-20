@@ -1400,6 +1400,7 @@ function GeneradorPicos({ state, up }){
 }
 
 
+
 function PropuestaCierre({ state, startDate, weeks, people, assignments, onApply, annualTarget }){
   const [sugs,setSugs] = useState(null);
   const [mode,setMode] = useState('replace'); // 'replace' | 'append'
@@ -1425,8 +1426,7 @@ function PropuestaCierre({ state, startDate, weeks, people, assignments, onApply
   }
 
   function eliminar(){
-    // Reemplazar por vacío -> limpia todos los refuerzos conciliación
-    onApply([], 'replace', null);
+    onApply([], 'replace', null); // limpia todos los refuerzos de conciliación
     alert('Refuerzos de conciliación eliminados.');
   }
 
@@ -1442,33 +1442,6 @@ function PropuestaCierre({ state, startDate, weeks, people, assignments, onApply
         <button onClick={eliminar} className="px-3 py-1.5 rounded-lg border text-rose-700">Eliminar refuerzos</button>
       </div>
 
-      {!sugs && <div className="text-sm text-slate-500">Pulsa “Calcular propuesta” para ver sugerencias.</div>}
-      {sugs && (
-        <div className="text-sm">
-          <div className="mb-2">Se propondrán {sugs.eventosSugeridos.length} días de refuerzo (L–V) para personas con déficit de horas.</div>
-          <div className="max-h-40 overflow-auto border rounded p-2 text-xs bg-white">
-            {sugs.propuestas.map((p,i)=> (
-              <div key={i}>{p.dateStr} · {people.find(x=>x.id===p.personId)?.name} · {p.shift.start}–{p.shift.end}</div>
-            ))}
-          </div>
-        </div>
-      )}
-    </Card>
-  );
-}
-
-  function aplicar(){
-    if (!sugs) return;
-    onApply(sugs.eventosSugeridos);
-    alert(`Aplicadas ${sugs.eventosSugeridos.length} jornadas de refuerzo de conciliación.`);
-    setSugs(null);
-  }
-  return (
-    <Card title="Propuesta de cierre de horas (conciliación)">
-      <div className="flex items-center gap-2 mb-2">
-        <button onClick={calcular} className="px-3 py-1.5 rounded-lg border">Calcular propuesta</button>
-        <button onClick={aplicar} disabled={!sugs} className={`px-3 py-1.5 rounded-lg border ${sugs?'':'opacity-50 cursor-not-allowed'}`}>Aplicar</button>
-      </div>
       {!sugs && <div className="text-sm text-slate-500">Pulsa “Calcular propuesta” para ver sugerencias.</div>}
       {sugs && (
         <div className="text-sm">
