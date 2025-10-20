@@ -632,7 +632,7 @@ export default function App(){
       enableCoverOnVacationDays: true,
       coverDays: [3,4,5]
     },
-    refuerzoPolicy:{ allowedMonths:[1,2,3,4,5,9,10,11,12], includeSaturdays:false, maxPerWeekPerPerson:1, maxPerMonthPerPerson:4, horizonDefault:'fin', maxPerWeekPerPerson:1, maxPerMonthPerPerson:4 },
+    refuerzoPolicy:{ allowedMonths:[1,2,3,4,5,9,10,11,12], includeSaturdays:false, maxPerWeekPerPerson:1, maxPerMonthPerPerson:4, horizonDefault:'fin' },
     managed:{ lastConciliationBatchId:null }
 });
 function forceAssign(dateStr, assignmentIndex, personId){
@@ -666,7 +666,8 @@ function forceAssign(dateStr, assignmentIndex, personId){
       if (typeof payload.applyConciliation === 'undefined') payload.applyConciliation = true;
             if (!payload.vacationPolicy) { payload.vacationPolicy = { mode:'allow', months:[7,8] }; }
 // Defaults de offPolicy si no existen en la nube
-      if (!payload.refuerzoPolicy) { payload.refuerzoPolicy = { allowedMonths:[1,2,3,4,5,9,10,11,12], maxPerWeekPerPerson:1, maxPerMonthPerPerson:4 }; }
+      ; }
+      if (!payload.refuerzoPolicy) { payload.refuerzoPolicy = { allowedMonths:[1,2,3,4,5,9,10,11,12], includeSaturdays:false, maxPerWeekPerPerson:1, maxPerMonthPerPerson:4, horizonDefault:'fin' }; }
       if (!payload.offPolicy) {
         payload.offPolicy = {
           enableLimitOffOnVacationWeek: true,
@@ -1473,7 +1474,7 @@ function GeneradorPicos({ state, up }){
 function PropuestaCierre({ state, startDate, weeks, people, assignments, onApply, annualTarget }){
   const [sugs,setSugs] = useState(null);
   const [mode,setMode] = useState('replace'); // 'replace' | 'append'
-  const [horizon, setHorizon] = useState('fin'); // 'visible' | 'fin'
+  const [horizon, setHorizon] = useState(state.refuerzoPolicy?.horizonDefault || 'fin'); // 'visible' | 'fin'
 
   function calcular(){
     // weeks horizonte
