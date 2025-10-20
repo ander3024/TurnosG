@@ -118,7 +118,7 @@ function generateSchedule({ startDate, weeks, people, weekdayShifts, weekendShif
   
   // --- OFF condicionado por vacaciones (configurable) ---
   const OFFP = (typeof window !== "undefined" && window.__OFF_POLICY__) ? window.__OFF_POLICY__ : {};
-  const VAC = (timeOffs||[]).filter(t=> t.type==='vacaciones' && t.status==='aprobada');
+  const VAC = (timeOffs||[]).filter(t=> t.type==='vacaciones' && t.status!=='denegada');
   function weekRange(startDate, w){
     const ws = addDays(startDate, w*7);
     const we = addDays(ws, 6);
