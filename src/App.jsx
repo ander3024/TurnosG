@@ -682,7 +682,7 @@ function forceAssign(dateStr, assignmentIndex, personId){
         }; }
 
       // Defaults de refuerzoPolicy si falta
-; };
+};
       }
 
       // Defaults de offPolicy si falta
