@@ -687,7 +687,7 @@ export default function App(){
         startDate, weeks:state.weeks, people:state.people,
         weekdayShifts:state.weekdayShifts, weekendShift:state.weekendShift,
         timeOffs:state.timeOffs, events:state.events, refuerzoWeekdayShift:state.refuerzoWeekdayShift,
-        priorityMap, overrides: state.overrides, rules: state.rules, province: state.province, closeOnHolidays: state.closeOnHolidays, closedExtraDates: state.closedExtraDates
+        priorityMap, overrides: state.overrides, rules: state.rules
       })
     : base, [state, startDate, base, priorityMap]);
 
