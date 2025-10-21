@@ -945,7 +945,7 @@ async function cloudSave() { setUI(prev=>({...prev, sync:"loading"}));
         {/* Calendarios y reportes */}
         <section className="lg:col-span-2 space-y-6">
           <Card title="Cuadrante (click en día para ampliar)">
-            <CalendarView startDate={startDate} weeks={state.weeks} assignments={ASS} people={state.people} onOpenDay={(ds)=>setModalDay(ds)} isAdmin={isAdmin} onQuickAssign={forceAssign} />
+            <CalendarView startDate={startDate} weeks={state.weeks} assignments={ASS} people={state.people} onOpenDay={(ds)=>setModalDay(ds)} isAdmin={isAdmin} onQuickAssign={forceAssign} province={state.province} closeOnHolidays={state.closeOnHolidays} closedExtraDates={state.closedExtraDates} />
           </Card>
 
           <Card title="Vista semanal por persona">
@@ -957,7 +957,7 @@ async function cloudSave() { setUI(prev=>({...prev, sync:"loading"}));
                 <button onClick={()=>window.print()} className="px-3 py-1.5 rounded-lg border">Imprimir / PDF</button>
               </div>
             </div>
-            <WeeklyView startDate={weeklyStart} weeks={1} assignments={ASS} people={state.people} timeOffs={state.timeOffs} province={state.province} consumeVacationOnHoliday={state.consumeVacationOnHoliday} />
+            <WeeklyView startDate={weeklyStart} weeks={1} assignments={ASS} people={state.people} timeOffs={state.timeOffs} province={state.province} consumeVacationOnHoliday={state.consumeVacationOnHoliday} closeOnHolidays={state.closeOnHolidays} closedExtraDates={state.closedExtraDates} />
           </Card>
 
           <TimeOffPanel state={state} setState={setState} controls={controls} isAdmin={isAdmin} currentUser={auth.user} />
@@ -1201,7 +1201,7 @@ function FestivosPanel({ state, up }){
   )}
 
 // ===== Calendarios =====
-function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmin, onQuickAssign }){ const todayStr = toDateValue(new Date());
+function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmin, onQuickAssign, province, closeOnHolidays, closedExtraDates }){ const todayStr = toDateValue(new Date());
   const days=[]; for(let w=0;w<weeks;w++) for(let d=0;d<7;d++) days.push(addDays(startDate, w*7+d));
   const personMap=new Map(people.map(p=>[p.id,p]));
   return (
@@ -1210,6 +1210,7 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
         {days.map(date=>{
           const dateStr=toDateValue(date); const wd=date.toLocaleDateString(undefined,{weekday:'short'}); const day=date.getDate(); const isWE=isWeekend(date); const cell=assignments[dateStr]||[]; const hasConflict=cell.some(c=>c.conflict);
           const sorted=[...cell].sort((a,b)=> minutesFromHHMM(a.shift.start)-minutesFromHHMM(b.shift.start));
+          const isClosed = isClosedBusinessDay(dateStr, province, closeOnHolidays, closedExtraDates);
           return (
             <div key={dateStr} className={`rounded-2xl border p-2 ${isWE? 'bg-slate-50':'bg-white'} ${hasConflict? 'border-red-400':'border-slate-200'}`}>
               <div className="flex items-center justify-between mb-2">
@@ -1223,7 +1224,14 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
                 </div>
               </div>
               <div className="space-y-1.5">
-                {sorted.map((c,i)=>{ const p=c.personId?personMap.get(c.personId):null; const span=formatSpan(c.shift.start,c.shift.end); const dur=minutesDiff(c.shift.start,c.shift.end)/60; const lbl=(c.shift.label|| (isWE?'Finde':`T${i+1}`)); const emblem = /mañana/i.test(lbl)? '☀️' : /tarde/i.test(lbl)? '🌙' : isWE? '🗓️' : '➕'; return (
+                {isClosed ? (
+                  <div className="rounded-xl px-2 py-1.5 border text-sm flex items-center justify-between bg-slate-50">
+                    <div className="truncate"><span className="text-[11px] mr-1 rounded px-1 py-0.5 border bg-amber-50">🎌 Cerrado (festivo)</span>
+                      <span className="text-slate-700">No se programan turnos</span>
+                    </div>
+                  </div>
+                ) : (
+                sorted.map((c,i)=>{ const p=c.personId?personMap.get(c.personId):null; const span=formatSpan(c.shift.start,c.shift.end); const dur=minutesDiff(c.shift.start,c.shift.end)/60; const lbl=(c.shift.label|| (isWE?'Finde':`T${i+1}`)); const emblem = /mañana/i.test(lbl)? '☀️' : /tarde/i.test(lbl)? '🌙' : isWE? '🗓️' : '➕'; return (
                   <div key={i} className={`rounded-xl px-2 py-1.5 border text-sm flex items-center justify-between ${c.conflict? 'border-red-300 bg-red-50':'border-slate-200'}`} title={`${lbl} · ${span} (${dur}h)`}>
                     <div className="truncate">
                       <span className="text-[11px] mr-1 rounded px-1 py-0.5 border bg-slate-50">{emblem} {lbl}</span>
@@ -1239,8 +1247,9 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
       </div>
     </div>
   )}
-function WeeklyView({ startDate, weeks, assignments, people, timeOffs, province, consumeVacationOnHoliday }){
+function WeeklyView({ startDate, weeks, assignments, people, timeOffs, province, consumeVacationOnHoliday, closeOnHolidays, closedExtraDates }){
   const header=[]; for(let d=0; d<7*weeks; d++){ const date=addDays(startDate,d); header.push({ dateStr:toDateValue(date), label: date.toLocaleDateString(undefined,{weekday:'short'})+' '+date.getDate() })}
+  const isClosedDay = (ds)=> isClosedBusinessDay(ds, province, closeOnHolidays, closedExtraDates);
   // Helpers: vacaciones/libranzas/viajes (efectivo = L–V y festivo según política)
 const isEffective = (dateStr) => {
   const d = parseDateValue(dateStr);
