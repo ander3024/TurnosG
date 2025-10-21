@@ -1,0 +1,145 @@
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@
+-function PropuestaCierre({ state, startDate, weeks, people, assignments, onApply, annualTarget }){
+-  const [sugs,setSugs] = useState(null);
+-  function calcular(){
+-    const { propuestas, eventosSugeridos } = proponerCierreHoras({
+-      assignments, people, startDate, weeks, annualTarget,
+-      baseShift: state.refuerzoWeekdayShift,
+-      weekdayShifts: state.weekdayShifts,
+-      weekendShift: state.weekendShift,
+-      events: state.events,
+-      timeOffs: state.timeOffs
+-    });
+-    setSugs({ propuestas, eventosSugeridos });
+-  }
+-  function aplicar(){
+-    if (!sugs) return;
+-    onApply(sugs.eventosSugeridos);
+-    alert(`Aplicadas ${sugs.eventosSugeridos.length} jornadas de refuerzo de conciliación.`);
+-    setSugs(null);
+-  }
+-  return (
+-    <Card title="Propuesta de cierre de horas (conciliación)">
+-      <div className="flex items-center gap-2 mb-2">
+-        <button onClick={calcular} className="px-3 py-1.5 rounded-lg border">Calcular propuesta</button>
+-        <button onClick={aplicar} disabled={!sugs} className={`px-3 py-1.5 rounded-lg border ${sugs?'':'opacity-50 cursor-not-allowed'}`}>Aplicar</button>
+-      </div>
+-      {!sugs && <div className="text-sm text-slate-500">Pulsa “Calcular propuesta” para ver sugerencias.</div>}
+-      {sugs && (
+-        <div className="text-sm">
+-          <div className="mb-2">Se propondrán {sugs.eventosSugeridos.length} días de refuerzo (L–V) para personas con déficit de horas.</div>
+-          <div className="max-h-40 overflow-auto border rounded p-2 text-xs bg-white">
+-            {sugs.propuestas.map((p,i)=> (
+-              <div key={i}>{p.dateStr} · {people.find(x=>x.id===p.personId)?.name} · {p.shift.start}–{p.shift.end}</div>
+-            ))}
+-          </div>
+-        </div>
+-      )}
+-    </Card>
+-  );
+-}
++function PropuestaCierre({ state, startDate, weeks, people, assignments, onApply, annualTarget }){
++  const [sugs,setSugs] = useState(null);
++  const [mode,setMode] = useState('replace');           // 'replace' | 'append'
++  const [horizon,setHorizon] = useState(state.refuerzoPolicy?.horizonDefault || 'fin'); // 'visible' | 'fin'
++
++  function calcular(){
++    // Horizonte: visible (tal cual) o hasta 31/12 del año de la última semana visible
++    let weeksH = weeks;
++    if (horizon === 'fin'){
++      const last = new Date(startDate.getTime() + (weeks*7-1)*24*3600*1000);
++      const end  = new Date(last.getFullYear(), 11, 31);
++      const days = Math.max(1, Math.floor((end - startDate)/(24*3600*1000)) + 1);
++      weeksH = Math.ceil(days/7);
++    }
++    const { propuestas, eventosSugeridos } = proponerCierreHoras({
++      assignments, people, startDate, weeks: weeksH, annualTarget,
++      baseShift: state.refuerzoWeekdayShift,
++      weekdayShifts: state.weekdayShifts,
++      weekendShift: state.weekendShift,
++      events: state.events,
++      timeOffs: state.timeOffs,
++      policy: state.refuerzoPolicy
++    });
++    setSugs({ propuestas, eventosSugeridos });
++  }
++
++  function aplicar(){
++    if (!sugs) return;
++    const batchId = new Date().toISOString();
++    onApply(sugs.eventosSugeridos, mode, batchId);
++    alert(`${sugs.eventosSugeridos.length} refuerzos aplicados (${mode==='replace'?'reemplazando los anteriores':'añadiendo'}).`);
++    setSugs(null);
++  }
++
++  function eliminar(){
++    onApply([], 'replace', null); // borra todos los refuerzos de conciliación previos
++    alert('Refuerzos de conciliación eliminados.');
++  }
++
++  return (
++    <Card title="Refuerzo de conciliación (gestionado)">
++      <div className="flex flex-wrap items-center gap-2 mb-2">
++        <label className="text-sm ml-2 flex items-center gap-2">
++          Horizonte:
++          <select value={horizon} onChange={e=>setHorizon(e.target.value)} className="border rounded px-2 py-1">
++            <option value="fin">Hasta fin de año</option>
++            <option value="visible">Semanas visibles</option>
++          </select>
++        </label>
++        <label className="text-sm ml-2 flex items-center gap-2">
++          Modo:
++          <select value={mode} onChange={e=>setMode(e.target.value)} className="border rounded px-2 py-1">
++            <option value="replace">Reemplazar anterior</option>
++            <option value="append">Añadir a lo existente</option>
++          </select>
++        </label>
++        <button onClick={calcular} className="px-3 py-1.5 rounded-lg border">Calcular propuesta</button>
++        <button onClick={aplicar} disabled={!sugs} className={`px-3 py-1.5 rounded-lg border ${sugs?'':'opacity-50 cursor-not-allowed'}`}>Aplicar</button>
++        <button onClick={eliminar} className="px-3 py-1.5 rounded-lg border text-rose-700">Eliminar refuerzos</button>
++      </div>
++
++      {!sugs && <div className="text-sm text-slate-500">Pulsa “Calcular propuesta” para ver sugerencias.</div>}
++      {sugs && (
++        <div className="text-sm">
++          <div className="mb-2">Se propondrán {sugs.eventosSugeridos.length} días de refuerzo (L–V) para personas con déficit de horas.</div>
++          <div className="max-h-40 overflow-auto border rounded p-2 text-xs bg-white">
++            {sugs.propuestas.map((p,i)=> (
++              <div key={i}>{p.dateStr} · {people.find(x=>x.id===p.personId)?.name} · {p.shift.start}–{p.shift.end}</div>
++            ))}
++          </div>
++        </div>
++      )}
++    </Card>
++  );
++}
+@@
+-          <PropuestaCierre
+-            state={state}
+-            startDate={startDate}
+-            weeks={state.weeks}
+-            people={state.people}
+-            assignments={ASS}
+-            onApply={(evs)=> up(['events'], [...state.events, ...evs])}
+-            annualTarget={state.annualTargetHours}
+-          />
++          <PropuestaCierre
++            state={state}
++            startDate={startDate}
++            weeks={state.weeks}
++            people={state.people}
++            assignments={ASS}
++            onApply={(evs, mode='append', batchId=null) => {
++              const tag = (e)=> ({...e, meta:{ ...(e.meta||{}), source:'conciliacion', batchId }});
++              const tagged = (evs||[]).map(tag);
++              const base = mode==='replace'
++                ? (state.events||[]).filter(e=> !(e?.meta?.source==='conciliacion'))
++                : (state.events||[]);
++              const next = [...base, ...tagged];
++              up(['events'], next);
++              if (batchId) up(['managed','lastConciliationBatchId'], batchId);
++            }}
++            annualTarget={state.annualTargetHours}
++          />
