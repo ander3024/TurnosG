@@ -667,45 +667,62 @@ function forceAssign(dateStr, assignmentIndex, personId){
 
   // ---------- Cloud (SQLite) ----------
   const [cloud, setCloud] = useState({ spaceId:"turnos-2025", readToken:"", writeToken:"WRT-1234", apiKey:"" });
-  async function cloudLoad() { setUI(prev=>({...prev, sync:"loading"}));
-    if (!isAdmin && !cloud.readToken) { showToast("Falta ReadToken"); setUI(prev=>({...prev, sync:"error"})); return}
-    try{
-      const extra={}; if(cloud.apiKey) extra["X-API-Key"]=cloud.apiKey; if(cloud.readToken) extra["X-Read-Token"]=cloud.readToken;
-      const data = await api(`/state/${encodeURIComponent(cloud.spaceId)}`, { method:"GET" }, auth.token, extra);
-      if(!data.payload){ alert("No hay datos guardados para ese Space ID"); return}
-      const payload = { ...data.payload };
-      if (!payload.conciliacion) payload.conciliacion = safeConciliacion();
-      if (typeof payload.applyConciliation === 'undefined') payload.applyConciliation = true;
-      if (!payload.refuerzoPolicy) {
-        payload.refuerzoPolicy = {
-          allowedMonths:[1,2,3,4,5,9,10,11,12],
-          includeSaturdays:false,
-          maxPerWeekPerPerson:1,
-          maxPerMonthPerPerson:4,
-          horizonDefault:'fin',
-          goalFill:true,
-          skipPast:true,
-          maxEscalation:3,
-          weekBoost:1,
-          monthBoost:2
-        };
-      }
-; }
+  async function cloudLoad() { 
+  setUI(prev=>({...prev, sync:"loading"}));
+  if (!isAdmin && !cloud.readToken) { showToast("Falta ReadToken"); setUI(prev=>({...prev, sync:"error"})); return; }
+  try {
+    const extra = {};
+    if (cloud.apiKey)   extra["X-API-Key"]   = cloud.apiKey;
+    if (cloud.readToken)extra["X-Read-Token"]= cloud.readToken;
 
-      // Defaults de refuerzoPolicy si falta
-}
-      }
+    const data = await api(`/state/${encodeURIComponent(cloud.spaceId)}`, { method:"GET" }, auth.token, extra);
+    if (!data.payload) { alert("No hay datos guardados para ese Space ID"); setUI(prev=>({...prev, sync:null})); return; }
+    const payload = { ...data.payload };
 
-      // Defaults de offPolicy si falta
-;
-      }
+    // Defaults de conciliación
+    if (!payload.conciliacion) payload.conciliacion = safeConciliacion();
+    if (typeof payload.applyConciliation === 'undefined') payload.applyConciliation = true;
 
-      if (typeof window !== "undefined") window.__OFF_POLICY__ = payload.offPolicy || {};
+    // Defaults de refuerzoPolicy
+    if (!payload.refuerzoPolicy) {
+      payload.refuerzoPolicy = {
+        allowedMonths:[1,2,3,4,5,9,10,11,12],
+        includeSaturdays:false,
+        maxPerWeekPerPerson:1,
+        maxPerMonthPerPerson:4,
+        horizonDefault:'fin',
+        goalFill:true,
+        skipPast:true,
+        maxEscalation:3,
+        weekBoost:1,
+        monthBoost:2
+      };
+    }
 
-      setState(prev=>({ ...prev, ...payload }));
-      setUI(prev=>({...prev, sync:"ok"})); showToast("Cargado de nube")}catch(e){ setUI(prev=>({...prev, sync:"error"})); showToast((String(e.message||"")).startsWith("403")?"403: ReadToken inválido o sin permisos":"Error al cargar: "+e.message)}
+    // Defaults de offPolicy
+    if (!payload.offPolicy) {
+      payload.offPolicy = {
+        enableLimitOffOnVacationWeek: true,
+        limitOffDays: [3,4,5],          // X-J-V
+        enableBlockFullOffAdjacentWeeks: true,
+        adjacencyWindow: 1,
+        enableCoverOnVacationDays: true,
+        coverDays: [3,4,5]
+      };
+    }
+
+    // sincroniza para el generador
+    if (typeof window !== "undefined") window.__OFF_POLICY__ = payload.offPolicy || {};
+
+    setState(prev => ({ ...prev, ...payload }));
+    setUI(prev=>({...prev, sync:"ok"}));
+    showToast("Cargado de nube");
+  } catch (e) {
+    setUI(prev=>({...prev, sync:"error"}));
+    showToast((String(e.message||"")).startsWith("403") ? "403: ReadToken inválido o sin permisos" : "Error al cargar: " + e.message);
   }
-  async function cloudSave() { setUI(prev=>({...prev, sync:"loading"}));
+}
+async function cloudSave() { setUI(prev=>({...prev, sync:"loading"}));
     try{
       const headers={ "Content-Type":"application/json", "X-Write-Token": cloud.writeToken };
       if(cloud.apiKey) headers["X-API-Key"]=cloud.apiKey;
