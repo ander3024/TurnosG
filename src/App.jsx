@@ -975,11 +975,6 @@ async function cloudSave() { setUI(prev=>({...prev, sync:"loading"}));
               const tag = (e)=> ({...e, meta:{ ...(e.meta||{}), source:'conciliacion', batchId }});
               const tagged = (evs||[]).map(tag);
               const base = mode==='replace'
-                ? (state.events||[]).filter(e=> !(e?.meta?.source==='conciliacion')
-
-            </div>
-</div>
-                ) : (
                 sorted.map((c,i)=>{ const p=c.personId?personMap.get(c.personId):null; const span=formatSpan(c.shift.start,c.shift.end); const dur=minutesDiff(c.shift.start,c.shift.end)/60; const lbl=(c.shift.label|| (isWE?'Finde':`T${i+1}`)); const emblem = /mañana/i.test(lbl)? '☀️' : /tarde/i.test(lbl)? '🌙' : isWE? '🗓️' : '➕'; return (
                   <div key={i} className={`rounded-xl px-2 py-1.5 border text-sm flex items-center justify-between ${c.conflict? 'border-red-300 bg-red-50':'border-slate-200'}`} title={`${lbl} · ${span} (${dur}h)`}>
                     <div className="truncate">
