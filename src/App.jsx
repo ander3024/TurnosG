@@ -10,18 +10,23 @@ async function api(path, opts = {}, token = "", extraHeaders = {}) {
   const res = await fetch(`${API_BASE}${path}`, { ...opts, headers });
   if (!res.ok) {
     const txt = await res.text();
-    throw new Error(`${res.status} ${txt}`)}
-  return res.json()}
+    throw new Error(`${res.status} ${txt}`);
+  }
+  return res.json();
+}
 
 // ===================== Utilidades fecha/hora =====================
-function toDateValue(d) { const pad=(n)=>String(n).padStart(2,"0"); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`}
-function parseDateValue(v){ const [y,m,d]=v.split('-').map(Number); return new Date(y,m-1,d)}
-function addDays(date, days){ const d=new Date(date); d.setDate(d.getDate()+days); return d}
-function startOfWeekMonday(date){ const d=new Date(date); const day=(d.getDay()+6)%7; d.setDate(d.getDate()-day); d.setHours(0,0,0,0); return d}
-function isWeekend(date){ const dow=date.getDay(); return dow===6 || dow===0}
-function minutesFromHHMM(hhmm){ const [h,m]=hhmm.split(':').map(Number); return h*60+(m||0)}
-function minutesDiff(a,b){ return minutesFromHHMM(b)-minutesFromHHMM(a)}
-function formatSpan(a,b){ return `${a}–${b}`}
+function toDateValue(d) {
+  const pad = (n)=> String(n).padStart(2,"0");
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+}
+function parseDateValue(v){ const [y,m,d]=v.split('-').map(Number); return new Date(y,m-1,d); }
+function addDays(date, days){ const d=new Date(date); d.setDate(d.getDate()+days); return d; }
+function startOfWeekMonday(date){ const d=new Date(date); const day=(d.getDay()+6)%7; d.setDate(d.getDate()-day); d.setHours(0,0,0,0); return d; }
+function isWeekend(date){ const dow=date.getDay(); return dow===6 || dow===0; }
+function minutesFromHHMM(hhmm){ const [h,m]=hhmm.split(':').map(Number); return h*60+(m||0); }
+function minutesDiff(a,b){ return minutesFromHHMM(b)-minutesFromHHMM(a); }
+function formatSpan(a,b){ return `${a}–${b}`; }
 
 // ===================== Catálogos / Festivos 2025 =====================
 const HOLIDAYS_2025 = {
@@ -32,6 +37,7 @@ const HOLIDAYS_2025 = {
   "Barcelona": [
     "2025-01-01","2025-01-06","2025-04-17","2025-04-21","2025-05-01","2025-06-24","2025-08-15","2025-09-11","2025-10-12","2025-11-01","2025-12-06","2025-12-08","2025-12-25","2025-12-26"
   ],
+};
 
 // ===================== Persistencia local =====================
 const STORAGE_KEY = "gestor-turnos-4p-v10";
