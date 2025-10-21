@@ -49,6 +49,14 @@ function usePersistentState(defaultValue){
 // ===================== Helpers varios =====================
 function expandRange(s,e){ const S=parseDateValue(s), E=parseDateValue(e); const out=[]; for(let d=new Date(S); d<=E; d=addDays(d,1)) out.push(toDateValue(d)); return out}
 function isHolidayDate(dateStr, province){ const list=HOLIDAYS_2025[province]||[]; return list.includes(dateStr)}
+
+// ¿Está la tienda cerrada por política?
+function isClosedBusinessDay(dateStr, province, closeOnHolidays, closedExtraDates){
+  const extra = Array.isArray(closedExtraDates)? new Set(closedExtraDates): new Set();
+  if (extra.has(dateStr)) return true;
+  if (closeOnHolidays && isHolidayDate(dateStr, province)) return true;
+  return false;
+}
 function countVacationDaysConsideringHolidays(s,e,province,consume){
   const dates=expandRange(s,e);
   return dates.reduce((acc,d)=>{
@@ -109,7 +117,7 @@ function pickBestCandidate(pool,{isWeekend,weekdaysLoad,weekendLoad,priorityMap}
   scored.sort((a,b)=> a.primary-b.primary || a.total-b.total || b.priority-a.priority || a.id.localeCompare(b.id));
   return scored[0].id}
 
-function generateSchedule({ startDate, weeks, people, weekdayShifts, weekendShift, timeOffs, events, refuerzoWeekdayShift, priorityMap, overrides, rules, offPolicy, province, consumeVacationOnHoliday }){
+function generateSchedule({ startDate, weeks, people, weekdayShifts, weekendShift, timeOffs, events, refuerzoWeekdayShift, priorityMap, overrides, rules, offPolicy, province, consumeVacationOnHoliday, closeOnHolidays, closedExtraDates }){
   const assignments={};
   const hoursPerPersonMin=new Map(people.map(p=>[p.id,0]));
   const weekdaysLoad=new Map(people.map(p=>[p.id,0]));
@@ -164,7 +172,13 @@ const nextOff=computeOffPersonId(people,w+1);
       const date=addDays(weekStart,d); const dateStr=toDateValue(date); const isWE=isWeekend(date);
       
       // decide si el offId puede librar HOY:
-      const dayIdx = date.getDay(); // 0=Dom..6=Sáb
+      const dayIdx = date.getDay(); 
+      // Día cerrado por festivo oficial o cierre extra → no se programan turnos
+      if (isClosedBusinessDay(dateStr, province, closeOnHolidays, closedExtraDates)) {
+        assignments[dateStr] = []; 
+        continue;
+      }
+// 0=Dom..6=Sáb
       const offAllowedToday = offLimitedThisWeek ? limitDays.includes(dayIdx) : true;
             const vacationOnDate = hasEffectiveVacationOnDate(date);
       const coverDays = (OFFP.coverDays && OFFP.coverDays.length) ? OFFP.coverDays : (OFFP.limitOffDays||[3,4,5]);
@@ -638,6 +652,8 @@ export default function App(){
     security:{ adminPin:"1234", personPins:{P1:"1111",P2:"2222",P3:"3333",P4:"4444"} },
     rebalance:false,
     province:"Madrid", consumeVacationOnHoliday:false,
+    closeOnHolidays:true,
+    closedExtraDates:[],
     overrides:{},
     swaps: [], showArchivedSwaps:false,
     rules: { enforce:true, maxDailyHours:9, maxWeeklyHours:40, minRestHours:12 },
@@ -702,7 +718,10 @@ function forceAssign(dateStr, assignmentIndex, personId){
         maxEscalation:3,
         weekBoost:1,
         monthBoost:2
-      };
+      }
+      if (payload.closeOnHolidays===undefined) payload.closeOnHolidays = true;
+      if (!Array.isArray(payload.closedExtraDates)) payload.closedExtraDates = [];
+;
     }
 
     // Defaults de offPolicy
@@ -752,7 +771,7 @@ async function cloudSave() { setUI(prev=>({...prev, sync:"loading"}));
 
   // ---------- Generación de cuadrante ----------
   const startDate=useMemo(()=>parseDateValue(state.startDate),[state.startDate]);
-  const base=useMemo(()=> generateSchedule({ startDate, weeks:state.weeks, people:state.people, weekdayShifts:state.weekdayShifts, weekendShift:state.weekendShift, timeOffs:state.timeOffs, events:state.events, refuerzoWeekdayShift:state.refuerzoWeekdayShift, overrides: state.overrides, rules: state.rules, offPolicy: state.offPolicy, province: state.province, consumeVacationOnHoliday: state.consumeVacationOnHoliday }), [state, startDate]);
+  const base=useMemo(()=> generateSchedule({ startDate, weeks:state.weeks, people:state.people, weekdayShifts:state.weekdayShifts, weekendShift:state.weekendShift, timeOffs:state.timeOffs, events:state.events, refuerzoWeekdayShift:state.refuerzoWeekdayShift, overrides: state.overrides, rules: state.rules, offPolicy: state.offPolicy, province: state.province, consumeVacationOnHoliday: state.consumeVacationOnHoliday, closeOnHolidays: state.closeOnHolidays, closedExtraDates: state.closedExtraDates }), [state, startDate]);
 
   const baseControls=useMemo(()=> buildControls({
       assignments:base.assignments, people:state.people,
@@ -765,7 +784,7 @@ async function cloudSave() { setUI(prev=>({...prev, sync:"loading"}));
   const priorityMap=useMemo(()=>{ const m=new Map(); baseControls.rows.forEach(r=> m.set(r.id, Math.max(0,r.remaining))); return m},[baseControls]);
 
   const { assignments } = useMemo(()=> state.rebalance
-    ? generateSchedule({ startDate, weeks:state.weeks, people:state.people, weekdayShifts:state.weekdayShifts, weekendShift:state.weekendShift, timeOffs:state.timeOffs, events:state.events, refuerzoWeekdayShift:state.refuerzoWeekdayShift, priorityMap, overrides: state.overrides, rules: state.rules, offPolicy: state.offPolicy, province: state.province, consumeVacationOnHoliday: state.consumeVacationOnHoliday })
+    ? generateSchedule({ startDate, weeks:state.weeks, people:state.people, weekdayShifts:state.weekdayShifts, weekendShift:state.weekendShift, timeOffs:state.timeOffs, events:state.events, refuerzoWeekdayShift:state.refuerzoWeekdayShift, priorityMap, overrides: state.overrides, rules: state.rules, offPolicy: state.offPolicy, province: state.province, consumeVacationOnHoliday: state.consumeVacationOnHoliday, closeOnHolidays: state.closeOnHolidays, closedExtraDates: state.closedExtraDates })
     : base, [state, startDate, base, priorityMap]);
 
   // Aplica mejorador de conciliación (evita días-isla y reduce cortes)
