@@ -534,7 +534,7 @@ export default function App(){
     rebalance:false,
     province:"Madrid", consumeVacationOnHoliday:false,
     closeOnHolidays: true,
-    closedExtraDates: [],
+    closedExtraDates: [], closeOnHolidays: true, closedExtraDates: [],
     overrides:{},
     swaps: [], showArchivedSwaps:false,
     rules: { enforce:true, maxDailyHours:9, maxWeeklyHours:40, minRestHours:12 },
