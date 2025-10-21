@@ -1243,7 +1243,7 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
                     const lbl  = (c.shift.label || (isWE ? 'Finde' : `T${i+1}`));
                     const emblem = /mañana/i.test(lbl)? '☀️' : /tarde/i.test(lbl)? '🌙' : (isWE ? '🗓️' : '➕');
                     return (
-                      <div key=65945 className={`rounded-xl px-2 py-1.5 border text-sm flex items-center justify-between ${c.conflict? 'border-red-300 bg-red-50':'border-slate-200'}`} title={`${lbl} · ${span} (${dur}h)`}>
+                      <div key={i} className={`rounded-xl px-2 py-1.5 border text-sm flex items-center justify-between ${c.conflict? 'border-red-300 bg-red-50':'border-slate-200'}`} title={`${lbl} · ${span} (${dur}h)`}>
                         <div className="truncate">
                           <span className="text-[11px] mr-1 rounded px-1 py-0.5 border bg-slate-50">{emblem} {lbl}</span>
                           <span className="text-slate-700">{span}</span>
