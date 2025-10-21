@@ -323,6 +323,7 @@ function improveConciliation({assignments, people, startDate, weeks, overrides, 
 
   for (let w=0; w<weeks; w++){
     for (let d=0; d<7; d++){
+      const date=addDays(weekStart,d); const dateStr=toDateValue(date); const isWE=isWeekend(date);
       const dateStr = toDateValue(addDays(startDate, w*7+d));
       const cell = best[dateStr] || [];
       for (let i=0;i<cell.length;i++){
@@ -532,7 +533,7 @@ export default function App(){
     events: [], timeOffs: [],
     security:{ adminPin:"1234", personPins:{P1:"1111",P2:"2222",P3:"3333",P4:"4444"} },
     rebalance:false,
-    province:"Madrid", consumeVacationOnHoliday:false, closeOnHolidays: true, closedExtraDates: [],
+    province:"Madrid", consumeVacationOnHoliday:false,
     overrides:{},
     swaps: [], showArchivedSwaps:false,
     rules: { enforce:true, maxDailyHours:9, maxWeeklyHours:40, minRestHours:12 },

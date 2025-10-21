@@ -156,7 +156,6 @@ const nextOff=computeOffPersonId(people,w+1);
     const weeklyMinutes = new Map(people.map(p=>[p.id,0]));
 
     for(let d=0; d<7; d++){
-      const date=addDays(weekStart,d); const dateStr=toDateValue(date); const isWE=isWeekend(date);
       // Día cerrado por festivo/cierre extra → no se programan turnos
       if (isClosedBusinessDay(dateStr, province, closeOnHolidays, closedExtraDates)) {
         assignments[dateStr] = [];
@@ -532,7 +531,7 @@ export default function App(){
     events: [], timeOffs: [],
     security:{ adminPin:"1234", personPins:{P1:"1111",P2:"2222",P3:"3333",P4:"4444"} },
     rebalance:false,
-    province:"Madrid", consumeVacationOnHoliday:false, closeOnHolidays: true, closedExtraDates: [],
+    province:"Madrid", consumeVacationOnHoliday:false,
     overrides:{},
     swaps: [], showArchivedSwaps:false,
     rules: { enforce:true, maxDailyHours:9, maxWeeklyHours:40, minRestHours:12 },
