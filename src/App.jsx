@@ -1237,6 +1237,37 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
                     );
                   }
                   return sorted.map((c,i) => {
+                    const p   = c.personId ? personMap.get(c.personId) : null;
+                    const span= formatSpan(c.shift.start,c.shift.end);
+                    const dur = minutesDiff(c.shift.start,c.shift.end)/60;
+                    const lbl = (c.shift.label || (isWE ? 'Finde' : `T${i+1}`));
+                    const emblem = /mañana/i.test(lbl) ? '☀️' : /tarde/i.test(lbl) ? '🌙' : (isWE ? '🗓️' : '➕');
+                    return (
+                      <div key={i} className={`rounded-xl px-2 py-1.5 border text-sm flex items-center justify-between ${c.conflict? 'border-red-300 bg-red-50':'border-slate-200'}`} title={`${lbl} · ${span} (${dur}h)`}>
+                        <div className="truncate">
+                          <span className="text-[11px] mr-1 rounded px-1 py-0.5 border bg-slate-50">{emblem} {lbl}</span>
+                          <span className="text-slate-700">{span}</span>
+                          <span className="text-[11px] ml-1 text-slate-500">({dur}h)</span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          {p ? (
+                            <span className="chip inline-flex items-center gap-1 px-1.5 py-0.5 rounded-lg" style={{background:`${p.color}20`, border:`1px solid ${p.color}55`}}>
+                              <span className="h-2.5 w-2.5 rounded" style={{background:p.color}}/>
+                              <span className="text-sm">{p.name}</span>
+                            </span>
+                          ) : (
+                            <span className="text-red-600 text-sm">⚠ Falta asignar</span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  });
+                })()}
+              </div>
+            </div>
+                    );
+                  }
+                  return sorted.map((c,i) => {
                     const p = c.personId ? personMap.get(c.personId) : null;
                     const span = formatSpan(c.shift.start, c.shift.end);
                     const dur  = minutesDiff(c.shift.start, c.shift.end)/60;
