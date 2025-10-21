@@ -419,21 +419,6 @@ function proponerCierreHoras({
   weekendShift = {start:'10:00',end:'22:00'},
   events = [],
   timeOffs = [], policy = { allowedMonths:[], includeSaturdays:false, maxPerWeekPerPerson:1, maxPerMonthPerPerson:4 }}){
-  // helpers inyectados para límites por semana/mes
-  const weekKey = (ds, pid) => {
-    const d = parseDateValue(ds);
-    const y = d.getFullYear();
-    const jan4 = new Date(y,0,4);
-    const week1Mon = new Date(jan4.getFullYear(),0,4 - ((jan4.getDay()+6)%7));
-    const wk = Math.floor((d - week1Mon)/(7*24*3600*1000)) + 1;
-    return pid+'|'+y+'-'+wk;
-  };
-  const monthKey = (ds, pid) => {
-    const d = parseDateValue(ds);
-    const y = d.getFullYear();
-    const m = String(d.getMonth()+1).padStart(2,'0');
-    return pid+'|'+y+'-'+m;
-  };
   // minutos ya trabajados en el periodo
   const minPorPersona = horasPeriodoPorPersona(assignments, people);
   // ordena por quien más necesita
