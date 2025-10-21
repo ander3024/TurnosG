@@ -984,7 +984,7 @@ async function cloudSave() { setUI(prev=>({...prev, sync:"loading"}));
                     </div>
                     <div className="flex items-center gap-1">{p? (<span className="chip inline-flex items-center gap-1 px-1.5 py-0.5 rounded-lg" style={{background:`${p.color}20`, border:`1px solid ${p.color}55`}}><span className="h-2.5 w-2.5 rounded" style={{background:p.color}}/><span className="text-sm">{p.name}</span></span>): (<span className="text-red-600 text-sm">⚠ Falta asignar</span>)}</div>
                   </div>
-                ))}
+                )}
       </div>
     </div>
   )}
