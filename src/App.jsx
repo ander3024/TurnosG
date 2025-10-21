@@ -530,6 +530,118 @@ function proponerCierreHoras({
   return { propuestas, eventosSugeridos }}
 
 // ===================== App (UI completa con login + nube) =====================
+
+
+function proponerCierreHoras({
+  assignments,
+  people,
+  startDate,
+  weeks,
+  annualTarget,
+  baseShift = {start:'12:00', end:'20:00'},
+  weekdayShifts = [{start:'10:00', end:'18:00'}],
+  weekendShift = {start:'10:00', end:'22:00'},
+  events = [],
+  timeOffs = [],
+  policy = { allowedMonths:[1,2,3,4,5,9,10,11,12], includeSaturdays:false, maxPerWeekPerPerson:1, maxPerMonthPerPerson:4 }
+}){
+  // minutos ya trabajados en el periodo
+  const minPorPersona = horasPeriodoPorPersona(assignments, people);
+
+  // Orden de necesidad (quien más déficit tiene primero)
+  const faltantes = people.map(p => ({
+    id:p.id,
+    need: Math.max(0, annualTarget*60 - (minPorPersona.get(p.id)||0))
+  })).sort((a,b)=> b.need - a.need);
+
+  // ==== helpers/contadores (ANTES del bucle; evita TDZ) ====
+  const allowedSet = new Set(policy.allowedMonths||[]);
+  const weekCount = new Map();   // clave: personId|YYYY-WW
+  const monthCount = new Map();  // clave: personId|YYYY-MM
+  function weekKey(ds, pid){
+    const d = parseDateValue(ds);
+    const y = d.getFullYear();
+    const jan4 = new Date(y,0,4);
+    const week1Mon = new Date(jan4.getFullYear(),0,4 - ((jan4.getDay()+6)%7));
+    const wk = Math.floor((d - week1Mon)/(7*24*3600*1000)) + 1;
+    return pid+'|'+y+'-'+wk;
+  }
+  function monthKey(ds, pid){
+    const d = parseDateValue(ds);
+    const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,'0');
+    return pid+'|'+y+'-'+m;
+  }
+
+  // Capacidad día
+  function baseSlotsForDate(ds){
+    const isWE = isWeekend(parseDateValue(ds));
+    return isWE ? 1 : (weekdayShifts?.length || 1);
+  }
+  function currentSlotsCount(ds){
+    const cell = assignments[ds] || [];
+    return cell.length;
+  }
+
+  const propuestas = [];
+  const proposedPerDay = new Map(); // ds -> count propuestos
+
+  // ==== reparto ====
+  for (const fp of faltantes){
+    let need = fp.need;
+    if (need <= 0) continue;
+
+    for (let w=0; w<weeks && need>0; w++){
+      for (let d=0; d<(policy.includeSaturdays?6:5) && need>0; d++){ // L–V o L–S
+        const ds = toDateValue(addDays(startDate, w*7+d));
+
+        // si ya trabaja ese día, no proponer
+        if ((assignments[ds]||[]).some(c=>c.personId===fp.id)) continue;
+
+        // capacidad (sin dejar pendiente)
+        const personasDisponibles = peopleAvailableThatDay({people, startDate, dateStr: ds, timeOffs});
+        const yaAsignados   = currentSlotsCount(ds);
+        const yaPropuestos  = proposedPerDay.get(ds) || 0;
+        const capacidadLibre = personasDisponibles - (yaAsignados + yaPropuestos);
+        if (capacidadLibre <= 0) continue;
+
+        // mes permitido
+        const mm = parseDateValue(ds).getMonth()+1;
+        if (allowedSet.size && !allowedSet.has(mm)) continue;
+
+        // topes por semana/mes
+        const wkK = weekKey(ds, fp.id);
+        const moK = monthKey(ds, fp.id);
+        const wCnt = weekCount.get(wkK)||0;
+        const mCnt = monthCount.get(moK)||0;
+        if (wCnt >= (policy.maxPerWeekPerPerson||1)) continue;
+        if (mCnt >= (policy.maxPerMonthPerPerson||4)) continue;
+
+        // propuesta
+        propuestas.push({ dateStr: ds, personId: fp.id, shift: baseShift, label: 'Refuerzo conciliación' });
+        weekCount.set(wkK, wCnt+1);
+        monthCount.set(moK, mCnt+1);
+        proposedPerDay.set(ds, yaPropuestos + 1);
+        need -= minutesDiff(baseShift.start, baseShift.end);
+      }
+    }
+  }
+
+  // propuestas -> eventos (suma por día)
+  const eventosByDay = new Map();
+  for (const p of propuestas){
+    const c = eventosByDay.get(p.dateStr) || 0;
+    eventosByDay.set(p.dateStr, c+1);
+  }
+  const eventosSugeridos = [...eventosByDay.entries()].map(([ds,count]) => ({
+    label: 'Refuerzo conciliación',
+    start: ds, end: ds,
+    weekdaysExtraSlots: count,
+    weekendExtraSlots: 0
+  }));
+
+  return { propuestas, eventosSugeridos };
+}
+
 export default function App(){
   // ---------- Auth (JWT) ----------
   const [auth, setAuth] = useState(() => {
