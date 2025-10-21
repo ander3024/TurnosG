@@ -1,0 +1,84 @@
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@
+ function isHolidayDate(dateStr, province){ const list=HOLIDAYS_2025[province]||[]; return list.includes(dateStr); }
++// Día cerrado por política (festivo oficial + cierres extra)
++function isClosedBusinessDay(dateStr, province, closeOnHolidays=true, closedExtraDates=[]){
++  const extra = Array.isArray(closedExtraDates) ? new Set(closedExtraDates) : new Set();
++  if (extra.has(dateStr)) return true;
++  if (closeOnHolidays && isHolidayDate(dateStr, province)) return true;
++  return false;
++}
+@@
+   const [state,setState]=usePersistentState({
+@@
+-    province:"Madrid", consumeVacationOnHoliday:false,
++    province:"Madrid", consumeVacationOnHoliday:false,
++    closeOnHolidays: true,
++    closedExtraDates: [],
+@@
+-function generateSchedule({ startDate, weeks, people, weekdayShifts, weekendShift, timeOffs, events, refuerzoWeekdayShift, priorityMap, overrides, rules }){
++function generateSchedule({ startDate, weeks, people, weekdayShifts, weekendShift, timeOffs, events, refuerzoWeekdayShift, priorityMap, overrides, rules, province, closeOnHolidays, closedExtraDates }){
+@@
+-    for(let d=0; d<7; d++){
+-      const date=addDays(weekStart,d); const dateStr=toDateValue(date); const isWE=isWeekend(date);
++    for(let d=0; d<7; d++){
++      const date=addDays(weekStart,d); const dateStr=toDateValue(date); const isWE=isWeekend(date);
++      // Si el día está cerrado (festivo/cierre extra) no se programan turnos
++      if (isClosedBusinessDay(dateStr, province, closeOnHolidays, closedExtraDates)) {
++        assignments[dateStr] = [];
++        continue;
++      }
+@@
+   const base=useMemo(()=> generateSchedule({
+       startDate, weeks:state.weeks, people:state.people,
+       weekdayShifts:state.weekdayShifts, weekendShift:state.weekendShift,
+-      timeOffs:state.timeOffs, events:state.events, refuerzoWeekdayShift:state.refuerzoWeekdayShift,
+-      overrides: state.overrides, rules: state.rules
++      timeOffs:state.timeOffs, events:state.events, refuerzoWeekdayShift:state.refuerzoWeekdayShift,
++      overrides: state.overrides, rules: state.rules,
++      province: state.province, closeOnHolidays: state.closeOnHolidays, closedExtraDates: state.closedExtraDates
+     }), [state, startDate]);
+@@
+-  const { assignments } = useMemo(()=> state.rebalance
+-    ? generateSchedule({
++  const { assignments } = useMemo(()=> state.rebalance
++    ? generateSchedule({
+         startDate, weeks:state.weeks, people:state.people,
+         weekdayShifts:state.weekdayShifts, weekendShift:state.weekendShift,
+-        timeOffs:state.timeOffs, events:state.events, refuerzoWeekdayShift:state.refuerzoWeekdayShift,
+-        priorityMap, overrides: state.overrides, rules: state.rules
++        timeOffs:state.timeOffs, events:state.events, refuerzoWeekdayShift:state.refuerzoWeekdayShift,
++        priorityMap, overrides: state.overrides, rules: state.rules,
++        province: state.province, closeOnHolidays: state.closeOnHolidays, closedExtraDates: state.closedExtraDates
+       })
+     : base, [state, startDate, base, priorityMap]);
+@@
+-          <Card title="Cuadrante (click en día para ampliar)">
+-            <CalendarView startDate={startDate} weeks={state.weeks} assignments={ASS} people={state.people} onOpenDay={(ds)=>setModalDay(ds)} isAdmin={isAdmin} onQuickAssign={forceAssign} />
++          <Card title="Cuadrante (click en día para ampliar)">
++            <CalendarView
++              startDate={startDate}
++              weeks={state.weeks}
++              assignments={ASS}
++              people={state.people}
++              onOpenDay={(ds)=>setModalDay(ds)}
++              isAdmin={isAdmin}
++              onQuickAssign={forceAssign}
++              province={state.province}
++              closeOnHolidays={state.closeOnHolidays}
++              closedExtraDates={state.closedExtraDates}
++            />
+           </Card>
+@@
+-            <WeeklyView startDate={weeklyStart} weeks={1} assignments={ASS} people={state.people} timeOffs={state.timeOffs} />
++            <WeeklyView
++              startDate={weeklyStart}
++              weeks={1}
++              assignments={ASS}
++              people={state.people}
++              timeOffs={state.timeOffs}
++              province={state.province}
++              closeOnHolidays={state.closeOnHolidays}
++              closedExtraDates={state.closedExtraDates}
++            />

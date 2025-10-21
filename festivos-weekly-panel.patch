@@ -1,0 +1,37 @@
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@
+-function WeeklyView({ startDate, weeks, assignments, people, timeOffs }){
++function WeeklyView({ startDate, weeks, assignments, people, timeOffs, province, closeOnHolidays, closedExtraDates }){
+   const header=[]; for(let d=0; d<7*weeks; d++){ const date=addDays(startDate,d); header.push({ dateStr:toDateValue(date), label: date.toLocaleDateString(undefined,{weekday:'short'})+' '+date.getDate() }); }
+   // Helpers: TO aprobadas
++  const isClosedDay = (dateStr) => isClosedBusinessDay(dateStr, province, closeOnHolidays, closedExtraDates);
+   const hasApprovedTO = (dateStr, personId) => {
+@@
+-                  {cell.length===0 ? (
+-                    (hasApprovedTO(h.dateStr, p.id)
+-                      ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[11px] bg-amber-50 border-amber-300 text-amber-800">
+-                          {(() => {
+-                            const t = getTOType(h.dateStr, p.id);
+-                            return t==='vacaciones' ? 'Vacaciones' : t==='libranza' ? 'Libranza' : t==='viaje' ? 'Viaje' : 'Ausencia';
+-                          })()}
+-                        </span>
+-                      : <span className="text-slate-400">—</span>
+-                    )
+-                  ) : ( cell.map((c,i)=>{ const span=formatSpan(c.shift.start,c.shift.end); const dur=minutesDiff(c.shift.start,c.shift.end)/60; return (
++                  {cell.length===0 ? (
++                    hasApprovedTO(h.dateStr, p.id)
++                      ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[11px] bg-amber-50 border-amber-300 text-amber-800">
++                          {(() => { const t = getTOType(h.dateStr, p.id); return t==='vacaciones' ? 'Vacaciones' : t==='libranza' ? 'Libranza' : t==='viaje' ? 'Viaje' : 'Ausencia'; })()}
++                        </span>
++                      : (isClosedDay(h.dateStr)
++                          ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[11px] bg-slate-50">🎌 Festivo</span>
++                          : <span className="text-slate-400">—</span>)
++                  ) : ( cell.map((c,i)=>{ const span=formatSpan(c.shift.start,c.shift.end); const dur=minutesDiff(c.shift.start,c.shift.end)/60; return (
+                     <div key={i} className="rounded-lg border px-2 py-1 mb-1" style={{borderColor:`${p.color}55`,background:`${p.color}10`}}>
+                       <div className="text-[11px] font-medium">{c.shift.label||'Turno'}</div>
+                       {((c.shift.label||"").toLowerCase().includes("refuerzo")) && <span className="ml-1 px-1 border rounded text-[10px]">Refuerzo</span>}
+                       <div className="text-[12px]">{span} <span className="text-[11px] text-slate-500">({dur}h)</span></div>
+                     </div>
+                   )})
+                   )}

@@ -1,0 +1,24 @@
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@
+ function FestivosPanel({ state, up }){
+   return (
+     <Card title="Festivos (2025)">
+       <div className="grid grid-cols-12 gap-2">
+         <div className="col-span-7"><label className="text-xs">Provincia</label><select value={state.province} onChange={(e)=>up(['province'],e.target.value)} className="w-full px-2 py-1 rounded border">{Object.keys(HOLIDAYS_2025).map(p=> <option key={p} value={p}>{p}</option>)}</select></div>
+-        <div className="col-span-5 flex items-end"><label className="text-xs flex items-center gap-2"><input type="checkbox" checked={state.consumeVacationOnHoliday} onChange={(e)=>up(['consumeVacationOnHoliday'],e.target.checked)} /> Consumir vacaciones en festivos</label></div>
++        <div className="col-span-5 flex flex-col justify-end gap-2">
++          <label className="text-xs flex items-center gap-2">
++            <input type="checkbox" checked={state.consumeVacationOnHoliday} onChange={(e)=>up(['consumeVacationOnHoliday'],e.target.checked)} />
++            Consumir vacaciones en festivos
++          </label>
++          <label className="text-xs flex items-center gap-2">
++            <input type="checkbox" checked={state.closeOnHolidays} onChange={(e)=>up(['closeOnHolidays'], e.target.checked)} />
++            Cerrar tienda en festivos oficiales
++          </label>
++        </div>
+         <div className="col-span-12 text-xs bg-slate-50 border rounded p-2">{(HOLIDAYS_2025[state.province]||[]).join(', ') || 'Sin datos'}</div>
+       </div>
+     </Card>
+   );
+ }
