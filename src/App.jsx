@@ -676,18 +676,24 @@ function forceAssign(dateStr, assignmentIndex, personId){
       const payload = { ...data.payload };
       if (!payload.conciliacion) payload.conciliacion = safeConciliacion();
       if (typeof payload.applyConciliation === 'undefined') payload.applyConciliation = true;
-      if (!payload.refuerzoPolicy) { payload.refuerzoPolicy = {
+      if (!payload.refuerzoPolicy) {
+        payload.refuerzoPolicy = {
           allowedMonths:[1,2,3,4,5,9,10,11,12],
           includeSaturdays:false,
           maxPerWeekPerPerson:1,
           maxPerMonthPerPerson:4,
           horizonDefault:'fin',
-          goalFill:true, skipPast:true,
-          maxEscalation:3, weekBoost:1, monthBoost:2
-        }; }
+          goalFill:true,
+          skipPast:true,
+          maxEscalation:3,
+          weekBoost:1,
+          monthBoost:2
+        };
+      }
+; }
 
       // Defaults de refuerzoPolicy si falta
-};
+}
       }
 
       // Defaults de offPolicy si falta
