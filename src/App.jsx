@@ -316,10 +316,13 @@ function scoreConciliacionBreakdown({assignments, people, startDate, weeks, conc
 
 // Mejoras locales (micro-swaps en el mismo día)
 
-function improveConciliation({assignments, people, startDate, weeks, overrides, conciliacion}){
+function improveConciliation({assignments, people, startDate, weeks, overrides, conciliacion, timeOffs}){
   conciliacion = safeConciliacion(conciliacion);
   const best = JSON.parse(JSON.stringify(assignments));
   let bestScore = scoreConciliacion({assignments:best, people, startDate, weeks, conciliacion});
+
+  // índice de ausencias: { personId -> Map('YYYY-MM-DD' -> entry) }
+  const indexTO = indexTimeOff(timeOffs || []);
 
   for (let w=0; w<weeks; w++){
     for (let d=0; d<7; d++){
@@ -337,9 +340,10 @@ function improveConciliation({assignments, people, startDate, weeks, overrides, 
 
         for (const p2 of people){
           if (p2.id === A.personId) continue;
-          if (p2.id === offW) continue; // respeta semana OFF
+          if (p2.id === offW) continue;                            // respeta semana OFF
+          if (indexTO.get(p2.id)?.has(dateStr)) continue;          // NO mover si p2 tiene time off ese día
 
-          // NO DOBLAR: si p2 ya tiene otro turno ese día, salta
+          // NO doblar turnos en el mismo día
           const alreadyToday = cell.some((x,idx)=> idx!==i && x.personId === p2.id);
           if (alreadyToday) continue;
 
@@ -348,14 +352,16 @@ function improveConciliation({assignments, people, startDate, weeks, overrides, 
 
           const newScore = scoreConciliacion({assignments:best, people, startDate, weeks, conciliacion});
           if (newScore < bestScore){
-            bestScore = newScore} else {
-            A.personId = oldPid}
+            bestScore = newScore;
+          } else {
+            A.personId = oldPid;
+          }
         }
       }
     }
   }
-  return best}
-
+  return best;
+}
 
 // Picos
 function thanksgivingDate(year){ let d = new Date(year,10,1); while(d.getDay()!==4) d.setDate(d.getDate()+1); d.setDate(d.getDate()+21); return d}
@@ -769,7 +775,7 @@ async function cloudSave() { setUI(prev=>({...prev, sync:"loading"}));
     startDate,
     weeks: state.weeks,
     overrides: state.overrides,
-    conciliacion: safeConciliacion(state.conciliacion)
+    conciliacion: safeConciliacion(state.conciliacion), timeOffs: state.timeOffs
   }), [assignments, state.people, startDate, state.weeks, state.overrides, state.conciliacion]);
 
   // Usar ASS para pintar/expotar
