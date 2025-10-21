@@ -706,7 +706,7 @@ function forceAssign(dateStr, assignmentIndex, personId){
     if (typeof payload.applyConciliation === 'undefined') payload.applyConciliation = true;
 
     // Defaults de refuerzoPolicy
-    if (!payload.refuerzoPolicy) {
+if (!payload.refuerzoPolicy) {
       payload.refuerzoPolicy = {
         allowedMonths:[1,2,3,4,5,9,10,11,12],
         includeSaturdays:false,
@@ -719,10 +719,13 @@ function forceAssign(dateStr, assignmentIndex, personId){
         weekBoost:1,
         monthBoost:2
       }
+      
+      // Defaults SIEMPRE para cierre en festivos y cierres extra
       if (payload.closeOnHolidays===undefined) payload.closeOnHolidays = true;
       if (!Array.isArray(payload.closedExtraDates)) payload.closedExtraDates = [];
-;
-    }
+if (payload.closeOnHolidays===undefined) payload.closeOnHolidays = true;
+      if (!Array.isArray(payload.closedExtraDates)) payload.closedExtraDates = [];
+}
 
     // Defaults de offPolicy
     if (!payload.offPolicy) {
