@@ -669,7 +669,8 @@ export default function App(){
       startDate, weeks:state.weeks, people:state.people,
       weekdayShifts:state.weekdayShifts, weekendShift:state.weekendShift,
       timeOffs:state.timeOffs, events:state.events, refuerzoWeekdayShift:state.refuerzoWeekdayShift,
-      overrides: state.overrides, rules: state.rules, province: state.province, closeOnHolidays: state.closeOnHolidays, closedExtraDates: state.closedExtraDates}), [state, startDate]);
+      overrides: state.overrides, rules: state.rules
+    }), [state, startDate]);
 
   const baseControls=useMemo(()=> buildControls({
       assignments:base.assignments, people:state.people,
