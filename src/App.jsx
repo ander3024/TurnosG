@@ -982,9 +982,7 @@ async function cloudSave() { setUI(prev=>({...prev, sync:"loading"}));
             }}
             annualTarget={state.annualTargetHours}
           />
-<span className="text-sm">{p.name}</span></span>): (<span className="text-red-600 text-sm">⚠ Falta asignar</span>)}</div>
-                  </div>
-                ))}
+
       </div>
     </div>
   )}
@@ -1187,7 +1185,7 @@ function SwapsPanel({ state, setState, assignments, isAdmin, currentUser }){
                 </div>
               </div>
             )
-          ))}
+          )}
         </div>
       </div>
     </Card>
