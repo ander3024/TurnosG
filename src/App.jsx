@@ -412,6 +412,10 @@ function peopleAvailableThatDay({people, startDate, dateStr, timeOffs}){
   return set.size}
 
 // Propuesta para cerrar horas CON CAPACIDAD (no generará días "pendientes")
+
+
+
+
 function proponerCierreHoras({
   assignments,
   people,
@@ -423,141 +427,48 @@ function proponerCierreHoras({
   weekendShift = {start:'10:00', end:'22:00'},
   events = [],
   timeOffs = [],
-  policy = { allowedMonths:[1,2,3,4,5,9,10,11,12], maxPerWeekPerPerson:1, maxPerMonthPerPerson:4 }
+  policy = { allowedMonths:[1,2,3,4,5,9,10,11,12], includeSaturdays:false, maxPerWeekPerPerson:1, maxPerMonthPerPerson:4, goalFill:true, skipPast:true, maxEscalation:3, weekBoost:1, monthBoost:2 }
 }){
-  // minutos ya trabajados en el periodo
-  const minPorPersona = horasPeriodoPorPersona(assignments, people);
-  // ordena por quien más necesita
-  const faltantes = people.map(p => ({
-      id:p.id,
-      need: Math.max(0, annualTarget*60 - (minPorPersona.get(p.id)||0))
-    }))
-    .sort((a,b)=> b.need - a.need);
-
-  // capacidad por día (para no pasarnos)
-  const propuestas = [];
-  const proposedPerDay = new Map(); // ds -> count propuestos
-  // pre-cálculo: nº de slots base por día (sin extras)
+  // ==== helpers capacidad ====
   function baseSlotsForDate(ds){
     const isWE = isWeekend(parseDateValue(ds));
-    return isWE ? 1 : (weekdayShifts?.length || 1)}
-  // asignados ahora mismo (ASS/assignments) ese día
+    return isWE ? 1 : (weekdayShifts?.length || 1);
+  }
   function currentSlotsCount(ds){
     const cell = assignments[ds] || [];
-    return cell.length}
-
-
-  // Reglas de reparto (meses permitidos y topes por semana/mes)
-// recorrido por necesidad
-  for (const fp of faltantes){
-    let need = fp.need; if (need <= 0) continue;
-
-    for (let w=0; w<weeks && need>0; w++){
-      for (let d=0; d<(policy.includeSaturdays?6:5) && need>0; d++){ // L–V o L–S
-        const ds = toDateValue(addDays(startDate, w*7+d));
-        const isWE = isWeekend(parseDateValue(ds));
-
-        // si la persona ya trabaja ese día, no proponer (evitamos islas)
-        const yaTrabaja = (assignments[ds]||[]).some(c=>c.personId===fp.id);
-        if (yaTrabaja) continue;
-
-        // capacidad del día:
-        const personasDisponibles = peopleAvailableThatDay({people, startDate, dateStr: ds, timeOffs});
-        const extrasExistentes    = countExtrasForDate(events, ds, isWE); // extras ya en calendario
-        const baseSlots           = baseSlotsForDate(ds);
-        const yaAsignados         = currentSlotsCount(ds);
-        const yaPropuestos        = proposedPerDay.get(ds) || 0;
-
-        // Máximo que podría soportar el día SIN dejar "pendiente":
-        // disponibles >= (slots_base + extras_existentes + ya_propuestos + NUEVO)
-        
-        // Capacidad real: personas libres menos (ya asignados + ya propuestos)
-        const capacidadLibre = personasDisponibles - (yaAsignados + yaPropuestos);
-        if (capacidadLibre <= 0) continue; // no cabe ni uno más
-
-        // filtro por mes permitido
-        const mm = parseDateValue(ds).getMonth()+1;
-        if (allowedSet.size && !allowedSet.has(mm)) continue;
-
-        // topes por semana/persona y mes/persona
-        const wkK = weekKey(ds, fp.id);
-        const moK = monthKey(ds, fp.id);
-        const wCnt = weekCount.get(wkK)||0;
-        const mCnt = monthCount.get(moK)||0;
-        if (wCnt >= (policy.maxPerWeekPerPerson||1)) continue;
-        if (mCnt >= (policy.maxPerMonthPerPerson||4)) continue;
-
-        // ok, proponemos 1 refuerzo ese día para esta persona
-
-        propuestas.push({ dateStr: ds, personId: fp.id, shift: baseShift, label: 'Refuerzo conciliación' });
-        weekCount.set(wkK, wCnt+1);
-        monthCount.set(moK, mCnt+1);
-        proposedPerDay.set(ds, yaPropuestos + 1);
-
-        need -= minutesDiff(baseShift.start, baseShift.end)}
+    return cell.length;
+  }
+  function weekIndexFromDate(startDate, dateStr){
+    const d0 = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+    const d  = parseDateValue(dateStr);
+    const diff = Math.floor((d - d0) / (24*3600*1000));
+    return Math.floor(diff / 7);
+  }
+  function peopleAvailableThatDay2({people, startDate, dateStr, timeOffs}){
+    const w = weekIndexFromDate(startDate, dateStr);
+    const offId = computeOffPersonId(people, w);
+    const set = new Set(people.map(p=>p.id));
+    set.delete(offId);
+    const indexTO = indexTimeOff(timeOffs);
+    for (const p of people){
+      if (indexTO.get(p.id)?.has(dateStr)) set.delete(p.id);
     }
+    return set.size;
   }
 
-
+  // ==== parámetros / límites ====
   const allowedSet = new Set(policy.allowedMonths||[]);
-  const weekCount = new Map(); // key: personId|YYYY-WW -> count
-  const monthCount = new Map(); // key: personId|YYYY-MM -> count
-  function weekKey(ds, pid){
-    const d = parseDateValue(ds);
-    const y = d.getFullYear();
-    const jan4 = new Date(y,0,4);
-    const week1 = new Date(jan4.getFullYear(),0,4 - ((jan4.getDay()+6)%7));
-    const wk = Math.floor((d - week1)/(7*24*3600*1000)) + 1;
-    return pid+'|'+y+'-'+wk}
-  function monthKey(ds, pid){
-    const d = parseDateValue(ds);
-    const y = d.getFullYear(), m = (d.getMonth()+1+'').padStart(2,'0');
-    return pid+'|'+y+'-'+m}
+  const todayDS = toDateValue(new Date());
+  const useSkipPast = policy.skipPast!==false;
 
-  // Convertimos propuestas en eventos por día: count propuestos -> weekdaysExtraSlots
-  const eventosByDay = new Map(); // ds -> count
-  for (const p of propuestas){
-    const c = eventosByDay.get(p.dateStr) || 0;
-    eventosByDay.set(p.dateStr, c+1)}
-  const eventosSugeridos = [...eventosByDay.entries()].map(([ds,count]) => ({
-    label: 'Refuerzo conciliación',
-    start: ds,
-    end: ds,
-    weekdaysExtraSlots: count,
-    weekendExtraSlots: 0
-  }));
-
-  return { propuestas, eventosSugeridos }}
-
-// ===================== App (UI completa con login + nube) =====================
-
-
-function proponerCierreHoras({
-  assignments,
-  people,
-  startDate,
-  weeks,
-  annualTarget,
-  baseShift = {start:'12:00', end:'20:00'},
-  weekdayShifts = [{start:'10:00', end:'18:00'}],
-  weekendShift = {start:'10:00', end:'22:00'},
-  events = [],
-  timeOffs = [],
-  policy = { allowedMonths:[1,2,3,4,5,9,10,11,12], includeSaturdays:false, maxPerWeekPerPerson:1, maxPerMonthPerPerson:4 }
-}){
-  // minutos ya trabajados en el periodo
+  // minutos ya trabajados + orden por necesidad
   const minPorPersona = horasPeriodoPorPersona(assignments, people);
-
-  // Orden de necesidad (quien más déficit tiene primero)
-  const faltantes = people.map(p => ({
+  const faltantesBase = people.map(p => ({
     id:p.id,
     need: Math.max(0, annualTarget*60 - (minPorPersona.get(p.id)||0))
   })).sort((a,b)=> b.need - a.need);
 
-  // ==== helpers/contadores (ANTES del bucle; evita TDZ) ====
-  const allowedSet = new Set(policy.allowedMonths||[]);
-  const weekCount = new Map();   // clave: personId|YYYY-WW
-  const monthCount = new Map();  // clave: personId|YYYY-MM
+  // contadores semana/mes para topes por persona
   function weekKey(ds, pid){
     const d = parseDateValue(ds);
     const y = d.getFullYear();
@@ -572,61 +483,100 @@ function proponerCierreHoras({
     return pid+'|'+y+'-'+m;
   }
 
-  // Capacidad día
-  function baseSlotsForDate(ds){
-    const isWE = isWeekend(parseDateValue(ds));
-    return isWE ? 1 : (weekdayShifts?.length || 1);
-  }
-  function currentSlotsCount(ds){
-    const cell = assignments[ds] || [];
-    return cell.length;
-  }
-
+  // propuesta acumulada
   const propuestas = [];
-  const proposedPerDay = new Map(); // ds -> count propuestos
+  const proposedPerDay = new Map(); // ds -> count
+  const weekCount = new Map();      // pid|YYYY-WW -> count
+  const monthCount = new Map();     // pid|YYYY-MM -> count
 
-  // ==== reparto ====
-  for (const fp of faltantes){
-    let need = fp.need;
-    if (need <= 0) continue;
+  // función de una pasada con topes dados
+  function passWithCaps({weekCap, monthCap, includeSaturdays}){
+    // clona array para “consumir” need a medida que asignamos
+    const faltantes = faltantesBase.map(x=>({id:x.id, need:x.need}));
+    // velocidad: mapa para lookup de need
+    const needMap = new Map(faltantes.map(x=>[x.id,x]));
 
-    for (let w=0; w<weeks && need>0; w++){
-      for (let d=0; d<(policy.includeSaturdays?6:5) && need>0; d++){ // L–V o L–S
-        const ds = toDateValue(addDays(startDate, w*7+d));
+    for (const fp of faltantes){
+      let need = fp.need;
+      if (need <= 0) continue;
 
-        // si ya trabaja ese día, no proponer
-        if ((assignments[ds]||[]).some(c=>c.personId===fp.id)) continue;
+      for (let w=0; w<weeks && need>0; w++){
+        for (let d=0; d<(includeSaturdays?6:5) && need>0; d++){ // L–V o L–S
+          const ds = toDateValue(addDays(startDate, w*7+d));
+          if (useSkipPast && ds < todayDS) continue;
 
-        // capacidad (sin dejar pendiente)
-        const personasDisponibles = peopleAvailableThatDay({people, startDate, dateStr: ds, timeOffs});
-        const yaAsignados   = currentSlotsCount(ds);
-        const yaPropuestos  = proposedPerDay.get(ds) || 0;
-        const capacidadLibre = personasDisponibles - (yaAsignados + yaPropuestos);
-        if (capacidadLibre <= 0) continue;
+          // si la persona ya trabaja ese día, no proponer
+          if ((assignments[ds]||[]).some(c=>c.personId===fp.id)) continue;
 
-        // mes permitido
-        const mm = parseDateValue(ds).getMonth()+1;
-        if (allowedSet.size && !allowedSet.has(mm)) continue;
+          // capacidad del día: no dejar “pendiente”
+          const personasDisponibles = peopleAvailableThatDay2({people, startDate, dateStr: ds, timeOffs});
+          const yaAsignados   = currentSlotsCount(ds);
+          const yaPropuestos  = proposedPerDay.get(ds) || 0;
+          const capacidadLibre = personasDisponibles - (yaAsignados + yaPropuestos);
+          if (capacidadLibre <= 0) continue;
 
-        // topes por semana/mes
-        const wkK = weekKey(ds, fp.id);
-        const moK = monthKey(ds, fp.id);
-        const wCnt = weekCount.get(wkK)||0;
-        const mCnt = monthCount.get(moK)||0;
-        if (wCnt >= (policy.maxPerWeekPerPerson||1)) continue;
-        if (mCnt >= (policy.maxPerMonthPerPerson||4)) continue;
+          // mes permitido
+          const mm = parseDateValue(ds).getMonth()+1;
+          if (allowedSet.size && !allowedSet.has(mm)) continue;
 
-        // propuesta
-        propuestas.push({ dateStr: ds, personId: fp.id, shift: baseShift, label: 'Refuerzo conciliación' });
-        weekCount.set(wkK, wCnt+1);
-        monthCount.set(moK, mCnt+1);
-        proposedPerDay.set(ds, yaPropuestos + 1);
-        need -= minutesDiff(baseShift.start, baseShift.end);
+          // topes por semana/mes
+          const wkK = weekKey(ds, fp.id);
+          const moK = monthKey(ds, fp.id);
+          const wCnt = weekCount.get(wkK)||0;
+          const mCnt = monthCount.get(moK)||0;
+          if (wCnt >= (weekCap||1)) continue;
+          if (mCnt >= (monthCap||4)) continue;
+
+          // ok, propuesta
+          propuestas.push({ dateStr: ds, personId: fp.id, shift: baseShift, label: 'Refuerzo conciliación' });
+          weekCount.set(wkK, wCnt+1);
+          monthCount.set(moK, mCnt+1);
+          proposedPerDay.set(ds, yaPropuestos + 1);
+
+          need -= minutesDiff(baseShift.start, baseShift.end);
+          needMap.get(fp.id).need = need;
+        }
       }
     }
   }
 
-  // propuestas -> eventos (suma por día)
+  // 1ª pasada con tus topes actuales
+  passWithCaps({
+    weekCap: (policy.maxPerWeekPerPerson||1),
+    monthCap:(policy.maxPerMonthPerPerson||4),
+    includeSaturdays: !!policy.includeSaturdays
+  });
+
+  // ¿Queda déficit? Escaladito en varias pasadas
+  if (policy.goalFill){
+    const maxEsc = Math.max(0, policy.maxEscalation||0);
+    const wBoost = Math.max(0, policy.weekBoost||0);
+    const mBoost = Math.max(0, policy.monthBoost||0);
+
+    for (let esc=1; esc<=maxEsc; esc++){
+      // si ya hemos propuesto algo para todos, comprobamos si aún queda gente por debajo
+      // Recalcula need restante con lo ya propuesto:
+      const addMinByPerson = new Map(people.map(p=>[p.id,0]));
+      for (const p of propuestas){
+        addMinByPerson.set(p.personId, (addMinByPerson.get(p.personId)||0) + minutesDiff(baseShift.start, baseShift.end));
+      }
+      let stillDeficit = false;
+      for (const pid of people.map(x=>x.id)){
+        const done = (minPorPersona.get(pid)||0) + (addMinByPerson.get(pid)||0);
+        const left = annualTarget*60 - done;
+        if (left > 0) { stillDeficit = true; break; }
+      }
+      if (!stillDeficit) break;
+
+      passWithCaps({
+        weekCap: (policy.maxPerWeekPerPerson||1) + esc*(wBoost||0),
+        monthCap:(policy.maxPerMonthPerPerson||4) + esc*(mBoost||0),
+        includeSaturdays: !!policy.includeSaturdays
+      });
+    }
+  }
+
+  // Agrupa propuestas en eventos (slots L–V)
   const eventosByDay = new Map();
   for (const p of propuestas){
     const c = eventosByDay.get(p.dateStr) || 0;
@@ -691,7 +641,7 @@ export default function App(){
       enableCoverOnVacationDays: true,
       coverDays: [3,4,5]
     },
-    refuerzoPolicy:{ allowedMonths:[1,2,3,4,5,9,10,11,12], includeSaturdays:false, maxPerWeekPerPerson:1, maxPerMonthPerPerson:4, horizonDefault:'fin' },
+    refuerzoPolicy:{ allowedMonths:[1,2,3,4,5,9,10,11,12], includeSaturdays:false, maxPerWeekPerPerson:1, maxPerMonthPerPerson:4, horizonDefault:'fin', goalFill:true, skipPast:true, maxEscalation:3, weekBoost:1, monthBoost:2 },
     managed:{ lastConciliationBatchId:null }
 });
 function forceAssign(dateStr, assignmentIndex, personId){
@@ -723,14 +673,7 @@ function forceAssign(dateStr, assignmentIndex, personId){
       if (typeof payload.applyConciliation === 'undefined') payload.applyConciliation = true;
 
       // Defaults de refuerzoPolicy si falta
-      if (!payload.refuerzoPolicy) {
-        payload.refuerzoPolicy = {
-          allowedMonths:[1,2,3,4,5,9,10,11,12],
-          includeSaturdays:false,
-          maxPerWeekPerPerson:1,
-          maxPerMonthPerPerson:4,
-          horizonDefault:'fin'
-        };
+      if (!payload.refuerzoPolicy) { payload.refuerzoPolicy = { allowedMonths:[1,2,3,4,5,9,10,11,12], includeSaturdays:false, maxPerWeekPerPerson:1, maxPerMonthPerPerson:4, horizonDefault:'fin', goalFill:true, skipPast:true, maxEscalation:3, weekBoost:1, monthBoost:2 }; };
       }
 
       // Defaults de offPolicy si falta
