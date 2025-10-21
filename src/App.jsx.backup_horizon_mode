@@ -844,7 +844,7 @@ export default function App(){
           <SwapsPanel state={state} setState={setState} assignments={ASS}  isAdmin={isAdmin} currentUser={auth.user} />
           {isAdmin && <RefuerzosPanel state={state} up={up} />}
           {isAdmin && <GeneradorPicos state={state} up={up} />}
-                    <PropuestaCierre
+          <PropuestaCierre
             state={state}
             startDate={startDate}
             weeks={state.weeks}
@@ -1393,10 +1393,11 @@ function GeneradorPicos({ state, up }){
     </Card>
   );
 }
+
 function PropuestaCierre({ state, startDate, weeks, people, assignments, onApply, annualTarget }){
   const [sugs,setSugs] = useState(null);
   const [mode,setMode] = useState('replace'); // 'replace' | 'append'
-  const [horizon,setHorizon] = useState(state.refuerzoPolicy?.horizonDefault || 'fin'); // 'visible' | 'fin'
+  const [horizon, setHorizon] = useState(state.refuerzoPolicy?.horizonDefault || 'fin'); // 'visible' | 'fin'
 
   function calcular(){
     let weeksH = weeks;
@@ -1412,8 +1413,7 @@ function PropuestaCierre({ state, startDate, weeks, people, assignments, onApply
       weekdayShifts: state.weekdayShifts,
       weekendShift: state.weekendShift,
       events: state.events,
-      timeOffs: state.timeOffs,
-      policy: state.refuerzoPolicy
+      timeOffs: state.timeOffs
     });
     setSugs({ propuestas, eventosSugeridos });
   }
@@ -1433,7 +1433,7 @@ function PropuestaCierre({ state, startDate, weeks, people, assignments, onApply
 
   return (
     <Card title="Refuerzo de conciliación (gestionado)">
-      <div className="flex flex-wrap items-center gap-2 mb-2">
+      <div className="flex items-center gap-2 mb-2">
         <label className="text-sm ml-2 flex items-center gap-2">
           Horizonte:
           <select value={horizon} onChange={e=>setHorizon(e.target.value)} className="border rounded px-2 py-1">
@@ -1441,14 +1441,11 @@ function PropuestaCierre({ state, startDate, weeks, people, assignments, onApply
             <option value="visible">Semanas visibles</option>
           </select>
         </label>
-        <label className="text-sm ml-2 flex items-center gap-2">
-          Modo:
-          <select value={mode} onChange={e=>setMode(e.target.value)} className="border rounded px-2 py-1">
-            <option value="replace">Reemplazar anterior</option>
-            <option value="append">Añadir a lo existente</option>
-          </select>
-        </label>
         <button onClick={calcular} className="px-3 py-1.5 rounded-lg border">Calcular propuesta</button>
+        <select value={mode} onChange={e=>setMode(e.target.value)} className="border rounded px-2 py-1">
+          <option value="replace">Aplicar (reemplazar anterior)</option>
+          <option value="append">Aplicar (añadir)</option>
+        </select>
         <button onClick={aplicar} disabled={!sugs} className={`px-3 py-1.5 rounded-lg border ${sugs?'':'opacity-50 cursor-not-allowed'}`}>Aplicar</button>
         <button onClick={eliminar} className="px-3 py-1.5 rounded-lg border text-rose-700">Eliminar refuerzos</button>
       </div>
@@ -1467,6 +1464,7 @@ function PropuestaCierre({ state, startDate, weeks, people, assignments, onApply
     </Card>
   );
 }
+
 
 function ScoreDebugPanel({ assignments, people, startDate, weeks, conciliacion, applyConciliation, onToggleApply }){
   const breakdown = useMemo(()=> scoreConciliacionBreakdown({
