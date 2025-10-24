@@ -114,6 +114,42 @@ function indexTimeOff(timeOffs, opts){
   return map;
 }
 
+
+// --- Helpers fines de semana (consecutivos) ---
+function saturdayOfWeekend(d){
+  const dt = new Date(d);
+  const day = dt.getDay(); // 6=Sat, 0=Sun
+  const sat = new Date(dt);
+  if(day===6){ /* sábado */ }
+  else if(day===0){ sat.setDate(sat.getDate()-1); }
+  else{
+    const dm = (dt.getDay()+6)%7; // 0..6 (L..D)
+    const off = 5 - dm; // 5 = sábado
+    sat.setDate(sat.getDate()+off);
+  }
+  sat.setHours(0,0,0,0);
+  return sat;
+}
+function weekendKeyStr(d){ return toDateValue(saturdayOfWeekend(d)); }
+function workedOnWeekend(assignments, satStr, personId){
+  const sat = assignments[satStr] || [];
+  const sunStr = toDateValue(addDays(parseDateValue(satStr),1));
+  const sun = assignments[sunStr] || [];
+  return sat.some(a=>a.personId===personId) || sun.some(a=>a.personId===personId);
+}
+function countPrevConsecutiveWeekends(assignmentsSoFar, date, personId){
+  // cuenta hacia atrás (sin contar el fin de semana actual)
+  let c=0;
+  const thisSat = saturdayOfWeekend(date);
+  let sat = new Date(thisSat); sat.setDate(sat.getDate()-7);
+  for(let i=0;i<60;i++){
+    const satStr = toDateValue(sat);
+    if(workedOnWeekend(assignmentsSoFar, satStr, personId)){ c++; sat.setDate(sat.getDate()-7); }
+    else break;
+  }
+  return c;
+}
+
 // ===================== Reglas duras convenio =====================
 function respectsRules({personId, date, shift, assignmentsSoFar, weeklyMinutes, weeklyDays, rules}){
   if(!rules?.enforce) return true;
@@ -328,18 +364,22 @@ function dayWorks(assignments, dateStr, personId){
 
 // Fallback de pesos por si vienen vacíos desde localStorage/nube
 function safeConciliacion(c){
-  const def = { penalizaDiaIslaTrabajo:3, penalizaDiaIslaLibre:2, penalizaCortesSemana:1 };
+  const def = { penalizaDiaIslaTrabajo:3, penalizaDiaIslaLibre:2, penalizaCortesSemana:1, penalizaFinDeSemanaExtra:1, penalizaFinesConsecutivos:2 };
   return c ? { ...def, ...c } : def;
 }
 
 // Score de conciliación
+
 function scoreConciliacion({assignments, people, startDate, weeks, conciliacion}){
   conciliacion = safeConciliacion(conciliacion);
   let score = 0;
+
+  // cortes e islas
   for (const p of people){
     for (let w=0; w<weeks; w++){
       const weekDays = [...Array(7)].map((_,i)=> toDateValue(addDays(startDate, w*7+i)));
       const works = weekDays.map(ds => dayWorks(assignments, ds, p.id) ? 1 : 0);
+
       for (let i=1;i<7;i++){
         if (works[i] !== works[i-1]) score += conciliacion.penalizaCortesSemana;
       }
@@ -349,6 +389,23 @@ function scoreConciliacion({assignments, people, startDate, weeks, conciliacion}
       }
     }
   }
+
+  // penalización soft por fines de semana (extra y consecutivos)
+  if (conciliacion.penalizaFinDeSemanaExtra || conciliacion.penalizaFinesConsecutivos){
+    for (const p of people){
+      let totalWE = 0;
+      let consec = 0;
+      for (let w=0; w<weeks; w++){
+        const sat = toDateValue(addDays(startDate, w*7+5));
+        const sun = toDateValue(addDays(startDate, w*7+6));
+        const workedWE = dayWorks(assignments, sat, p.id) || dayWorks(assignments, sun, p.id);
+        if (workedWE){ totalWE++; consec++; } else { consec=0; }
+        if (consec >= 3) score += (conciliacion.penalizaFinesConsecutivos||0);
+      }
+      if (totalWE > 3) score += (totalWE - 3) * (conciliacion.penalizaFinDeSemanaExtra||0);
+    }
+  }
+
   return score;
 }
 
