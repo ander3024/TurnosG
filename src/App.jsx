@@ -2542,7 +2542,9 @@ function AuthenticatedApp(props){
             }annualTarget={state.annualTargetHours}
           />
 
-            )}{(isAdmin && (state?.debug?.weekendAudit===true)) && (<WeekendAuditPanel assignments={ASS} people={state.people} startDate={startDate} weeks={state.weeks} />)}{(isAdmin && (state?.debug?.score===true)) && (<ScoreDebugPanel
+            )}{(isAdmin && (state?.debug?.weekendAudit===true)) && (<Card title="Weekend audit (Admin)">
+  <WeekendAuditPanel assignments={ASS} people={state.people} startDate={startDate} weeks={state.weeks} />
+</Card>)}{(isAdmin && (state?.debug?.score===true)) && (<ScoreDebugPanel
             assignments={ASS}
             people={state.people}
             startDate={startDate}

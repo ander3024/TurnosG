@@ -72,7 +72,7 @@ export default function WeekendAuditPanel({ assignments = {}, people = [], start
   }, [assignments, people, startDate, weeks]);
 
   return (
-    <div className="border rounded-2xl p-4 space-y-4">
+    <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div className="text-sm font-medium">Weekend audit — rango visible</div>
         <div className="text-xs text-slate-500">
