@@ -1,8 +1,8 @@
 diff --git a/src/App.jsx b/src/App.jsx
-index 5770141..2d7f992 100644
+index 7b9d69a..0fbc9cd 100644
 --- a/src/App.jsx
 +++ b/src/App.jsx
-@@ -1415,7 +1415,7 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
+@@ -1414,7 +1414,7 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
                        <span className="text-slate-700">{span}</span>
                        <span className="text-[11px] ml-1 text-slate-500">({dur}h{c.shift.lunchMinutes ? " · comida "+(c.shift.lunchMinutes)+"m" : ""})</span>
                      </div>
