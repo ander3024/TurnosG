@@ -1,0 +1,56 @@
+From 822f84a7064319a3668eb8569e9d8149e0e84395 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Andr=C3=A9s=20Fern=C3=A1ndez?= <andres@careucom.com>
+Date: Sat, 25 Oct 2025 17:22:30 +0000
+Subject: [PATCH] fix(ui): DayModal usa modalDayProp en
+ dateStr/date/assignments
+
+---
+ .../2025-10-25_fix-daymodal-modaldayprop.unified.patch | 10 ++++------
+ src/App.jsx                                            |  6 +++---
+ 2 files changed, 7 insertions(+), 9 deletions(-)
+
+diff --git a/patches/2025-10-25_fix-daymodal-modaldayprop.unified.patch b/patches/2025-10-25_fix-daymodal-modaldayprop.unified.patch
+index 77ce804..628db06 100644
+--- a/patches/2025-10-25_fix-daymodal-modaldayprop.unified.patch
++++ b/patches/2025-10-25_fix-daymodal-modaldayprop.unified.patch
+@@ -1,9 +1,10 @@
+ diff --git a/src/App.jsx b/src/App.jsx
++index 990045f..7b9d69a 100644
+ --- a/src/App.jsx
+ +++ b/src/App.jsx
+-@@
+--      {modalDayProp && (
+-+      {modalDayProp && (
++@@ -2544,9 +2544,9 @@ function AuthenticatedApp(props){
++ 
++        {modalDayProp && (
+          <DayModal
+ -          dateStr={modalDay}
+ -          date={parseDateValue(modalDay)}
+@@ -14,6 +15,3 @@ diff --git a/src/App.jsx b/src/App.jsx
+            people={state.people}
+            onOverride={forceAssign}
+            isAdmin={isAdmin}
+--          onClose={()=>setModalDayProp(null)}
+-+          onClose={()=>setModalDayProp(null)}
+-         />
+diff --git a/src/App.jsx b/src/App.jsx
+index 990045f..7b9d69a 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -2544,9 +2544,9 @@ function AuthenticatedApp(props){
+ 
+        {modalDayProp && (
+         <DayModal
+-          dateStr={modalDay}
+-          date={parseDateValue(modalDay)}
+-          assignments={ASS[modalDay]||[]}
++          dateStr={modalDayProp}
++          date={parseDateValue(modalDayProp)}
++          assignments={ASS[modalDayProp]||[]}
+           people={state.people}
+           onOverride={forceAssign}
+           isAdmin={isAdmin}
+-- 
+2.45.2
+
