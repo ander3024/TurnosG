@@ -4,3 +4,8 @@ build/
 .env
 *.log
 .vscode/
+# Backups locales
+*.bak
+*.backup
+src/App.jsx.bak.*
+src/App.jsx.backup_*
