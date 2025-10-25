@@ -2541,7 +2541,7 @@ function AuthenticatedApp(props){
             }annualTarget={state.annualTargetHours}
           />
 
-            )}{isAdmin && (<ScoreDebugPanel
+            )}{(isAdmin && (state?.debug?.score===true)) && (<ScoreDebugPanel
             assignments={ASS}
             people={state.people}
             startDate={startDate}
