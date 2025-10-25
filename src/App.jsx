@@ -1599,7 +1599,7 @@ function SwapsPanel({ state, setState, assignments, isAdmin, currentUser }){
     const overrides=structuredClone(state.overrides||{});
     overrides[sw.dateA]=overrides[sw.dateA]||{}; overrides[sw.dateB]=overrides[sw.dateB]||{};
     overrides[sw.dateA][keyA]=B.personId; overrides[sw.dateB][keyB]=A.personId;
-    const swaps=state.swaps.map((r,idx)=> idx===i? {...r,status:'aprobada'}:r);
+    const swaps=state.swaps.map((r,idx)=> idx===i? {...r,status:'aprobada', approvedBy:(currentUser?.name||currentUser?.id||"admin"), approvedAt:new Date().toISOString()}:r);
     setState(prev=>({...prev, overrides, swaps }));
   }
   function denySwap(i){ if (!isAdmin) return; setState(prev=>({...prev, swaps: prev.swaps.map((r,idx)=> idx===i? {...r,status:'denegada'}:r)})); }
@@ -2609,3 +2609,14 @@ function AuthenticatedApp(props){
   );
 }
 
+  // Persistencia simple de toggles Admin (localStorage)
+  useEffect(()=>{ try{
+    const raw = localStorage.getItem('gt_debug');
+    if(raw){
+      const dbg = JSON.parse(raw);
+      setState(prev=>({...prev, debug:{...(prev.debug||{}), ...dbg}}));
+    }
+  }catch(_){/* noop */} },[]);
+  useEffect(()=>{ try{
+    localStorage.setItem('gt_debug', JSON.stringify(state.debug||{}));
+  }catch(_){/* noop */} },[state?.debug]);
