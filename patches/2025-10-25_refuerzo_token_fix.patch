@@ -1,0 +1,13 @@
+diff --git a/src/App.jsx b/src/App.jsx
+index 0fbc9cd..e09b9cf 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -1414,7 +1414,7 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
+                       <span className="text-slate-700">{span}</span>
+                       <span className="text-[11px] ml-1 text-slate-500">({dur}h{c.shift.lunchMinutes ? " · comida "+(c.shift.lunchMinutes)+"m" : ""})</span>
+                     </div>
+-                    <div className="flex items-center gap-1">{p? (<span className="chip inline-flex items-center gap-1 px-1.5 py-0.5 rounded-lg" style={{background:`${p.color}20`, border:`1px solid ${p.color}55`}}><span className="h-2.5 w-2.5 rounded" style={{background:p.color}}/><span className="text-sm">{p.name}</span>): (<span className="text-red-600 text-sm">⚠ Falta asignar</span>)}</div>
++                    <div className="flex items-center gap-1">{p ? (<span className="chip inline-flex items-center gap-1 px-1.5 py-0.5 rounded-lg" style={{background:`20`, border:`1px solid 55`}}><span className="h-2.5 w-2.5 rounded" style={{background:p.color}}/><span className="text-sm">{p.name}</span></span>) : (<span className="text-red-600 text-sm">⚠ Falta asignar</span>)}</div>
+                   </div>
+                 );})}
+               </div>
