@@ -2338,6 +2338,17 @@ function VacationPolicyPanel({ state, up }){
 
 
 function AuthenticatedApp(props){
+  // Persistencia simple de toggles Admin (localStorage)
+  useEffect(()=>{ try{
+    const raw = localStorage.getItem("gt_debug");
+    if(raw){
+      const dbg = JSON.parse(raw);
+      setState(prev=>({...prev, debug:{...(prev.debug||{}), ...dbg}}));
+    }
+  }catch(_){/* noop */} },[]);
+  useEffect(()=>{ try{
+    localStorage.setItem("gt_debug", JSON.stringify(state.debug||{}));
+  }catch(_){/* noop */} },[state?.debug]);
   const { auth, setAuth, ui, setUI, showToast,
           state, setState,
           cloud, setCloud, cloudLoad, cloudSave,
@@ -2609,14 +2620,11 @@ function AuthenticatedApp(props){
   );
 }
 
-  // Persistencia simple de toggles Admin (localStorage)
   useEffect(()=>{ try{
-    const raw = localStorage.getItem('gt_debug');
     if(raw){
       const dbg = JSON.parse(raw);
       setState(prev=>({...prev, debug:{...(prev.debug||{}), ...dbg}}));
     }
   }catch(_){/* noop */} },[]);
   useEffect(()=>{ try{
-    localStorage.setItem('gt_debug', JSON.stringify(state.debug||{}));
   }catch(_){/* noop */} },[state?.debug]);
