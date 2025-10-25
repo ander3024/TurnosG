@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import WeekendAuditPanel from "./components/WeekendAuditPanel";
 
 // === Defaults para autoload de usuarios no-admin ===
 const PUBLIC_SPACE = { id: "turnos-2025", readToken: "READ-2025" };
@@ -2542,6 +2543,13 @@ function AuthenticatedApp(props){
 
       <footer className="w-full max-w-[1800px] mx-auto px-6 pb-10 text-xs text-slate-500">Persistencia local + Nube SQLite. </footer>
 
+
+      {/* Audit de fines de semana (solo Admin con ancla) */}
+      {((state?.auth?.role==="admin")||state?.isAdmin) && state?.debug?.weekendAudit===true && (
+        <div className="w-full max-w-[1800px] mx-auto px-6 pb-4">
+          <WeekendAuditPanel state={state} rules={rules} assignments={ASS} />
+        </div>
+      )}
        {modalDayProp && (
         <DayModal
           dateStr={modalDayProp}
