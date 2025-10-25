@@ -1,21 +1,16 @@
 import { useMemo } from "react";
 
 function isWE(dateStr){
-  const d = new Date(dateStr); const dow = d.getDay(); // 0=dom,6=sáb
-  return dow===0 || dow===6;
+  const d = new Date(dateStr); const dow = d.getDay();
+  return dow===0 || dow===6; // dom o sáb
 }
 function fmt(n){ return new Intl.NumberFormat('es-ES').format(n); }
 
 export default function WeekendAuditPanel({ assignments = {}, people = [], startDate, weeks }){
   const data = useMemo(()=>{
-    // Mapa persona -> métricas
-    const map = new Map(people.map(p=>[p.id, {
-      id:p.id, name:p.name, color:p.color,
-      weekends:0, total:0, lastWasWE:false, maxStreak:0, streak:0
-    }]));
+    const map = new Map(people.map(p=>[p.id, {id:p.id, name:p.name, color:p.color, weekends:0, total:0, lastWasWE:false, maxStreak:0, streak:0}]));
     let weDays=0, weSlots=0, weUnassigned=0, totSlots=0;
 
-    // Recorre días visibles (si recibimos startDate+weeks) o todo assignments
     const keys = Object.keys(assignments).sort();
     const from = startDate? new Date(startDate) : null;
     const to   = startDate? new Date(startDate.getTime()+(weeks*7-1)*86400000) : null;
@@ -23,53 +18,43 @@ export default function WeekendAuditPanel({ assignments = {}, people = [], start
     for (const k of keys){
       const inRange = !from || (new Date(k) >= from && new Date(k) <= to);
       if(!inRange) continue;
-      const isWeekend = isWE(k);
+      const weekend = isWE(k);
       const arr = assignments[k] || [];
       totSlots += arr.length;
-      if (isWeekend){ weDays++; weSlots += arr.length; }
-
-      // huecos sin persona
-      if (isWeekend){
-        weUnassigned += arr.filter(a=>!a?.personId).length;
-      }
-
-      // por persona
+      if (weekend){ weDays++; weSlots += arr.length; weUnassigned += arr.filter(a=>!a?.personId).length; }
       for (const a of arr){
         if(!a?.personId) continue;
-        const rec = map.get(a.personId);
-        if (!rec) continue;
+        const rec = map.get(a.personId); if (!rec) continue;
         rec.total++;
-        if (isWeekend){
+        if (weekend){
           rec.weekends++;
-          // racha de findes seguidos (por día, no por slot)
-          if (!rec.lastWasWE){ rec.streak = 1; }
-          else { rec.streak += 1; }
-          if (rec.streak > rec.maxStreak) rec.maxStreak = rec.streak;
+          rec.streak = rec.lastWasWE ? rec.streak+1 : 1;
+          rec.maxStreak = Math.max(rec.maxStreak, rec.streak);
           rec.lastWasWE = true;
         } else {
-          rec.lastWasWE = false;
-          rec.streak = 0;
+          rec.lastWasWE = false; rec.streak = 0;
         }
       }
     }
 
-    const rows = [...map.values()]
-      .map(r=>({
-        ...r,
-        ratio: r.total ? r.weekends / r.total : 0
-      }))
-      .sort((a,b)=> b.weekends - a.weekends);
-
+    const rows = [...map.values()].map(r=>({...r, ratio: r.total ? r.weekends/r.total : 0})).sort((a,b)=> b.weekends - a.weekends);
     const avgWE = rows.length ? rows.reduce((s,r)=>s+r.weekends,0)/rows.length : 0;
-    // top y bottom (outliers)
-    const top3 = rows.slice(0,3);
-    const bottom3 = [...rows].reverse().slice(0,3);
-
-    return {
-      weDays, weSlots, weUnassigned, totSlots,
-      avgWE, rows, top3, bottom3
-    };
+    return { weDays, weSlots, weUnassigned, totSlots, avgWE, rows, top3: rows.slice(0,3), bottom3: [...rows].reverse().slice(0,3) };
   }, [assignments, people, startDate, weeks]);
+
+  function exportCSV(){
+    const rows = data.rows || [];
+    const header = ["id","name","weekends","total","ratio","maxStreak"];
+    const lines = [header.join(",")].concat(rows.map(r=>[
+      r.id, JSON.stringify(r.name), r.weekends, r.total, (r.ratio*100).toFixed(0)+"%", r.maxStreak
+    ].join(",")));
+    const blob = new Blob([lines.join("\n")], {type:"text/csv;charset=utf-8;"});
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "weekend-audit.csv";
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
 
   return (
     <div className="space-y-4">
@@ -82,7 +67,10 @@ export default function WeekendAuditPanel({ assignments = {}, people = [], start
         </div>
       </div>
 
-      {/* Top desequilibrio (más findes) */}
+      <div className="flex justify-end">
+        <button onClick={exportCSV} className="px-3 py-1.5 rounded-lg border text-sm">Exportar CSV</button>
+      </div>
+
       <div className="grid md:grid-cols-3 gap-3">
         {data.top3.map(p=>(
           <div key={p.id} className="rounded-xl border p-3">
@@ -98,7 +86,6 @@ export default function WeekendAuditPanel({ assignments = {}, people = [], start
         ))}
       </div>
 
-      {/* Tabla completa */}
       <div className="overflow-x-auto">
         <table className="w-full text-sm border-collapse">
           <thead>
@@ -129,14 +116,13 @@ export default function WeekendAuditPanel({ assignments = {}, people = [], start
         </table>
       </div>
 
-      {/* Alertas rápidas */}
       <div className="text-xs">
         {data.weUnassigned>0 && (
           <div className="text-rose-600">⚠ Hay {fmt(data.weUnassigned)} huecos de fin de semana sin asignar.</div>
         )}
         {data.rows.length>0 && (
           <div className="text-slate-600">
-            Media WE por persona: <b>{fmt(data.avgWE.toFixed(1))}</b>
+            Media WE por persona: <b>{fmt(Number(data.avgWE).toFixed(1))}</b>
           </div>
         )}
       </div>
