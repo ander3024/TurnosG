@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import WeekendAuditPanel from "./components/WeekendAuditPanel";
 
 // === Defaults para autoload de usuarios no-admin ===
 const PUBLIC_SPACE = { id: "turnos-2025", readToken: "READ-2025" };
@@ -2541,7 +2542,7 @@ function AuthenticatedApp(props){
             }annualTarget={state.annualTargetHours}
           />
 
-            )}{(isAdmin && (state?.debug?.score===true)) && (<ScoreDebugPanel
+            )}{(isAdmin && (state?.debug?.weekendAudit===true)) && (<WeekendAuditPanel assignments={ASS} />)}{(isAdmin && (state?.debug?.score===true)) && (<ScoreDebugPanel
             assignments={ASS}
             people={state.people}
             startDate={startDate}
@@ -2573,6 +2574,16 @@ function AuthenticatedApp(props){
                   onChange={(e)=>up(['debug','score'], e.target.checked)}
                 />
                 Mostrar ScoreDebugPanel
+            <div className="mt-2">
+              <label className="text-sm flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={!!(state?.debug?.weekendAudit)}
+                  onChange={(e)=>up(['debug','weekendAudit'], e.target.checked)}
+                />
+                Mostrar WeekendAuditPanel
+              </label>
+            </div>
               </label>
             </div>
           </section>
