@@ -2565,6 +2565,16 @@ function AuthenticatedApp(props){
         {auth.user.role === 'admin' && (
           <section className="lg:col-span-3 space-y-6">
             <AdminUsersAndPerms auth={auth} />
+            <div className="p-3 border rounded-lg">
+              <label className="text-sm flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={!!(state?.debug?.score)}
+                  onChange={(e)=>up(['debug','score'], e.target.checked)}
+                />
+                Mostrar ScoreDebugPanel
+              </label>
+            </div>
           </section>
         )}
       </main>
