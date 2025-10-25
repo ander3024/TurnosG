@@ -1,9 +1,10 @@
 diff --git a/src/App.jsx b/src/App.jsx
+index 990045f..7b9d69a 100644
 --- a/src/App.jsx
 +++ b/src/App.jsx
-@@
--      {modalDayProp && (
-+      {modalDayProp && (
+@@ -2544,9 +2544,9 @@ function AuthenticatedApp(props){
+ 
+        {modalDayProp && (
          <DayModal
 -          dateStr={modalDay}
 -          date={parseDateValue(modalDay)}
@@ -14,6 +15,3 @@ diff --git a/src/App.jsx b/src/App.jsx
            people={state.people}
            onOverride={forceAssign}
            isAdmin={isAdmin}
--          onClose={()=>setModalDayProp(null)}
-+          onClose={()=>setModalDayProp(null)}
-         />

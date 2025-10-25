@@ -2544,9 +2544,9 @@ function AuthenticatedApp(props){
 
        {modalDayProp && (
         <DayModal
-          dateStr={modalDay}
-          date={parseDateValue(modalDay)}
-          assignments={ASS[modalDay]||[]}
+          dateStr={modalDayProp}
+          date={parseDateValue(modalDayProp)}
+          assignments={ASS[modalDayProp]||[]}
           people={state.people}
           onOverride={forceAssign}
           isAdmin={isAdmin}
