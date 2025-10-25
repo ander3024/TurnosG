@@ -114,42 +114,6 @@ function indexTimeOff(timeOffs, opts){
   return map;
 }
 
-
-// --- Helpers fines de semana (consecutivos) ---
-function saturdayOfWeekend(d){
-  const dt = new Date(d);
-  const day = dt.getDay(); // 6=Sat, 0=Sun
-  const sat = new Date(dt);
-  if(day===6){ /* sábado */ }
-  else if(day===0){ sat.setDate(sat.getDate()-1); }
-  else{
-    const dm = (dt.getDay()+6)%7; // 0..6 (L..D)
-    const off = 5 - dm; // 5 = sábado
-    sat.setDate(sat.getDate()+off);
-  }
-  sat.setHours(0,0,0,0);
-  return sat;
-}
-function weekendKeyStr(d){ return toDateValue(saturdayOfWeekend(d)); }
-function workedOnWeekend(assignments, satStr, personId){
-  const sat = assignments[satStr] || [];
-  const sunStr = toDateValue(addDays(parseDateValue(satStr),1));
-  const sun = assignments[sunStr] || [];
-  return sat.some(a=>a.personId===personId) || sun.some(a=>a.personId===personId);
-}
-function countPrevConsecutiveWeekends(assignmentsSoFar, date, personId){
-  // cuenta hacia atrás (sin contar el fin de semana actual)
-  let c=0;
-  const thisSat = saturdayOfWeekend(date);
-  let sat = new Date(thisSat); sat.setDate(sat.getDate()-7);
-  for(let i=0;i<60;i++){
-    const satStr = toDateValue(sat);
-    if(workedOnWeekend(assignmentsSoFar, satStr, personId)){ c++; sat.setDate(sat.getDate()-7); }
-    else break;
-  }
-  return c;
-}
-
 // ===================== Reglas duras convenio =====================
 function respectsRules({personId, date, shift, assignmentsSoFar, weeklyMinutes, weeklyDays, rules}){
   if(!rules?.enforce) return true;
@@ -364,22 +328,18 @@ function dayWorks(assignments, dateStr, personId){
 
 // Fallback de pesos por si vienen vacíos desde localStorage/nube
 function safeConciliacion(c){
-  const def = { penalizaDiaIslaTrabajo:3, penalizaDiaIslaLibre:2, penalizaCortesSemana:1, penalizaFinDeSemanaExtra:1, penalizaFinesConsecutivos:2 };
+  const def = { penalizaDiaIslaTrabajo:3, penalizaDiaIslaLibre:2, penalizaCortesSemana:1 };
   return c ? { ...def, ...c } : def;
 }
 
 // Score de conciliación
-
 function scoreConciliacion({assignments, people, startDate, weeks, conciliacion}){
   conciliacion = safeConciliacion(conciliacion);
   let score = 0;
-
-  // cortes e islas
   for (const p of people){
     for (let w=0; w<weeks; w++){
       const weekDays = [...Array(7)].map((_,i)=> toDateValue(addDays(startDate, w*7+i)));
       const works = weekDays.map(ds => dayWorks(assignments, ds, p.id) ? 1 : 0);
-
       for (let i=1;i<7;i++){
         if (works[i] !== works[i-1]) score += conciliacion.penalizaCortesSemana;
       }
@@ -389,23 +349,6 @@ function scoreConciliacion({assignments, people, startDate, weeks, conciliacion}
       }
     }
   }
-
-  // penalización soft por fines de semana (extra y consecutivos)
-  if (conciliacion.penalizaFinDeSemanaExtra || conciliacion.penalizaFinesConsecutivos){
-    for (const p of people){
-      let totalWE = 0;
-      let consec = 0;
-      for (let w=0; w<weeks; w++){
-        const sat = toDateValue(addDays(startDate, w*7+5));
-        const sun = toDateValue(addDays(startDate, w*7+6));
-        const workedWE = dayWorks(assignments, sat, p.id) || dayWorks(assignments, sun, p.id);
-        if (workedWE){ totalWE++; consec++; } else { consec=0; }
-        if (consec >= 3) score += (conciliacion.penalizaFinesConsecutivos||0);
-      }
-      if (totalWE > 3) score += (totalWE - 3) * (conciliacion.penalizaFinDeSemanaExtra||0);
-    }
-  }
-
   return score;
 }
 
@@ -693,11 +636,7 @@ export default function App(){
   
   // --- ui feedback (banner + toast) ---
   const [ui, setUI] = useState({ sync:null, toast:null });
-  
-  
-  // Modal día (compartido)
-  const [modalDay, setModalDay] = useState(null);
-function showToast(msg){ setUI(prev=>({...prev, toast:msg})); setTimeout(()=>setUI(prev=>({...prev, toast:null})), 2000); }
+  function showToast(msg){ setUI(prev=>({...prev, toast:msg})); setTimeout(()=>setUI(prev=>({...prev, toast:null})), 2000); }
 
 
 
@@ -725,7 +664,7 @@ function showToast(msg){ setUI(prev=>({...prev, toast:msg})); setTimeout(()=>set
     swaps: [], showArchivedSwaps:false,
     rules: { enforce:true, maxDailyHours:9, maxWeeklyHours:40, minRestHours:12, maxDaysPerWeek:5, maxConsecutiveWeekends:1 },
     applyConciliation: true,
-    conciliacion: { penalizaDiaIslaTrabajo:3, penalizaDiaIslaLibre:2, penalizaCortesSemana:1, penalizaFinDeSemanaExtra:1, penalizaFinesConsecutivos:2 },
+    conciliacion: { penalizaDiaIslaTrabajo:3, penalizaDiaIslaLibre:2, penalizaCortesSemana:1 },
   
     offPolicy: {
       enableLimitOffOnVacationWeek: true,
@@ -770,8 +709,7 @@ function showToast(msg){ setUI(prev=>({...prev, toast:msg})); setTimeout(()=>set
       const data = await api(`/state/${encodeURIComponent(cloud.spaceId)}`, { method:"GET" }, auth.token, extra);
       if(!data.payload){ alert("No hay datos guardados para ese Space ID"); return; }
       const payload = { ...data.payload };
-      payload.conciliacion = safeConciliacion(payload.conciliacion || {});
-if (!payload.conciliacion) payload.conciliacion = safeConciliacion();
+      if (!payload.conciliacion) payload.conciliacion = safeConciliacion();
       if (typeof payload.applyConciliation === 'undefined') payload.applyConciliation = true;
       // Defaults de offPolicy si no existen en la nube
       if (!payload.offPolicy) {
@@ -869,6 +807,7 @@ function goToday(){
   }
   const weeklyStart=useMemo(()=> addDays(startDate, weekIndex*7), [startDate, weekIndex]);
   const canPrev=weekIndex>0, canNext=weekIndex<state.weeks-1, canNextRange=weekIndex<state.weeks-userWeeks;
+  const [modalDay,setModalDay]=useState(null);
 
   // ---------- Auth-only: login screen ----------
   
@@ -923,7 +862,7 @@ if (!auth.user || !auth.token) {
             {ui.sync==="ok" && <span className="px-2 py-1 rounded bg-emerald-100 border border-emerald-300">¡Listo!</span>}
             {ui.sync==="error" && <span className="px-2 py-1 rounded bg-rose-100 border border-rose-300">Error</span>}
             {ui.toast && (<div className="fixed right-4 bottom-4 z-50 bg-black text-white px-3 py-2 rounded-lg shadow">{ui.toast}</div>)}
-            <button onClick={()=>props.setAuth({ token:"", user:null })} className="px-2 py-1 rounded border">Salir</button>
+            <button onClick={doLogout} className="px-2 py-1 rounded border">Salir</button>
           </div>
         </div>
       </header>
@@ -959,62 +898,6 @@ if (!auth.user || !auth.token) {
     );
   }
 
-  // ---------- Exportaciones (CSV/ICS/Nómina) ----------
-  function exportCSV(){
-    const rows = buildCSV(ASS, state.people);
-    const blob = new Blob([rows.join("\\n")], {type:"text/csv;charset=utf-8;"});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = `turnos_${state.startDate}_${state.weeks}w.csv`; a.click();
-    URL.revokeObjectURL(url);
-  }
-  function exportJSON(){
-    const blob = new Blob([JSON.stringify(state,null,2)], {type:'application/json'});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = `turnos_backup_${state.startDate}.json`; a.click();
-    URL.revokeObjectURL(url);
-  }
-  function importJSON(file){
-    const r = new FileReader();
-    r.onload = ()=>{ try{ setState(JSON.parse(r.result)); }catch{ alert('JSON inválido'); } };
-    r.readAsText(file);
-  }
-  function exportICS(personId){
-    const ics = buildICS({ assignments: ASS, people: state.people, personId, startDate, weeks: state.weeks });
-    const blob = new Blob([ics], {type:'text/calendar;charset=utf-8'});
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob); a.download = `turnos_${personId}.ics`; a.click();
-  }
-  function exportPayroll(){
-    const header=['persona','desde','hasta','horas_lv','horas_sd','horas_refuerzo','horas_totales'];
-    const rows=[header.join(',')];
-    const from = parseDateValue(payroll.from), to = parseDateValue(payroll.to);
-    const days=[]; for(let d=new Date(from); d<=to; d=addDays(d,1)) days.push(toDateValue(d));
-    const byPerson=new Map(state.people.map(p=>[p.id,{lv:0,sd:0,ref:0}]));
-    for(const dateStr of days){
-      const cell=ASS[dateStr]||[];
-      for(const a of cell){
-        if(!a.personId) continue;
-        const dur = effectiveMinutes(a.shift)/60;
-        const rec = byPerson.get(a.personId);
-        const isWE = isWeekend(parseDateValue(dateStr));
-        const isRef = (a.shift.label||'').toLowerCase().includes('refuerzo');
-        if(isRef) rec.ref += dur; else if(isWE) rec.sd += dur; else rec.lv += dur;
-      }
-    }
-    for(const p of state.people){
-      const r=byPerson.get(p.id);
-      const total=(r.lv+r.sd+r.ref).toFixed(1);
-      rows.push([p.name,payroll.from,payroll.to,r.lv.toFixed(1),r.sd.toFixed(1),r.ref.toFixed(1),total].join(','));
-    }
-    const blob=new Blob([rows.join("\\n")],{type:'text/csv;charset=utf-8;'});
-    const a=document.createElement('a');
-    a.href=URL.createObjectURL(blob);
-    a.download=`nomina_${payroll.from}_${payroll.to}.csv`;
-    a.click();
-  }
-
 return (
   <AuthenticatedApp
   auth={auth}
@@ -1022,10 +905,7 @@ return (
   ui={ui}
   setUI={setUI}
   showToast={showToast}
-  
-  modalDay={modalDay}
-  setModalDay={setModalDay}
-state={state}
+  state={state}
   setState={setState}
   cloud={cloud}
   setCloud={setCloud}
@@ -1159,67 +1039,37 @@ function ConciliacionPanel({ state, up }){
   );
 }
 
-
-
-function ReglasPanel({ state, up }){
+function ReglasPanel({ state, up, isAdmin }){ if (!isAdmin) return null;
   return (
     <Card title="Reglas duras del convenio">
       <div className="grid grid-cols-12 gap-2">
         <div className="col-span-12 flex items-center gap-2">
+          <label className="text-xs flex items-center gap-2"><input type="checkbox" checked={state.rules.enforce} onChange={(e)=>up(['rules','enforce'], e.target.checked)} /> Enforzar reglas</label>
+        </div>
+        <div className="col-span-4"><label className="text-xs">Máx horas/día</label><input type="number" min={1} max={12} value={state.rules.maxDailyHours} onChange={(e)=>up(['rules','maxDailyHours'], Number(e.target.value))} className="w-full px-2 py-1 rounded border"/></div>
+        <div className="col-span-4"><label className="text-xs">Máx horas/semana</label><input type="number" min={5} max={60} value={state.rules.maxWeeklyHours} onChange={(e)=>up(['rules','maxWeeklyHours'], Number(e.target.value))} className="w-full px-2 py-1 rounded border"/></div>
+        <div className="col-span-4"><label className="text-xs">Descanso mínimo (h)</label><input type="number" min={0} max={24} value={state.rules.minRestHours} onChange={(e)=>up(['rules','minRestHours'], Number(e.target.value))} className="w-full px-2 py-1 rounded border"/></div>
+        <div className="col-span-6">
+          <label className="text-xs">Máx días trabajados/semana</label>
+          <input type="number" min={1} max={7}
+                 value={state.rules.maxDaysPerWeek ?? 5}
+                 onChange={(e)=>up(['rules','maxDaysPerWeek'], Number(e.target.value))}
+                 className="w-full px-2 py-1 rounded border" />
+        </div>
+        <div className="col-span-6">
           <label className="text-xs flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={!!state.rules.enforce}
-              onChange={(e)=>up(['rules','enforce'], e.target.checked)}
-            />
-            Enforzar reglas
+            <input type="checkbox"
+                   checked={(state.rules.maxConsecutiveWeekends||0) > 0}
+                   onChange={(e)=>up(['rules','maxConsecutiveWeekends'], e.target.checked ? 1 : 0)} />
+            Evitar fines de semana consecutivos
           </label>
+          <div className="text-[11px] text-slate-500 mt-1">
+            Si hay alternativas, no asigna el finde a quien lo trabajó la semana anterior.
+          </div>
         </div>
 
-        <div className="col-span-3">
-          <label className="text-xs">Máx horas/día</label>
-          <input
-            type="number" min={1} max={12}
-            value={state.rules.maxDailyHours}
-            onChange={(e)=>up(['rules','maxDailyHours'], Number(e.target.value))}
-            className="w-full px-2 py-1 rounded border"
-          />
-        </div>
-
-        <div className="col-span-3">
-          <label className="text-xs">Máx horas/semana</label>
-          <input
-            type="number" min={5} max={60}
-            value={state.rules.maxWeeklyHours}
-            onChange={(e)=>up(['rules','maxWeeklyHours'], Number(e.target.value))}
-            className="w-full px-2 py-1 rounded border"
-          />
-        </div>
-
-        <div className="col-span-3">
-          <label className="text-xs">Descanso mínimo (h)</label>
-          <input
-            type="number" min={0} max={24}
-            value={state.rules.minRestHours}
-            onChange={(e)=>up(['rules','minRestHours'], Number(e.target.value))}
-            className="w-full px-2 py-1 rounded border"
-          />
-        </div>
-
-        <div className="col-span-3">
-          <label className="text-xs">Fines consecutivos (máx)</label>
-          <input
-            type="number" min={0} max={6}
-            value={state.rules.maxConsecutiveWeekends ?? 1}
-            onChange={(e)=>up(['rules','maxConsecutiveWeekends'], Math.max(0, Number(e.target.value)||0))}
-            className="w-full px-2 py-1 rounded border"
-          />
-        </div>
       </div>
-
-      <p className="mt-2 text-xs text-slate-500">
-        Si no hay turnos encadenados, el descanso mínimo se ignora.
-      </p>
+      <p className="mt-2 text-xs text-slate-500">Si no hay turnos encadenados, el descanso mínimo se ignora.</p>
     </Card>
   );
 }
@@ -2320,10 +2170,6 @@ function AuthenticatedApp(props){
           up, upPerson, forceAssign } = props;
 
   // --- scope admin (robusto tras refactor) ---
-  // Aliases seguros para modal del día (local o via props)
-  const modalDayProp = (typeof modalDay !== 'undefined') ? modalDay : (props.modalDay ?? null);
-  const setModalDayProp = (typeof setModalDay !== 'undefined') ? setModalDay : props.setModalDay;
-
   const __ap_props = (typeof arguments !== "undefined" && arguments.length ? arguments[0] : {});
   const __ap_auth = (typeof auth !== "undefined" && auth) ? auth : (__ap_props && (__ap_props.auth || __ap_props.Auth || null));
   const isAdmin = !!(__ap_auth && __ap_auth.user && __ap_auth.user.role === "admin");
@@ -2403,7 +2249,7 @@ function AuthenticatedApp(props){
             {ui.sync==="ok" && <span className="px-2 py-1 rounded bg-emerald-100 border border-emerald-300">¡Listo!</span>}
             {ui.sync==="error" && <span className="px-2 py-1 rounded bg-rose-100 border border-rose-300">Error</span>}
             {ui.toast && (<div className="fixed right-4 bottom-4 z-50 bg-black text-white px-3 py-2 rounded-lg shadow">{ui.toast}</div>)}
-            <button onClick={()=>props.setAuth({ token:"", user:null })} className="px-2 py-1 rounded border">Salir</button>
+            <button onClick={doLogout} className="px-2 py-1 rounded border">Salir</button>
           </div>
         </div>
       </header>
@@ -2526,7 +2372,7 @@ function AuthenticatedApp(props){
             <div className="grid grid-cols-12 gap-2">
               <div className="col-span-6"><label className="text-xs">Desde</label><input type="date" value={payroll.from} onChange={(e)=>setPayroll({...payroll,from:e.target.value})} className="w-full px-2 py-1 rounded border"/></div>
               <div className="col-span-6"><label className="text-xs">Hasta</label><input type="date" value={payroll.to} onChange={(e)=>setPayroll({...payroll,to:e.target.value})} className="w-full px-2 py-1 rounded border"/></div>
-              <div className="col-span-12"><button onClick={props.exportPayroll} className="px-3 py-1.5 rounded-lg border w-full">Exportar Nómina (CSV)</button></div>
+              <div className="col-span-12"><button onClick={exportPayroll} className="px-3 py-1.5 rounded-lg border w-full">Exportar Nómina (CSV)</button></div>
             </div>
           </Card>
 
@@ -2542,7 +2388,7 @@ function AuthenticatedApp(props){
 
       <footer className="w-full max-w-[1800px] mx-auto px-6 pb-10 text-xs text-slate-500">Persistencia local + Nube SQLite. </footer>
 
-       {modalDayProp && (
+       {modalDay && (
         <DayModal
           dateStr={modalDay}
           date={parseDateValue(modalDay)}
@@ -2550,7 +2396,7 @@ function AuthenticatedApp(props){
           people={state.people}
           onOverride={forceAssign}
           isAdmin={isAdmin}
-          onClose={()=>setModalDayProp(null)}
+          onClose={()=>setModalDay(null)}
         />
       )}
     </div>

@@ -114,42 +114,6 @@ function indexTimeOff(timeOffs, opts){
   return map;
 }
 
-
-// --- Helpers fines de semana (consecutivos) ---
-function saturdayOfWeekend(d){
-  const dt = new Date(d);
-  const day = dt.getDay(); // 6=Sat, 0=Sun
-  const sat = new Date(dt);
-  if(day===6){ /* sábado */ }
-  else if(day===0){ sat.setDate(sat.getDate()-1); }
-  else{
-    const dm = (dt.getDay()+6)%7; // 0..6 (L..D)
-    const off = 5 - dm; // 5 = sábado
-    sat.setDate(sat.getDate()+off);
-  }
-  sat.setHours(0,0,0,0);
-  return sat;
-}
-function weekendKeyStr(d){ return toDateValue(saturdayOfWeekend(d)); }
-function workedOnWeekend(assignments, satStr, personId){
-  const sat = assignments[satStr] || [];
-  const sunStr = toDateValue(addDays(parseDateValue(satStr),1));
-  const sun = assignments[sunStr] || [];
-  return sat.some(a=>a.personId===personId) || sun.some(a=>a.personId===personId);
-}
-function countPrevConsecutiveWeekends(assignmentsSoFar, date, personId){
-  // cuenta hacia atrás (sin contar el fin de semana actual)
-  let c=0;
-  const thisSat = saturdayOfWeekend(date);
-  let sat = new Date(thisSat); sat.setDate(sat.getDate()-7);
-  for(let i=0;i<60;i++){
-    const satStr = toDateValue(sat);
-    if(workedOnWeekend(assignmentsSoFar, satStr, personId)){ c++; sat.setDate(sat.getDate()-7); }
-    else break;
-  }
-  return c;
-}
-
 // ===================== Reglas duras convenio =====================
 function respectsRules({personId, date, shift, assignmentsSoFar, weeklyMinutes, weeklyDays, rules}){
   if(!rules?.enforce) return true;
@@ -364,22 +328,18 @@ function dayWorks(assignments, dateStr, personId){
 
 // Fallback de pesos por si vienen vacíos desde localStorage/nube
 function safeConciliacion(c){
-  const def = { penalizaDiaIslaTrabajo:3, penalizaDiaIslaLibre:2, penalizaCortesSemana:1, penalizaFinDeSemanaExtra:1, penalizaFinesConsecutivos:2 };
+  const def = { penalizaDiaIslaTrabajo:3, penalizaDiaIslaLibre:2, penalizaCortesSemana:1 };
   return c ? { ...def, ...c } : def;
 }
 
 // Score de conciliación
-
 function scoreConciliacion({assignments, people, startDate, weeks, conciliacion}){
   conciliacion = safeConciliacion(conciliacion);
   let score = 0;
-
-  // cortes e islas
   for (const p of people){
     for (let w=0; w<weeks; w++){
       const weekDays = [...Array(7)].map((_,i)=> toDateValue(addDays(startDate, w*7+i)));
       const works = weekDays.map(ds => dayWorks(assignments, ds, p.id) ? 1 : 0);
-
       for (let i=1;i<7;i++){
         if (works[i] !== works[i-1]) score += conciliacion.penalizaCortesSemana;
       }
@@ -389,23 +349,6 @@ function scoreConciliacion({assignments, people, startDate, weeks, conciliacion}
       }
     }
   }
-
-  // penalización soft por fines de semana (extra y consecutivos)
-  if (conciliacion.penalizaFinDeSemanaExtra || conciliacion.penalizaFinesConsecutivos){
-    for (const p of people){
-      let totalWE = 0;
-      let consec = 0;
-      for (let w=0; w<weeks; w++){
-        const sat = toDateValue(addDays(startDate, w*7+5));
-        const sun = toDateValue(addDays(startDate, w*7+6));
-        const workedWE = dayWorks(assignments, sat, p.id) || dayWorks(assignments, sun, p.id);
-        if (workedWE){ totalWE++; consec++; } else { consec=0; }
-        if (consec >= 3) score += (conciliacion.penalizaFinesConsecutivos||0);
-      }
-      if (totalWE > 3) score += (totalWE - 3) * (conciliacion.penalizaFinDeSemanaExtra||0);
-    }
-  }
-
   return score;
 }
 
@@ -725,7 +668,7 @@ function showToast(msg){ setUI(prev=>({...prev, toast:msg})); setTimeout(()=>set
     swaps: [], showArchivedSwaps:false,
     rules: { enforce:true, maxDailyHours:9, maxWeeklyHours:40, minRestHours:12, maxDaysPerWeek:5, maxConsecutiveWeekends:1 },
     applyConciliation: true,
-    conciliacion: { penalizaDiaIslaTrabajo:3, penalizaDiaIslaLibre:2, penalizaCortesSemana:1, penalizaFinDeSemanaExtra:1, penalizaFinesConsecutivos:2 },
+    conciliacion: { penalizaDiaIslaTrabajo:3, penalizaDiaIslaLibre:2, penalizaCortesSemana:1 },
   
     offPolicy: {
       enableLimitOffOnVacationWeek: true,
@@ -770,8 +713,7 @@ function showToast(msg){ setUI(prev=>({...prev, toast:msg})); setTimeout(()=>set
       const data = await api(`/state/${encodeURIComponent(cloud.spaceId)}`, { method:"GET" }, auth.token, extra);
       if(!data.payload){ alert("No hay datos guardados para ese Space ID"); return; }
       const payload = { ...data.payload };
-      payload.conciliacion = safeConciliacion(payload.conciliacion || {});
-if (!payload.conciliacion) payload.conciliacion = safeConciliacion();
+      if (!payload.conciliacion) payload.conciliacion = safeConciliacion();
       if (typeof payload.applyConciliation === 'undefined') payload.applyConciliation = true;
       // Defaults de offPolicy si no existen en la nube
       if (!payload.offPolicy) {
@@ -1159,67 +1101,37 @@ function ConciliacionPanel({ state, up }){
   );
 }
 
-
-
-function ReglasPanel({ state, up }){
+function ReglasPanel({ state, up, isAdmin }){ if (!isAdmin) return null;
   return (
     <Card title="Reglas duras del convenio">
       <div className="grid grid-cols-12 gap-2">
         <div className="col-span-12 flex items-center gap-2">
+          <label className="text-xs flex items-center gap-2"><input type="checkbox" checked={state.rules.enforce} onChange={(e)=>up(['rules','enforce'], e.target.checked)} /> Enforzar reglas</label>
+        </div>
+        <div className="col-span-4"><label className="text-xs">Máx horas/día</label><input type="number" min={1} max={12} value={state.rules.maxDailyHours} onChange={(e)=>up(['rules','maxDailyHours'], Number(e.target.value))} className="w-full px-2 py-1 rounded border"/></div>
+        <div className="col-span-4"><label className="text-xs">Máx horas/semana</label><input type="number" min={5} max={60} value={state.rules.maxWeeklyHours} onChange={(e)=>up(['rules','maxWeeklyHours'], Number(e.target.value))} className="w-full px-2 py-1 rounded border"/></div>
+        <div className="col-span-4"><label className="text-xs">Descanso mínimo (h)</label><input type="number" min={0} max={24} value={state.rules.minRestHours} onChange={(e)=>up(['rules','minRestHours'], Number(e.target.value))} className="w-full px-2 py-1 rounded border"/></div>
+        <div className="col-span-6">
+          <label className="text-xs">Máx días trabajados/semana</label>
+          <input type="number" min={1} max={7}
+                 value={state.rules.maxDaysPerWeek ?? 5}
+                 onChange={(e)=>up(['rules','maxDaysPerWeek'], Number(e.target.value))}
+                 className="w-full px-2 py-1 rounded border" />
+        </div>
+        <div className="col-span-6">
           <label className="text-xs flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={!!state.rules.enforce}
-              onChange={(e)=>up(['rules','enforce'], e.target.checked)}
-            />
-            Enforzar reglas
+            <input type="checkbox"
+                   checked={(state.rules.maxConsecutiveWeekends||0) > 0}
+                   onChange={(e)=>up(['rules','maxConsecutiveWeekends'], e.target.checked ? 1 : 0)} />
+            Evitar fines de semana consecutivos
           </label>
+          <div className="text-[11px] text-slate-500 mt-1">
+            Si hay alternativas, no asigna el finde a quien lo trabajó la semana anterior.
+          </div>
         </div>
 
-        <div className="col-span-3">
-          <label className="text-xs">Máx horas/día</label>
-          <input
-            type="number" min={1} max={12}
-            value={state.rules.maxDailyHours}
-            onChange={(e)=>up(['rules','maxDailyHours'], Number(e.target.value))}
-            className="w-full px-2 py-1 rounded border"
-          />
-        </div>
-
-        <div className="col-span-3">
-          <label className="text-xs">Máx horas/semana</label>
-          <input
-            type="number" min={5} max={60}
-            value={state.rules.maxWeeklyHours}
-            onChange={(e)=>up(['rules','maxWeeklyHours'], Number(e.target.value))}
-            className="w-full px-2 py-1 rounded border"
-          />
-        </div>
-
-        <div className="col-span-3">
-          <label className="text-xs">Descanso mínimo (h)</label>
-          <input
-            type="number" min={0} max={24}
-            value={state.rules.minRestHours}
-            onChange={(e)=>up(['rules','minRestHours'], Number(e.target.value))}
-            className="w-full px-2 py-1 rounded border"
-          />
-        </div>
-
-        <div className="col-span-3">
-          <label className="text-xs">Fines consecutivos (máx)</label>
-          <input
-            type="number" min={0} max={6}
-            value={state.rules.maxConsecutiveWeekends ?? 1}
-            onChange={(e)=>up(['rules','maxConsecutiveWeekends'], Math.max(0, Number(e.target.value)||0))}
-            className="w-full px-2 py-1 rounded border"
-          />
-        </div>
       </div>
-
-      <p className="mt-2 text-xs text-slate-500">
-        Si no hay turnos encadenados, el descanso mínimo se ignora.
-      </p>
+      <p className="mt-2 text-xs text-slate-500">Si no hay turnos encadenados, el descanso mínimo se ignora.</p>
     </Card>
   );
 }

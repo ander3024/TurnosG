@@ -1,0 +1,924 @@
+import React, { useEffect, useMemo, useState } from "react";
+
+// ===================== Config API (proxy Apache → Flask) =====================
+const API_BASE = "/api";
+// ===== Predeterminados para no-admin (ajusta el token):
+const DEFAULT_SPACE_ID = "turnos-2025";
+const DEFAULT_READ_TOKEN = "RTK-4987d8ae5a5f14c0497b59fcd4aeb43602d188ebae1c8680"; // <-- Sustituye por tu token corporativo
+
+// ===================== Helper fetch con/ sin JWT =====================
+async function api(path, opts = {}, token = "", extraHeaders = {}) {
+  const headers = { ...(opts.headers || {}), ...extraHeaders };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  const res = await fetch(`${API_BASE}${path}`, { ...opts, headers });
+  if (!res.ok) {
+    const txt = await res.text();
+    throw new Error(`${res.status} ${txt}`);
+
+  return res.json();
+
+// ===================== Utilidades fecha/hora =====================
+function toDateValue(d) { const pad=(n)=>String(n).padStart(2,"0"); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; }
+function parseDateValue(v){ const [y,m,d]=v.split('-').map(Number); return new Date(y,m-1,d); }
+function addDays(date, days){ const d=new Date(date); d.setDate(d.getDate()+days); return d; }
+function startOfWeekMonday(date){ const d=new Date(date); const day=(d.getDay()+6)%7; d.setDate(d.getDate()-day); d.setHours(0,0,0,0); return d; }
+function isWeekend(date){ const dow=date.getDay(); return dow===6 || dow===0; }
+function minutesFromHHMM(hhmm){ const [h,m]=hhmm.split(':').map(Number); return h*60+(m||0); }
+function minutesDiff(a,b){ return minutesFromHHMM(b)-minutesFromHHMM(a); }
+function effectiveMinutes(shift){
+  const raw = minutesDiff(shift.start, shift.end);
+  const lunch = Math.max(0, Number(shift.lunchMinutes||0));
+  return Math.max(0, raw - lunch);
+
+function formatSpan(a,b){ return `${a}–${b}`; }
+
+// ===================== Catálogos / Festivos 2025 =====================
+const HOLIDAYS_2025 = {
+  "Madrid": [
+    "2025-01-01","2025-01-06","2025-03-20","2025-04-17","2025-05-01","2025-05-02",
+    "2025-07-25","2025-08-15","2025-10-12","2025-12-25"
+  ],
+  "Barcelona": [
+    "2025-01-01","2025-01-06","2025-04-17","2025-04-21","2025-05-01","2025-06-24","2025-08-15","2025-09-11","2025-10-12","2025-11-01","2025-12-06","2025-12-08","2025-12-25","2025-12-26"
+  ],
+};
+
+// ===================== Persistencia local =====================
+const STORAGE_KEY = "gestor-turnos-4p-v10";
+function usePersistentState(defaultValue){
+  const [state,setState]=useState(()=>{ try{ const raw=localStorage.getItem(STORAGE_KEY); return raw?JSON.parse(raw):defaultValue; }catch{ return defaultValue; } });
+  useEffect(() => {
+  if (typeof window !== "undefined") {
+    window.__OFF_POLICY__ = state.offPolicy || {};
+    window.__CUSTOM_HOLIDAYS__ = state.customHolidaysByYear || {};
+  }
+
+  const [loginForm, setLoginForm] = useState({ email:"", password:"" });
+  async function doLogin(e){ e?.preventDefault();
+    const data = await api("/auth/login",{ method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(loginForm) });
+    setAuth({ token:data.token, user:data.user });
+
+  function doLogout(){
+    try { localStorage.removeItem("turnos_auth"); } catch {}
+    if (typeof setAutoCloudLoaded === "function") { try { setAutoCloudLoaded(false); } catch {} }
+    setAuth({ token:"", user:null });
+
+  // --- ui feedback (banner + toast) ---
+  const [ui, setUI] = useState({ sync:null, toast:null });
+  function showToast(msg){ setUI(prev=>({...prev, toast:msg})); setTimeout(()=>setUI(prev=>({...prev, toast:null})), 2000); }
+
+  // --- permisos UI ---
+  const isAdmin = auth.user?.role === 'admin';
+
+  // ---------- Estado principal ----------
+  const defaultStart = startOfWeekMonday(new Date());
+  const [state,setState]=usePersistentState({
+    people:[{id:"P1",name:"Persona A",color:"#1d4ed8",offset:0},{id:"P2",name:"Persona B",color:"#059669",offset:1},{id:"P3",name:"Persona C",color:"#d97706",offset:2},{id:"P4",name:"Persona D",color:"#dc2626",offset:3}],
+    startDate: toDateValue(defaultStart), weeks: 8,
+    annualTargetHours: 1560, vacationDaysNatural: 25, travelDefaultHours: 8,
+    weekdayShifts:[{start:"10:00",end:"18:00",label:"Mañana",lunchMinutes:60},{start:"14:00",end:"22:00",label:"Tarde",lunchMinutes:0}],
+    weekendShift:{start:"10:00",end:"22:00",label:"Finde"},
+    refuerzoWeekdayShift:{start:"12:00",end:"20:00",label:"Refuerzo",lunchMinutes:60},
+    events: [], timeOffs: [],
+    security:{ adminPin:"1234", personPins:{P1:"1111",P2:"2222",P3:"3333",P4:"4444"} },
+    rebalance:false,
+    province:"Madrid", consumeVacationOnHoliday:false,
+    closeOnHolidays: true,
+    closedExtraDates: [],
+    customHolidaysByYear: {},
+    overrides:{},
+    swaps: [], showArchivedSwaps:false,
+    rules: { enforce:true, maxDailyHours:9, maxWeeklyHours:40, minRestHours:12, maxDaysPerWeek:5, maxConsecutiveWeekends:1 },
+    applyConciliation: true,
+    conciliacion: { penalizaDiaIslaTrabajo:3, penalizaDiaIslaLibre:2, penalizaCortesSemana:1 },
+  
+    offPolicy: {
+      enableLimitOffOnVacationWeek: true,
+      limitOffDays: [3,4,5], // X(3), J(4), V(5) -> getDay(): 0=Dom..6=Sáb
+      enableBlockFullOffAdjacentWeeks: true,
+      adjacencyWindow: 1
+    },
+    vacationPolicy: { mode:'allow', months:[7,8] },
+    refuerzoPolicy:{ allowedMonths:[1,2,3,4,5,9,10,11,12], includeSaturdays:false,
+      maxPerWeekPerPerson:1, maxPerMonthPerPerson:4, horizonDefault:'fin',
+      goalFill:true, skipPast:true, maxEscalation:3, weekBoost:1, monthBoost:2 },
+    managed:{ lastConciliationBatchId:null }
+});
+
+  function forceAssign(dateStr, assignmentIndex, personId){
+  const a = ASS[dateStr]?.[assignmentIndex];
+  if(!a) return;
+  const key = `${a.shift.start}-${a.shift.end}-${a.shift.label||`T${assignmentIndex+1}`}`;
+  const next = structuredClone(state.overrides || {});
+  next[dateStr] = next[dateStr] || {};
+  next[dateStr][key] = personId || null; // si pasas '', quita override
+  up(['overrides'], next);
+  up(['audit'], [ ...(state.audit||[]), { ts:new Date().toISOString(), actor:(auth.user?.email||'unknown'), action:'override', dateStr, assignmentIndex, personId } ]);
+
+  // Sincroniza offPolicy con window para que generateSchedule lea la política activa
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      window.__OFF_POLICY__ = state.offPolicy || {};
+      window.__CUSTOM_HOLIDAYS__ = state.customHolidaysByYear || {};
+
+  // ---------- Cloud (SQLite) ----------
+  const [cloud, setCloud] = useState(() => ({ spaceId: (typeof DEFAULT_SPACE_ID!=="undefined" ? DEFAULT_SPACE_ID : "turnos-2025"), readToken: (typeof DEFAULT_READ_TOKEN!=="undefined" ? DEFAULT_READ_TOKEN : ""), writeToken: "", apiKey: "" }));
+    async function cloudLoad() { 
+    setUI(prev=>({...prev, sync:"loading"}));
+    if (!isAdmin && !cloud.readToken) { 
+      showToast("Falta ReadToken"); 
+      setUI(prev=>({...prev, sync:"error"})); 
+      return; 
+    }
+    try{
+      const extra={}; 
+      if(cloud.apiKey) extra["X-API-Key"]=cloud.apiKey; 
+      if(cloud.readToken) extra["X-Read-Token"]=cloud.readToken;
+      const data = await api(`/state/${encodeURIComponent(cloud.spaceId)}`, { method:"GET" }, auth.token, extra);
+      if(!data.payload){ 
+        alert("No hay datos guardados para ese Space ID"); 
+        setUI(prev=>({...prev, sync:null})); 
+        return; 
+      }
+      const payload = { ...data.payload };
+      if (!payload.conciliacion) payload.conciliacion = safeConciliacion();
+      if (typeof payload.applyConciliation === 'undefined') payload.applyConciliation = true;
+      if (!payload.offPolicy) {
+        payload.offPolicy = {
+          enableLimitOffOnVacationWeek: true,
+          limitOffDays: [3,4,5],
+          enableBlockFullOffAdjacentWeeks: true,
+          adjacencyWindow: 1
+        };
+      }
+      if (typeof window !== "undefined") window.__OFF_POLICY__ = payload.offPolicy || {};
+      setState(prev=>({ ...prev, ...payload }));
+      setUI(prev=>({...prev, sync:"ok"})); 
+      showToast("Cargado de nube");
+    } catch(e) { 
+      setUI(prev=>({...prev, sync:"error"})); 
+      showToast((String(e.message||"")).startsWith("403")?"403: ReadToken inválido o sin permisos":"Error al cargar: "+e.message); 
+    }
+  }
+
+async function cloudSave() { setUI(prev=>({...prev, sync:"loading"}));
+    try{
+      const headers={ "Content-Type":"application/json", "X-Write-Token": cloud.writeToken };
+      if(cloud.apiKey) headers["X-API-Key"]=cloud.apiKey;
+      const payload = state; // si quieres excluir PINs: const { security, ...payload } = state;
+      const out = await api(`/state/${encodeURIComponent(cloud.spaceId)}`, { method:"PUT", headers, body: JSON.stringify({ payload, read_token: cloud.readToken || null }) }, auth.token);
+      setUI(prev=>({...prev, sync:"ok"})); showToast("Guardado en nube");
+    }catch(e){ setUI(prev=>({...prev, sync:"error"})); showToast((String(e.message||"")).startsWith("403")?"403: ReadToken inválido o sin permisos":"Error al cargar: "+e.message); }
+
+  // ---------- Utilidades de estado ----------
+  // deep-set seguro (crea objetos intermedios)
+  function up(path, value){
+  setState(prev => {
+    const next = structuredClone(prev);
+    let o = next;
+    for (let i = 0; i < path.length - 1; i++){
+      const k = path[i];
+      if (typeof o[k] !== 'object' || o[k] === null) o[k] = {};
+      o = o[k];
+    }
+    o[path[path.length - 1]] = value;
+    return next;
+  });
+}
+
+  // ---------- Generación de cuadrante ----------
+  const startDate=useMemo(()=>parseDateValue(state.startDate),[state.startDate]);
+  const base=useMemo(()=> generateSchedule({ startDate, weeks:state.weeks, people:state.people, weekdayShifts:state.weekdayShifts, weekendShift:state.weekendShift, timeOffs:state.timeOffs, events:state.events, refuerzoWeekdayShift:state.refuerzoWeekdayShift, overrides: state.overrides, rules: state.rules, province: state.province, closeOnHolidays: state.closeOnHolidays, closedExtraDates: state.closedExtraDates, customHolidaysByYear: state.customHolidaysByYear, consumeVacationOnHoliday: state.consumeVacationOnHoliday }), [state, startDate]);
+
+  const baseControls=useMemo(()=> buildControls({
+      assignments:base.assignments, people:state.people,
+      weekdayShifts:state.weekdayShifts, weekendShift:state.weekendShift,
+      hoursPerPersonMin:base.hoursPerPersonMin, annualTargetHours:state.annualTargetHours,
+      startDate, weeks:state.weeks, vacationDaysNatural:state.vacationDaysNatural,
+      timeOffs:state.timeOffs, province:state.province, consumeVacationOnHoliday:state.consumeVacationOnHoliday
+    }), [base, state.people, state.weekdayShifts, state.weekendShift, state.annualTargetHours, startDate, state.weeks, state.vacationDaysNatural, state.timeOffs, state.province, state.consumeVacationOnHoliday]);
+
+  const priorityMap=useMemo(()=>{ const m=new Map(); baseControls.rows.forEach(r=> m.set(r.id, Math.max(0,r.remaining))); return m; },[baseControls]);
+
+  const { assignments } = useMemo(()=> state.rebalance
+    ? generateSchedule({ startDate, weeks:state.weeks, people:state.people, weekdayShifts:state.weekdayShifts, weekendShift:state.weekendShift, timeOffs:state.timeOffs, events:state.events, refuerzoWeekdayShift:state.refuerzoWeekdayShift, priorityMap, overrides: state.overrides, rules: state.rules, province: state.province, closeOnHolidays: state.closeOnHolidays, closedExtraDates: state.closedExtraDates, customHolidaysByYear: state.customHolidaysByYear, consumeVacationOnHoliday: state.consumeVacationOnHoliday })
+    : base, [state, startDate, base, priorityMap]);
+
+  // Aplica mejorador de conciliación (evita días-isla y reduce cortes)
+  const assignmentsImproved = useMemo(()=> improveConciliation({
+    assignments: JSON.parse(JSON.stringify(assignments)),
+    people: state.people,
+    startDate,
+    weeks: state.weeks,
+    overrides: state.overrides,
+    conciliacion: safeConciliacion(state.conciliacion),
+    timeOffs: state.timeOffs,
+    province: state.province,
+    consumeVacationOnHoliday: state.consumeVacationOnHoliday,
+    customHolidaysByYear: state.customHolidaysByYear
+  }), [assignments, state.people, startDate, state.weeks, state.overrides, state.conciliacion]);
+
+  // Usar ASS para pintar/expotar
+  const ASS = state.applyConciliation ? assignmentsImproved : assignments;
+
+  // Recalcular controles con ASS (para que refleje la vista final)
+  const controls=useMemo(()=> buildControls({
+      assignments:ASS, people:state.people,
+      weekdayShifts:state.weekdayShifts, weekendShift:state.weekendShift,
+      hoursPerPersonMin:new Map(), // no lo necesitamos aquí
+      annualTargetHours:state.annualTargetHours,
+      startDate, weeks:state.weeks, vacationDaysNatural:state.vacationDaysNatural,
+      timeOffs:state.timeOffs, province:state.province, consumeVacationOnHoliday:state.consumeVacationOnHoliday
+    }), [ASS, state.people, state.weekdayShifts, state.weekendShift, state.annualTargetHours, startDate, state.weeks, state.vacationDaysNatural, state.timeOffs, state.province, state.consumeVacationOnHoliday]);
+
+  // ---------- Hooks que deben ejecutarse SIEMPRE ----------
+  const [payroll,setPayroll]=useState({ from: state.startDate, to: toDateValue(addDays(startDate, state.weeks*7-1)) });
+  const [weekIndex,setWeekIndex]=useState(0);
+  const [userWeeks, setUserWeeks] = useState(1);
+function goToday(){
+    const t = startOfWeekMonday(new Date());
+    const idx = Math.max(0, Math.min(state.weeks-1, Math.floor((t - startDate)/(7*24*3600*1000))));
+    setWeekIndex(idx);
+
+  const weeklyStart=useMemo(()=> addDays(startDate, weekIndex*7), [startDate, weekIndex]);
+  const canPrev=weekIndex>0, canNext=weekIndex<state.weeks-1, canNextRange=weekIndex<state.weeks-userWeeks;
+  const [modalDay,setModalDay]=useState(null);
+
+  // ---------- Auth-only: login screen ----------
+  if (!auth.user || !auth.token) {
+    return (
+      <div className="min-h-screen grid place-items-center bg-slate-50 text-slate-900">
+        <div className="bg-white rounded-2xl shadow p-6 w-full max-w-sm border border-slate-200">
+          <h1 className="text-lg font-semibold mb-4">Acceso · Gestor de Turnos</h1>
+          <form className="space-y-3" onSubmit={doLogin}>
+            <div>
+              <label className="text-xs">Email</label>
+              <input type="email" required value={loginForm.email}
+                onChange={e=>setLoginForm({...loginForm,email:e.target.value})}
+                className="w-full px-3 py-2 rounded border" placeholder="tú@empresa.com" />
+            </div>
+            <div>
+              <label className="text-xs">Contraseña</label>
+              <input type="password" required value={loginForm.password}
+                onChange={e=>setLoginForm({...loginForm,password:e.target.value})}
+                className="w-full px-3 py-2 rounded border" placeholder="••••••••" />
+            </div>
+            <button className="w-full px-3 py-2 rounded-lg border hover:bg-slate-100">Entrar</button>
+          </form>
+          <p className="mt-3 text-xs text-slate-500">
+            * Crea el admin con <code>POST /api/auth/init-admin</code> (ver backend).
+          </p>
+        </div>
+      </div>
+    );
+
+  // ---------- Exportaciones (CSV/ICS/Nómina) ----------
+  function exportCSV(){ const rows=buildCSV(ASS, state.people); const blob=new Blob([rows.join("\n")],{type:"text/csv;charset=utf-8;"}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=`turnos_${state.startDate}_${state.weeks}w.csv`; a.click(); URL.revokeObjectURL(url); }
+  function exportJSON(){ const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=`turnos_backup_${state.startDate}.json`; a.click(); URL.revokeObjectURL(url); }
+  function importJSON(file){ const r=new FileReader(); r.onload=()=>{ try{ setState(JSON.parse(r.result)); }catch{ alert('JSON inválido'); } }; r.readAsText(file); }
+  function exportICS(personId){ const ics=buildICS({assignments:ASS, people:state.people, personId, startDate, weeks:state.weeks}); const blob=new Blob([ics],{type:'text/calendar;charset=utf-8'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`turnos_${personId}.ics`; a.click(); }
+
+  function exportPayroll(){
+    const header=['persona','desde','hasta','horas_lv','horas_sd','horas_refuerzo','horas_totales'];
+    const rows=[header.join(',')];
+    const from=parseDateValue(payroll.from), to=parseDateValue(payroll.to);
+    const days=[]; for(let d=new Date(from); d<=to; d=addDays(d,1)) days.push(toDateValue(d));
+    const byPerson=new Map(state.people.map(p=>[p.id,{lv:0,sd:0,ref:0}]));
+    for(const dateStr of days){ const cell=ASS[dateStr]||[]; for(const a of cell){ if(!a.personId) continue; const dur = effectiveMinutes(a.shift)/60; const rec=byPerson.get(a.personId); const isWE=isWeekend(parseDateValue(dateStr)); const isRef=(a.shift.label||'').toLowerCase().includes('refuerzo'); if(isRef) rec.ref+=dur; else if(isWE) rec.sd+=dur; else rec.lv+=dur; } }
+    for(const p of state.people){ const r=byPerson.get(p.id); const total=(r.lv+r.sd+r.ref).toFixed(1); rows.push([p.name,payroll.from,payroll.to,r.lv.toFixed(1),r.sd.toFixed(1),r.ref.toFixed(1),total].join(',')); }
+    const blob=new Blob([rows.join("\n")],{type:'text/csv;charset=utf-8;'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`nomina_${payroll.from}_${payroll.to}.csv`; a.click();
+
+  // Auto-cargar nube una única vez para usuarios no-admin
+  const [autoCloudLoaded, setAutoCloudLoaded] = useState(false);
+  useEffect(() => {
+    if (auth.user && auth.token && !isAdmin && !autoCloudLoaded) {
+      (async () => {
+        try { await cloudLoad(); } catch(e) {}
+        finally { setAutoCloudLoaded(true); }
+      })();
+
+  }, [auth.user, auth.token, isAdmin, autoCloudLoaded]);){
+  const [sugs,setSugs] = useState(null);
+  const [mode,setMode] = useState('replace'); // 'replace' | 'append'
+  const [horizon,setHorizon] = useState(state.refuerzoPolicy?.horizonDefault || 'fin'); // 'visible' | 'fin'
+
+  function calcular(){
+    let weeksH = weeks;
+    if (horizon==='fin'){
+      const last = new Date(startDate.getTime() + (weeks*7-1)*24*3600*1000);
+      const end  = new Date(last.getFullYear(), 11, 31);
+      const days = Math.max(1, Math.floor((end - startDate)/(24*3600*1000)) + 1);
+      weeksH = Math.ceil(days/7);
+
+    const { propuestas, eventosSugeridos } = proponerCierreHoras({
+      assignments, people, startDate, weeks: weeksH, annualTarget,
+      baseShift: state.refuerzoWeekdayShift,
+      weekdayShifts: state.weekdayShifts,
+      weekendShift: state.weekendShift,
+      events: state.events,
+      timeOffs: state.timeOffs,
+      policy: state.refuerzoPolicy
+    });
+    setSugs({ propuestas, eventosSugeridos });
+
+  function aplicar(){
+    if (!sugs) return;
+    const batchId = new Date().toISOString();
+    onApply(sugs.eventosSugeridos, mode, batchId);
+    alert(`${sugs.eventosSugeridos.length} refuerzos aplicados (${mode==='replace'?'reemplazando los anteriores':'añadiendo'}).`);
+    setSugs(null);
+
+  function eliminar(){
+    onApply([], 'replace', null);
+    alert('Refuerzos de conciliación eliminados.');
+
+  return (
+    <Card title="Refuerzo de conciliación (gestionado)">
+      <div className="flex flex-wrap items-center gap-2 mb-2">
+        <label className="text-sm ml-2 flex items-center gap-2">
+          Horizonte:
+          <select value={horizon} onChange={e=>setHorizon(e.target.value)} className="border rounded px-2 py-1">
+            <option value="fin">Hasta fin de año</option>
+            <option value="visible">Semanas visibles</option>
+          </select>
+        </label>
+        <label className="text-sm ml-2 flex items-center gap-2">
+          Modo:
+          <select value={mode} onChange={e=>setMode(e.target.value)} className="border rounded px-2 py-1">
+            <option value="replace">Reemplazar anterior</option>
+            <option value="append">Añadir a lo existente</option>
+          </select>
+        </label>
+        <button onClick={calcular} className="px-3 py-1.5 rounded-lg border">Calcular propuesta</button>
+        <button onClick={aplicar} disabled={!sugs} className={`px-3 py-1.5 rounded-lg border ${sugs?'':'opacity-50 cursor-not-allowed'}`}>Aplicar</button>
+        <button onClick={eliminar} className="px-3 py-1.5 rounded-lg border text-rose-700">Eliminar refuerzos</button>
+      </div>
+
+      {!sugs && <div className="text-sm text-slate-500">Pulsa “Calcular propuesta” para ver sugerencias.</div>}
+      {sugs && (
+        <div className="text-sm">
+          <div className="mb-2">Se propondrán {sugs.eventosSugeridos.length} días de refuerzo (L–V) para personas con déficit de horas.</div>
+          <div className="max-h-40 overflow-auto border rounded p-2 text-xs bg-white">
+            {sugs.propuestas.map((p,i)=> (
+              <div key={i}>{p.dateStr} · {people.find(x=>x.id===p.personId)?.name} · {p.shift.start}–{p.shift.end}</div>
+            ))}
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+
+function ScoreDebugPanel({ assignments, people, startDate, weeks, conciliacion, applyConciliation, onToggleApply }){
+  const breakdown = useMemo(()=> scoreConciliacionBreakdown({
+    assignments, people, startDate, weeks, conciliacion
+  }), [assignments, people, startDate, weeks, conciliacion]);
+
+  return (
+    <Card title="Score de conciliación (debug)">
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-sm text-slate-600">
+          Penalizaciones · Día-isla trabajo: <b>{safeConciliacion(conciliacion).penalizaDiaIslaTrabajo}</b> ·
+          Día-isla libre: <b>{safeConciliacion(conciliacion).penalizaDiaIslaLibre}</b> ·
+          Cortes/semana: <b>{safeConciliacion(conciliacion).penalizaCortesSemana}</b>
+        </div>
+        <label className="text-sm flex items-center gap-2">
+          <input type="checkbox" checked={!!applyConciliation} onChange={e=>onToggleApply(e.target.checked)} />
+          Aplicar mejorador
+        </label>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm border-collapse">
+          <thead>
+            <tr className="border-b">
+              <th className="text-left p-2">Semana</th>
+              <th className="text-left p-2">Cortes W↔L</th>
+              <th className="text-left p-2">Islas trabajo</th>
+              <th className="text-left p-2">Islas libre</th>
+              <th className="text-left p-2">Score</th>
+            </tr>
+          </thead>
+          <tbody>
+            {breakdown.byWeek.map(w=>(
+              <tr key={w.week} className="border-b">
+                <td className="p-2">#{w.week}</td>
+                <td className="p-2">{w.cortes}</td>
+                <td className="p-2">{w.islasTrabajo}</td>
+                <td className="p-2">{w.islasLibre}</td>
+                <td className="p-2">{w.score}</td>
+              </tr>
+            ))}
+            <tr>
+              <td className="p-2 font-medium" colSpan={4}>Total</td>
+              <td className="p-2 font-medium">{breakdown.total}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p className="mt-2 text-xs text-slate-500">
+        * Cuanto más bajo el score, mejor conciliación (menos cortes y menos días-isla).
+      </p>
+    </Card>
+  );
+
+// ===== Resumen y Modal Día =====
+function buildControls({
+  assignments, people, weekdayShifts, weekendShift,
+  hoursPerPersonMin, // ya no lo necesitamos, pero lo dejo en la firma por compatibilidad
+  annualTargetHours, startDate, weeks, vacationDaysNatural,
+  timeOffs, province, consumeVacationOnHoliday
+}){
+  // Inicializa resumen
+  const summary = people.map(p=>({
+    id:p.id, name:p.name, color:p.color,
+    weekdays:0, weekends:0, minutes:0
+  }));
+  const index = new Map(summary.map(s=>[s.id,s]));
+
+  // Recorre todo el periodo y acumula días y minutos
+  const dates = Object.keys(assignments).length
+    ? Object.keys(assignments)
+    : [...Array(weeks*7)].map((_,i)=> toDateValue(addDays(startDate, i)));
+
+  for (const ds of dates){
+    const cell = assignments[ds] || [];
+    const isWE = isWeekend(parseDateValue(ds));
+    for (const c of cell){
+      if (!c.personId) continue;
+      const s = index.get(c.personId);
+      if (!s) continue;
+      if (isWE) s.weekends += 1; else s.weekdays += 1;
+      s.minutes += effectiveMinutes(c.shift);
+
+  // Vacaciones usadas (laborables)
+  const vacByPerson = new Map();
+  for (const to of timeOffs){
+    if (to.type==='vacaciones' && to.status==='aprobada'){
+      const days = countVacationDaysConsideringHolidays(to.start,to.end,province,consumeVacationOnHoliday);
+      vacByPerson.set(to.personId,(vacByPerson.get(to.personId)||0)+days);
+
+  const vacationsUsedNatural = Array.from(vacByPerson.values()).reduce((a,b)=>a+b,0);
+
+  // Derivados
+  for (const s of summary){
+    s.hours = s.minutes/60;
+    s.annualProjection = s.hours * (52/weeks);
+    s.delta = s.annualProjection - annualTargetHours;
+    s.remaining = annualTargetHours - s.annualProjection;
+
+  // Conflictos (por si en el futuro los marcas)
+  const totalConflicts = dates.reduce((acc,ds)=> acc + (assignments[ds]||[]).filter(a=>a.conflict).length, 0);
+
+  // Etiqueta de periodo visible en resumen
+  const periodStart = startDate;
+  const periodEnd   = addDays(startDate, weeks*7 - 1);
+  const fmt = d => d.toLocaleDateString(undefined,{ day:"2-digit", month:"short", year:"numeric"});
+  const periodLabel = `${fmt(periodStart)} – ${fmt(periodEnd)} · ${weeks} sem`;
+
+  return { rows:summary, totalConflicts, vacationsUsedNatural, vacationUsedNaturalByPerson: vacByPerson, periodLabel };
+
+function ResumenPanel({ controls, annualTarget, onExportICS }){
+  return (
+    <Card title="Resumen de horas vs objetivo y proyección anual">
+      <div className="text-xs text-slate-600 mb-2">
+        Periodo mostrado: {controls.periodLabel}. Proyección = horas del periodo × (52 / semanas mostradas).
+      </div>
+      <table className="w-full text-sm border-separate border-spacing-y-1">
+        <thead><tr className="text-left text-slate-600"><th className="py-1">Persona</th><th className="py-1">Jornadas L–V</th><th className="py-1">Jornadas S–D</th><th className="py-1">Horas (periodo)</th><th className="py-1">Proyección anual</th><th className="py-1">Δ vs {annualTarget}h</th><th className="py-1">Horas pendientes/sobrantes</th><th className="py-1">ICS</th></tr></thead>
+        <tbody>
+          {controls.rows.map(r=> (
+            <tr key={r.id} className="bg-white">
+              <td className="py-1 px-2"><span className="inline-flex items-center gap-2"><span className="h-3 w-3 rounded" style={{background:r.color}}/><span>{r.name}</span></span></td>
+              <td className="py-1 px-2">{r.weekdays}</td>
+              <td className="py-1 px-2">{r.weekends}</td>
+              <td className="py-1 px-2">{r.hours.toFixed(1)}</td>
+              <td className="py-1 px-2">{r.annualProjection.toFixed(0)}</td>
+              <td className={`py-1 px-2 ${r.delta>0?'text-amber-700': r.delta<0?'text-blue-700':''}`}>{r.delta.toFixed(0)}</td>
+              <td className={`py-1 px-2 ${r.remaining>0?'text-blue-700': r.remaining<0?'text-amber-700':''}`}>
+                <div className="text-right">{r.remaining.toFixed(0)}</div>
+                <div className="h-1.5 w-full bg-slate-100 rounded mt-1">
+                  <div className="h-1.5 rounded" style={{
+                    width: `${Math.min(100, Math.max(0, (r.annualProjection/annualTarget)*100))}%`,
+                    background: r.annualProjection>=annualTarget ? '#f59e0b55' : '#3b82f655'
+                  }}/>
+                </div>
+              </td>
+              <td className="py-1 px-2"><button className="px-2 py-0.5 rounded border" onClick={()=>onExportICS(r.id)}>Descargar</button></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="mt-3 text-sm flex items-center justify-between"><div>Conflictos en periodo: {controls.totalConflicts>0? (<span className="text-red-600 font-medium">{controls.totalConflicts}</span>):(<span className="text-emerald-700 font-medium">0</span>)}</div><div className="text-xs text-slate-500">* Proyección estimada por semanas mostradas.</div></div>
+    </Card>
+  );
+
+// ===== Modal Día =====
+function DayModal({ dateStr, date, assignments, people, onOverride, onClose, isAdmin }){
+  const pmap=new Map(people.map(p=>[p.id,p]));
+  const sorted=assignments.map(x=>x); // ya vienen ordenados por ASS
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-3xl max-h-[85vh] overflow-auto">
+        <div className="p-4 border-b flex items-center justify-between">
+          <div>
+            <div className="text-sm text-slate-500">{dateStr}</div>
+            <div className="text-lg font-semibold">Detalle del día</div>
+          </div>
+          <button onClick={onClose} className="px-3 py-1.5 rounded-lg border hover:bg-slate-100">Cerrar</button>
+        </div>
+        <div className="p-4 space-y-3">
+          {sorted.length===0 && <div className="text-sm text-slate-500">No hay turnos este día.</div>}
+          {sorted.map((c,i)=>{ const p=c.personId?pmap.get(c.personId):null; const span=formatSpan(c.shift.start,c.shift.end); const dur = effectiveMinutes(c.shift)/60;
+            return (
+              <div key={i} className={`rounded-xl border p-3 ${c.conflict? 'border-red-300 bg-red-50':'border-slate-200'}`}>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-sm">
+                    <div className="font-medium">{c.shift.label||`Turno ${i+1}`} · {span} <span className="text-slate-500 font-normal">({dur}h{c.shift.lunchMinutes ? " · comida " + (c.shift.lunchMinutes) + "m" : ""})</span></div>
+                    <div className="text-xs text-slate-500">{c.conflict? '⚠ Falta asignar':'Asignado'}</div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <select
+                      className="border rounded px-2 py-1 text-sm"
+                      value={c.personId || ''}
+                      onChange={e=> (isAdmin && onOverride(dateStr, i, e.target.value || null))}
+                      disabled={!isAdmin}
+                    >
+                      <option value="">— Sin override —</option>
+                      {people.map(pp=> <option key={pp.id} value={pp.id}>{pp.name}</option>)}
+                    </select>
+                    {p && <span className="inline-flex items-center gap-1 text-sm">
+                      <span className="h-3 w-3 rounded" style={{background:p.color}}/> {p.name}
+                    </span>}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+
+// ===== CSV / ICS =====
+function buildCSV(assignments, people){ const header=["fecha","turno","inicio","fin","persona","tipo","conflicto"]; const rows=[header.join(',')]; const pmap=new Map(people.map(p=>[p.id,p.name])); const dates=Object.keys(assignments).sort(); for(const d of dates){ for(const a of assignments[d]){ rows.push([d,a.shift.label||"",a.shift.start,a.shift.end,a.personId?pmap.get(a.personId):"", isWeekend(parseDateValue(d))?"fin_de_semana":"laborable", a.conflict?"SI":"NO"].join(',')); } } return rows; }
+function buildICS({ assignments, people, personId, startDate, weeks }){ const prod='-//Gestor Turnos 4P//ES'; let ics=`BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:${prod}\nCALSCALE:GREGORIAN\nMETHOD:PUBLISH\n`; const person=people.find(p=>p.id===personId); const fmt=(d)=> d.getFullYear().toString().padStart(4,'0')+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0')+'T'+String(d.getHours()).padStart(2,'0')+String(d.getMinutes()).padStart(2,'0')+'00'; for(let w=0;w<weeks;w++){ for(let d=0;d<7;d++){ const date=addDays(startDate,w*7+d); const ds=toDateValue(date); const cell=assignments[ds]||[]; for(const c of cell){ if(c.personId!==personId) continue; const [sh,sm]=c.shift.start.split(':').map(Number); const [eh,em]=c.shift.end.split(':').map(Number); const s=new Date(date.getFullYear(),date.getMonth(),date.getDate(),sh,sm||0,0); const e=new Date(date.getFullYear(),date.getMonth(),date.getDate(),eh,em||0,0); const uid=`${personId}-${ds}-${c.shift.start.replace(':','')}`; const summary=`${c.shift.label||'Turno'} · ${person?.name||personId}`; ics+=`BEGIN:VEVENT\nUID:${uid}@turnos4p\nDTSTAMP:${fmt(new Date())}\nDTSTART:${fmt(s)}\nDTEND:${fmt(e)}\nSUMMARY:${summary}\nDESCRIPTION:${isWeekend(date)?'Fin de semana':'Laborable'}\nEND:VEVENT\n`; } } } ics+='END:VCALENDAR\n'; return ics; }
+
+function GeneradorPicos({ state, up }
+
+function PropuestaCierre({ state, startDate, weeks, people, assignments, onApply, annualTarget }
+
+){
+  const [anio,setAnio] = useState(new Date().getFullYear());
+
+  function generar(){
+    const nuevos = generarPicosParaAnio(Number(anio));
+    up(['events'], [...state.events, ...nuevos]);
+    alert(`Añadidos ${nuevos.length} eventos de picos para ${anio}`);
+
+  return (
+    <Card title="Generar picos (Black Friday, Navidad, Rebajas)">
+      <div className="flex items-center gap-2">
+        <input type="number" className="border rounded px-2 py-1 w-24" value={anio} onChange={e=>setAnio(e.target.value)} />
+        <button onClick={generar} className="px-3 py-1.5 rounded-lg border">Generar</button>
+      </div>
+      <p className="text-xs text-slate-500 mt-2">Fechas genéricas; puedes ajustar los rangos después desde “Eventos de Refuerzo”.</p>
+    </Card>
+  );
+
+function AdminUsersAndPerms({ auth }) {
+  const [users, setUsers] = useState([]);
+  const [creating, setCreating] = useState({ email:'', name:'', role:'user', password:'' });
+  const [space, setSpace] = useState({ id:'turnos-2025', ownerEmail:'', readToken:'', writeToken:'' });
+  const [loading, setLoading] = useState(false);
+
+  async function loadUsers() {
+    try {
+      setLoading(true);
+      const data = await api('/admin/users', { method: 'GET' }, auth.token);
+      setUsers(data.users || []);
+    } catch (e) {
+      alert(e.message);
+    } finally {
+      setLoading(false);
+
+  async function createUser(e) {
+    e?.preventDefault();
+    try {
+      setLoading(true);
+      await api('/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(creating)
+      }, auth.token);
+      alert('Usuario creado');
+      setCreating({ email:'', name:'', role:'user', password:'' });
+      loadUsers();
+    } catch (e) {
+      alert(e.message);
+    } finally {
+      setLoading(false);
+
+  async function resetPassword(email) {
+    const pwd = prompt(`Nueva contraseña para ${email}:`);
+    if (!pwd) return;
+    try {
+      setLoading(true);
+      await api('/admin/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type':'application/json' },
+        body: JSON.stringify({ email, password: pwd })
+      }, auth.token);
+      alert('Contraseña actualizada');
+    } catch (e) {
+      alert(e.message);
+    } finally {
+      setLoading(false);
+
+  async function transferOwnership() {
+    if (!space.id || !space.ownerEmail) { alert('Indica Space ID y nuevo propietario'); return; }
+    try {
+      setLoading(true);
+      await api(`/state/${encodeURIComponent(space.id)}/transfer`, {
+        method: 'POST',
+        headers: { 'Content-Type':'application/json' },
+        body: JSON.stringify({ owner_email: space.ownerEmail })
+      }, auth.token);
+      alert('Propiedad transferida');
+    } catch (e) {
+      alert(e.message);
+    } finally {
+      setLoading(false);
+
+  async function updateTokens() {
+    if (!space.id) { alert('Indica Space ID'); return; }
+    try {
+      setLoading(true);
+      await api(`/state/${encodeURIComponent(space.id)}/tokens`, {
+        method: 'POST',
+        headers: { 'Content-Type':'application/json' },
+        body: JSON.stringify({ read_token: space.readToken || null, write_token: space.writeToken || null })
+      }, auth.token);
+      alert('Tokens actualizados');
+    } catch (e) {
+      alert(e.message);
+    } finally {
+      setLoading(false);
+
+  useEffect(()=>{ loadUsers(); },[]);
+
+  return (
+    <Card title="Administración · Usuarios y Permisos">
+      <div className="grid grid-cols-12 gap-4">
+        {/* Crear usuario */}
+        <div className="col-span-12 lg:col-span-4">
+          <div className="text-sm font-medium mb-2">Crear usuario</div>
+          <form className="space-y-2" onSubmit={createUser}>
+            <div><label className="text-xs">Email</label>
+              <input className="w-full border rounded px-2 py-1" type="email" required
+                     value={creating.email} onChange={e=>setCreating({...creating,email:e.target.value})}/>
+            </div>
+            <div><label className="text-xs">Nombre</label>
+              <input className="w-full border rounded px-2 py-1" required
+                     value={creating.name} onChange={e=>setCreating({...creating,name:e.target.value})}/>
+            </div>
+            <div><label className="text-xs">Rol</label>
+              <select className="w-full border rounded px-2 py-1"
+                      value={creating.role} onChange={e=>setCreating({...creating,role:e.target.value})}>
+                <option value="user">user</option>
+                <option value="admin">admin</option>
+              </select>
+            </div>
+            <div><label className="text-xs">Contraseña</label>
+              <input className="w-full border rounded px-2 py-1" type="password" required
+                     value={creating.password} onChange={e=>setCreating({...creating,password:e.target.value})}/>
+            </div>
+            <button className="w-full px-3 py-1.5 rounded-lg border" disabled={loading}>
+              {loading? 'Creando...':'Crear usuario'}
+            </button>
+          </form>
+        </div>
+
+        {/* Lista de usuarios */}
+        <div className="col-span-12 lg:col-span-8">
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-sm font-medium">Usuarios</div>
+            <button onClick={loadUsers} className="px-2 py-1 rounded border">Refrescar</button>
+          </div>
+          <div className="border rounded-lg divide-y">
+            {users.length===0 && <div className="p-3 text-sm text-slate-500">Sin usuarios.</div>}
+            {users.map(u=>(
+              <div key={u.id} className="p-2 text-sm flex items-center justify-between">
+                <div>
+                  <b>{u.name}</b> · {u.email} · <span className="uppercase">{u.role}</span>
+                  <span className="ml-2 text-xs text-slate-500">id:{u.id}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button onClick={()=>resetPassword(u.email)} className="text-slate-700 hover:underline">Reset pass</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Permisos por Space */}
+        <div className="col-span-12">
+          <div className="text-sm font-medium mb-2 mt-4">Permisos por Space</div>
+          <div className="grid grid-cols-12 gap-2">
+            <div className="col-span-3">
+              <label className="text-xs">Space ID</label>
+              <input className="w-full border rounded px-2 py-1"
+                     value={space.id} onChange={e=>setSpace({...space,id:e.target.value})}/>
+            </div>
+            <div className="col-span-4">
+              <label className="text-xs">Nuevo propietario (email)</label>
+              <input className="w-full border rounded px-2 py-1"
+                     value={space.ownerEmail} onChange={e=>setSpace({...space,ownerEmail:e.target.value})}/>
+            </div>
+            <div className="col-span-2">
+              <label className="text-xs">read_token</label>
+              <input className="w-full border rounded px-2 py-1"
+                     value={space.readToken} onChange={e=>setSpace({...space,readToken:e.target.value})}/>
+            </div>
+            <div className="col-span-2">
+              <label className="text-xs">write_token</label>
+              <input className="w-full border rounded px-2 py-1"
+                     value={space.writeToken} onChange={e=>setSpace({...space,writeToken:e.target.value})}/>
+            </div>
+            <div className="col-span-12 flex gap-2">
+              <button onClick={transferOwnership} className="px-3 py-1.5 rounded-lg border" disabled={loading}>Transferir propietario</button>
+              <button onClick={updateTokens}    className="px-3 py-1.5 rounded-lg border" disabled={loading}>Actualizar tokens</button>
+            </div>
+          </div>
+          <p className="mt-2 text-xs text-slate-500">
+            * Un usuario **admin** puede leer/escribir cualquier Space.<br/>
+            * Un usuario **owner** puede operar su Space sin `write_token`.<br/>
+            * Un **user** sin propiedad necesita `write_token` para guardar, y `read_token` si lo exigiste para leer.
+          </p>
+        </div>
+      </div>
+    </Card>
+  );
+
+function OffPolicyPanel({ state, up }){
+  const p = state.offPolicy || {};
+  const days = [
+    {k:1, lbl:'L'}, {k:2,lbl:'M'}, {k:3,lbl:'X'}, {k:4,lbl:'J'}, {k:5,lbl:'V'}, {k:6,lbl:'S'}, {k:0,lbl:'D'}
+  ];
+  function toggleDay(k){
+    const set = new Set(p.limitOffDays || []);
+    if (set.has(k)) set.delete(k); else set.add(k);
+    // Reemplazo defensivo del objeto completo
+    const curr = state.offPolicy || { enableLimitOffOnVacationWeek:true, limitOffDays:[3,4,5], enableBlockFullOffAdjacentWeeks:true, adjacencyWindow:1 };
+    up(['offPolicy'], { ...curr, limitOffDays: Array.from(set).sort() });
+
+  return (
+    <Card title="Semana OFF condicionada por vacaciones">
+      <div className="grid grid-cols-12 gap-3 text-sm">
+        <label className="col-span-12 flex items-center gap-2">
+          <input type="checkbox"
+                 checked={!!p.enableLimitOffOnVacationWeek}
+                 onChange={e=>{
+                   const curr = state.offPolicy || { enableLimitOffOnVacationWeek:true, limitOffDays:[3,4,5], enableBlockFullOffAdjacentWeeks:true, adjacencyWindow:1 };
+                   up(['offPolicy'], { ...curr, enableLimitOffOnVacationWeek: e.target.checked });
+                 }} />
+          Si hay <b>vacaciones</b> en la semana, el OFF solo se respeta en los días seleccionados.
+        </label>
+        <div className="col-span-12">
+          <div className="text-xs mb-1">Días OFF permitidos (por defecto X-J-V):</div>
+          <div className="flex flex-wrap gap-2">
+            {days.map(d=>(
+              <label key={d.k} className={`px-2 py-1 rounded border cursor-pointer ${ (p.limitOffDays||[3,4,5]).includes(d.k) ? 'bg-slate-100' : ''}`}>
+                <input type="checkbox" className="mr-1"
+                       checked={(p.limitOffDays||[3,4,5]).includes(d.k)}
+                       onChange={()=>toggleDay(d.k)} />
+                {d.lbl}
+              </label>
+            ))}
+          </div>
+        </div>
+        <label className="col-span-12 flex items-center gap-2">
+          <input type="checkbox"
+                 checked={!!p.enableBlockFullOffAdjacentWeeks}
+                 onChange={e=>{
+                   const curr = state.offPolicy || { enableLimitOffOnVacationWeek:true, limitOffDays:[3,4,5], enableBlockFullOffAdjacentWeeks:true, adjacencyWindow:1 };
+                   up(['offPolicy'], { ...curr, enableBlockFullOffAdjacentWeeks: e.target.checked });
+                 }} />
+          Limitar también si hay vacaciones en la <b>semana anterior o posterior</b>.
+        </label>
+        <div className="col-span-6">
+          <label className="text-xs block mb-1">Ventana adyacente (semanas)</label>
+          <input
+            type="number" min={1} max={4}
+            value={p.adjacencyWindow||1}
+            onChange={e=>{
+              const v = Number(e.target.value);
+              const curr = state.offPolicy || { enableLimitOffOnVacationWeek:true, limitOffDays:[3,4,5], enableBlockFullOffAdjacentWeeks:true, adjacencyWindow:1 };
+              up(['offPolicy'], { ...curr, adjacencyWindow: isNaN(v) ? 1 : Math.max(1, Math.min(4, v)) });
+            }}
+            className="w-full border rounded px-2 py-1"
+          />
+        </div>
+      </div>
+    </Card>
+  );
+
+function RefuerzoPolicyPanel({ state, up }){
+  const pol = state.refuerzoPolicy || { allowedMonths:[], includeSaturdays:false, maxPerWeekPerPerson:1, maxPerMonthPerPerson:4, horizonDefault:'fin' };
+  const months = [
+    {k:1,'lbl':'Ene'},{k:2,'lbl':'Feb'},{k:3,'lbl':'Mar'},{k:4,'lbl':'Abr'},
+    {k:5,'lbl':'May'},{k:6,'lbl':'Jun'},{k:7,'lbl':'Jul'},{k:8,'lbl':'Ago'},
+    {k:9,'lbl':'Sep'},{k:10,'lbl':'Oct'},{k:11,'lbl':'Nov'},{k:12,'lbl':'Dic'}
+  ];
+  function toggleMonth(m){
+    const set = new Set(pol.allowedMonths||[]);
+    if (set.has(m)) set.delete(m); else set.add(m);
+    up(['refuerzoPolicy'], { ...pol, allowedMonths: Array.from(set).sort((a,b)=>a-b) });
+
+  return (
+    <Card title="Política de refuerzos (conciliación)">
+      <div className="grid grid-cols-12 gap-3 text-sm">
+        <div className="col-span-12">
+          <div className="text-xs mb-1">Meses donde SÍ proponer refuerzos:</div>
+          <div className="flex flex-wrap gap-2">
+            {months.map(m=>(
+              <label key={m.k} className={`px-2 py-1 rounded border cursor-pointer \${(pol.allowedMonths||[]).includes(m.k)?'bg-slate-100':''}`}>
+                <input type="checkbox" className="mr-1"
+                  checked={(pol.allowedMonths||[]).includes(m.k)}
+                  onChange={()=>toggleMonth(m.k)} />
+                {m.lbl}
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <div className="col-span-6">
+          <label className="text-xs block mb-1">Máx refuerzos/semana/persona</label>
+          <input type="number" min={0} max={14}
+            value={pol.maxPerWeekPerPerson||0}
+            onChange={e=>up(['refuerzoPolicy'], { ...pol, maxPerWeekPerPerson: Math.max(0, Number(e.target.value)||0) })}
+            className="w-full border rounded px-2 py-1" />
+        </div>
+        <div className="col-span-6">
+          <label className="text-xs block mb-1">Máx refuerzos/mes/persona</label>
+          <input type="number" min={0} max={31}
+            value={pol.maxPerMonthPerPerson||0}
+            onChange={e=>up(['refuerzoPolicy'], { ...pol, maxPerMonthPerPerson: Math.max(0, Number(e.target.value)||0) })}
+            className="w-full border rounded px-2 py-1" />
+        </div>
+
+        <label className="col-span-12 flex items-center gap-2">
+          <input type="checkbox"
+            checked={!!pol.includeSaturdays}
+            onChange={e=>up(['refuerzoPolicy'], { ...pol, includeSaturdays: e.target.checked })} />
+          Incluir sábados (si no, sólo L–V)
+        </label>
+      </div>
+    </Card>
+  );
+
+function VacationPolicyPanel({ state, up }){
+  const vp = state.vacationPolicy || { mode:'allow', months:[] };
+  const months = [
+    {k:1,'lbl':'Ene'},{k:2,'lbl':'Feb'},{k:3,'lbl':'Mar'},{k:4,'lbl':'Abr'},
+    {k:5,'lbl':'May'},{k:6,'lbl':'Jun'},{k:7,'lbl':'Jul'},{k:8,'lbl':'Ago'},
+    {k:9,'lbl':'Sep'},{k:10,'lbl':'Oct'},{k:11,'lbl':'Nov'},{k:12,'lbl':'Dic'}
+  ];
+  function setMode(mode){ up(['vacationPolicy'], { ...vp, mode }); }
+  function toggleMonth(m){
+    const set = new Set(vp.months || []);
+    if (set.has(m)) set.delete(m); else set.add(m);
+    up(['vacationPolicy'], { ...vp, months: Array.from(set).sort((a,b)=>a-b) });
+
+  return (
+    <Card title="Política de Vacaciones (meses)">
+      <div className="grid grid-cols-12 gap-3 text-sm">
+        <div className="col-span-12 flex items-center gap-4">
+          <label className="inline-flex items-center gap-2">
+            <input type="radio" name="vp-mode" checked={(vp.mode||'allow')==='allow'} onChange={()=>setMode('allow')} />
+            Permitir SOLO en los meses seleccionados
+          </label>
+          <label className="inline-flex items-center gap-2">
+            <input type="radio" name="vp-mode" checked={vp.mode==='block'} onChange={()=>setMode('block')} />
+            Bloquear los meses seleccionados
+          </label>
+        </div>
+        <div className="col-span-12">
+          <div className="flex flex-wrap gap-2">
+            {months.map(m=>(
+              <label key={m.k} className={`px-2 py-1 rounded border cursor-pointer ${ (vp.months||[]).includes(m.k) ? 'bg-slate-100' : ''}`}>
+                <input type="checkbox" className="mr-1"
+                  checked={(vp.months||[]).includes(m.k)}
+                  onChange={()=>toggleMonth(m.k)} />
+                {m.lbl}
+              </label>
+            ))}
+          </div>
+          <div className="text-[11px] text-slate-500 mt-2">
+            * Modo <b>Permitir</b>: sólo se aceptan vacaciones en esos meses. <b>Bloquear</b>: se impiden en esos meses.
+          </div>
+        </div>
+      </div>
+    </Card>
+  );
+

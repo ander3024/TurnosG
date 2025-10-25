@@ -1750,7 +1750,517 @@ function PropuestaCierre({ state, startDate, weeks, people, assignments, onApply
   );
 }
 
-function ScoreDebugPanel({ assignments, people, startDate, weeks, conciliacion, applyConciliation, onToggleApply }){
+
+
+
+
+function ScoreDebugPanel({ assignments, people, startDate, weeks, conciliacion, applyConciliation, onToggleApply }
+
+// === Panel: Auditoría de fines de semana (solo Admin
+function WeekendAuditPanel({ assignments, people, startDate, weeks, rules, isAdmin }) {
+  if (!isAdmin) return null;
+
+  const rows = React.useMemo(() => {
+    const maxCons = Number(rules?.maxConsecutiveWeekends ?? 1);
+    const workedWeekend = (pid, w) => {
+      const sat = toDateValue(addDays(startDate, w*7 + 5));
+      const sun = toDateValue(addDays(startDate, w*7 + 6));
+      const satC = assignments[sat] || [];
+      const sunC = assignments[sun] || [];
+      return satC.some(a=>a.personId===pid) || sunC.some(a=>a.personId===pid);
+    };
+
+    const out = [];
+    for (const p of people){
+      let total=0, streak=0, maxStreak=0, viol=0;
+      for (let w=0; w<weeks; w++){
+        const wk = workedWeekend(p.id, w);
+        if (wk){ total++; streak++; } else { streak=0; }
+        if (streak>maxStreak) maxStreak=streak;
+        if (maxCons>0 && streak>maxCons) viol++;
+      }
+      out.push({ id:p.id, name:p.name, weekends:total, maxStreak, violations:viol });
+    }
+    return out.sort((a,b)=> a.name.localeCompare(b.name));
+  }, [assignments, people, startDate, weeks, rules]);
+
+  return (
+    <Card title="Auditoría de fines de semana">
+      <div className="text-xs text-slate-600 mb-2">
+        Regla vigente · máx. fines de semana consecutivos: <b>{rules?.maxConsecutiveWeekends ?? 1}</b>
+      </div>
+      <table className="w-full text-sm border-collapse">
+        <thead>
+          <tr className="border-b">
+            <th className="text-left p-2">Persona</th>
+            <th className="text-left p-2">Fines trabajados</th>
+            <th className="text-left p-2">Racha máx.</th>
+            <th className="text-left p-2">Infracciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(r=>(
+            <tr key={r.id} className="border-b">
+              <td className="p-2">{r.name}</td>
+              <td className="p-2">{r.weekends}</td>
+              <td className="p-2">{r.maxStreak}</td>
+              <td className={"p-2 " + (r.violations ? "text-rose-700" : "")}>{r.violations}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </Card>
+  );
+}
+
+){
+  const breakdown = React.useMemo(() => {
+    return scoreConciliacionBreakdown({ assignments, people, startDate, weeks, conciliacion });
+  }, [assignments, people, startDate, weeks, conciliacion]);
+
+  return (
+    <Card title="Score de conciliación (debug)">
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-sm text-slate-600">
+          Penalizaciones · Día-isla trabajo: <b>{safeConciliacion(conciliacion).penalizaDiaIslaTrabajo}</b> ·
+          Día-isla libre: <b>{safeConciliacion(conciliacion).penalizaDiaIslaLibre}</b> ·
+          Cortes/semana: <b>{safeConciliacion(conciliacion).penalizaCortesSemana}</b>
+        </div>
+        <label className="text-sm flex items-center gap-2">
+          <input type="checkbox" checked={!!applyConciliation} onChange={e=>onToggleApply(e.target.checked)} />
+          Aplicar mejorador
+        </label>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm border-collapse">
+          <thead>
+            <tr className="border-b">
+              <th className="text-left p-2">Semana</th>
+              <th className="text-left p-2">Cortes W↔L</th>
+              <th className="text-left p-2">Islas trabajo</th>
+              <th className="text-left p-2">Islas libre</th>
+              <th className="text-left p-2">Score</th>
+            </tr>
+          </thead>
+          <tbody>
+            {breakdown.byWeek.map(w=>(
+              <tr key={w.week} className="border-b">
+                <td className="p-2">#{w.week}</td>
+                <td className="p-2">{w.cortes}</td>
+                <td className="p-2">{w.islasTrabajo}</td>
+                <td className="p-2">{w.islasLibre}</td>
+                <td className="p-2">{w.score}</td>
+              </tr>
+            ))}
+            <tr>
+              <td className="p-2 font-medium" colSpan={4}>Total</td>
+              <td className="p-2 font-medium">{breakdown.total}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p className="mt-2 text-xs text-slate-500">* Cuanto más bajo el score, mejor conciliación.</p>
+    </Card>
+  );
+}
+
+
+// === Panel: Auditoría de fines de semana (solo Admin)
+) {
+  if (!isAdmin) return null;
+
+  const rows = React.useMemo(() => {
+    const maxCons = Number(rules?.maxConsecutiveWeekends ?? 1);
+
+    const workedWeekend = (pid, w) => {
+      const sat = toDateValue(addDays(startDate, w*7 + 5));
+      const sun = toDateValue(addDays(startDate, w*7 + 6));
+      const satC = assignments[sat] || [];
+      const sunC = assignments[sun] || [];
+      return satC.some(a=>a.personId===pid) || sunC.some(a=>a.personId===pid);
+    };
+
+    const out = [];
+    for (const p of people){
+      let total=0, streak=0, maxStreak=0, viol=0;
+      for (let w=0; w<weeks; w++){
+        const wk = workedWeekend(p.id, w);
+        if (wk){ total++; streak++; } else { streak=0; }
+        if (streak>maxStreak) maxStreak=streak;
+        if (maxCons>0 && streak>maxCons) viol++;
+      }
+      out.push({ id:p.id, name:p.name, weekends:total, maxStreak, violations:viol });
+    }
+    return out.sort((a,b)=> a.name.localeCompare(b.name));
+  }, [assignments, people, startDate, weeks, rules]);
+
+  return (
+    <Card title="Auditoría de fines de semana">
+      <div className="text-xs text-slate-600 mb-2">
+        Regla vigente · máx. fines de semana consecutivos: <b>{rules?.maxConsecutiveWeekends ?? 1}</b>
+      </div>
+      <table className="w-full text-sm border-collapse">
+        <thead>
+          <tr className="border-b">
+            <th className="text-left p-2">Persona</th>
+            <th className="text-left p-2">Fines trabajados</th>
+            <th className="text-left p-2">Racha máx.</th>
+            <th className="text-left p-2">Infracciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(r=>(
+            <tr key={r.id} className="border-b">
+              <td className="p-2">{r.name}</td>
+              <td className="p-2">{r.weekends}</td>
+              <td className="p-2">{r.maxStreak}</td>
+              <td className={"p-2 " + (r.violations ? "text-rose-700" : "")}>{r.violations}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </Card>
+  );
+}
+
+{
+  const breakdown = React.useMemo(() => {
+    return scoreConciliacionBreakdown({ assignments, people, startDate, weeks, conciliacion });
+  }, [assignments, people, startDate, weeks, conciliacion]);
+
+  return (
+    <Card title="Score de conciliación (debug)">
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-sm text-slate-600">
+          Penalizaciones · Día-isla trabajo: <b>{safeConciliacion(conciliacion).penalizaDiaIslaTrabajo}</b> ·
+          Día-isla libre: <b>{safeConciliacion(conciliacion).penalizaDiaIslaLibre}</b> ·
+          Cortes/semana: <b>{safeConciliacion(conciliacion).penalizaCortesSemana}</b>
+        </div>
+        <label className="text-sm flex items-center gap-2">
+          <input type="checkbox" checked={!!applyConciliation} onChange={e=>onToggleApply(e.target.checked)} />
+          Aplicar mejorador
+        </label>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm border-collapse">
+          <thead>
+            <tr className="border-b">
+              <th className="text-left p-2">Semana</th>
+              <th className="text-left p-2">Cortes W↔L</th>
+              <th className="text-left p-2">Islas trabajo</th>
+              <th className="text-left p-2">Islas libre</th>
+              <th className="text-left p-2">Score</th>
+            </tr>
+          </thead>
+          <tbody>
+            {breakdown.byWeek.map(w=>(
+              <tr key={w.week} className="border-b">
+                <td className="p-2">#{w.week}</td>
+                <td className="p-2">{w.cortes}</td>
+                <td className="p-2">{w.islasTrabajo}</td>
+                <td className="p-2">{w.islasLibre}</td>
+                <td className="p-2">{w.score}</td>
+              </tr>
+            ))}
+            <tr>
+              <td className="p-2 font-medium" colSpan={4}>Total</td>
+              <td className="p-2 font-medium">{breakdown.total}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p className="mt-2 text-xs text-slate-500">* Cuanto más bajo el score, mejor conciliación.</p>
+    </Card>
+  );
+}
+
+
+// === Panel: Auditoría de fines de semana (solo Admin)
+) {
+  if (!isAdmin) return null;
+
+  const rows = React.useMemo(() => {
+    const maxCons = Number(rules?.maxConsecutiveWeekends ?? 1);
+
+    const workedWeekend = (pid, w) => {
+      const sat = toDateValue(addDays(startDate, w*7 + 5));
+      const sun = toDateValue(addDays(startDate, w*7 + 6));
+      const satC = assignments[sat] || [];
+      const sunC = assignments[sun] || [];
+      return satC.some(a=>a.personId===pid) || sunC.some(a=>a.personId===pid);
+    };
+
+    const out = [];
+    for (const p of people){
+      let total=0, streak=0, maxStreak=0, viol=0;
+      for (let w=0; w<weeks; w++){
+        const wk = workedWeekend(p.id, w);
+        if (wk){ total++; streak++; } else { streak=0; }
+        if (streak>maxStreak) maxStreak=streak;
+        if (maxCons>0 && streak>maxCons) viol++;
+      }
+      out.push({ id:p.id, name:p.name, weekends:total, maxStreak, violations:viol });
+    }
+    return out.sort((a,b)=> a.name.localeCompare(b.name));
+  }, [assignments, people, startDate, weeks, rules]);
+
+  return (
+    <Card title="Auditoría de fines de semana">
+      <div className="text-xs text-slate-600 mb-2">
+        Regla vigente · máx. fines de semana consecutivos: <b>{rules?.maxConsecutiveWeekends ?? 1}</b>
+      </div>
+      <table className="w-full text-sm border-collapse">
+        <thead>
+          <tr className="border-b">
+            <th className="text-left p-2">Persona</th>
+            <th className="text-left p-2">Fines trabajados</th>
+            <th className="text-left p-2">Racha máx.</th>
+            <th className="text-left p-2">Infracciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(r=>(
+            <tr key={r.id} className="border-b">
+              <td className="p-2">{r.name}</td>
+              <td className="p-2">{r.weekends}</td>
+              <td className="p-2">{r.maxStreak}</td>
+              <td className={"p-2 " + (r.violations ? "text-rose-700" : "")}>{r.violations}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </Card>
+  );
+}
+
+){
+  const breakdown = React.useMemo(() => {
+    return scoreConciliacionBreakdown({ assignments, people, startDate, weeks, conciliacion });
+  }, [assignments, people, startDate, weeks, conciliacion]);
+
+  return (
+    <Card title="Score de conciliación (debug)">
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-sm text-slate-600">
+          Penalizaciones · Día-isla trabajo: <b>{safeConciliacion(conciliacion).penalizaDiaIslaTrabajo}</b> ·
+          Día-isla libre: <b>{safeConciliacion(conciliacion).penalizaDiaIslaLibre}</b> ·
+          Cortes/semana: <b>{safeConciliacion(conciliacion).penalizaCortesSemana}</b>
+        </div>
+        <label className="text-sm flex items-center gap-2">
+          <input type="checkbox" checked={!!applyConciliation} onChange={e=>onToggleApply(e.target.checked)} />
+          Aplicar mejorador
+        </label>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm border-collapse">
+          <thead>
+            <tr className="border-b">
+              <th className="text-left p-2">Semana</th>
+              <th className="text-left p-2">Cortes W↔L</th>
+              <th className="text-left p-2">Islas trabajo</th>
+              <th className="text-left p-2">Islas libre</th>
+              <th className="text-left p-2">Score</th>
+            </tr>
+          </thead>
+          <tbody>
+            {breakdown.byWeek.map(w=>(
+              <tr key={w.week} className="border-b">
+                <td className="p-2">#{w.week}</td>
+                <td className="p-2">{w.cortes}</td>
+                <td className="p-2">{w.islasTrabajo}</td>
+                <td className="p-2">{w.islasLibre}</td>
+                <td className="p-2">{w.score}</td>
+              </tr>
+            ))}
+            <tr>
+              <td className="p-2 font-medium" colSpan={4}>Total</td>
+              <td className="p-2 font-medium">{breakdown.total}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p className="mt-2 text-xs text-slate-500">* Cuanto más bajo el score, mejor conciliación.</p>
+    </Card>
+  );
+}
+
+
+// === Panel: Auditoría de fines de semana (solo Admin)
+) {
+  if (!isAdmin) return null;
+
+  const rows = React.useMemo(() => {
+    const maxCons = Number(rules?.maxConsecutiveWeekends ?? 1);
+
+    const workedWeekend = (pid, w) => {
+      const sat = toDateValue(addDays(startDate, w*7 + 5));
+      const sun = toDateValue(addDays(startDate, w*7 + 6));
+      const satC = assignments[sat] || [];
+      const sunC = assignments[sun] || [];
+      return satC.some(a=>a.personId===pid) || sunC.some(a=>a.personId===pid);
+    };
+
+    const out = [];
+    for (const p of people){
+      let total=0, streak=0, maxStreak=0, viol=0;
+      for (let w=0; w<weeks; w++){
+        const wk = workedWeekend(p.id, w);
+        if (wk){ total++; streak++; } else { streak=0; }
+        if (streak>maxStreak) maxStreak=streak;
+        if (maxCons>0 && streak>maxCons) viol++;
+      }
+      out.push({ id:p.id, name:p.name, weekends:total, maxStreak, violations:viol });
+    }
+    return out.sort((a,b)=> a.name.localeCompare(b.name));
+  }, [assignments, people, startDate, weeks, rules]);
+
+  return (
+    <Card title="Auditoría de fines de semana">
+      <div className="text-xs text-slate-600 mb-2">
+        Regla vigente · máx. fines de semana consecutivos: <b>{rules?.maxConsecutiveWeekends ?? 1}</b>
+      </div>
+      <table className="w-full text-sm border-collapse">
+        <thead>
+          <tr className="border-b">
+            <th className="text-left p-2">Persona</th>
+            <th className="text-left p-2">Fines trabajados</th>
+            <th className="text-left p-2">Racha máx.</th>
+            <th className="text-left p-2">Infracciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(r=>(
+            <tr key={r.id} className="border-b">
+              <td className="p-2">{r.name}</td>
+              <td className="p-2">{r.weekends}</td>
+              <td className="p-2">{r.maxStreak}</td>
+              <td className={"p-2 " + (r.violations ? "text-rose-700" : "")}>{r.violations}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </Card>
+  );
+}
+
+){
+  const breakdown = React.useMemo(() => {
+    return scoreConciliacionBreakdown({ assignments, people, startDate, weeks, conciliacion });
+  }, [assignments, people, startDate, weeks, conciliacion]);
+
+  return (
+    <Card title="Score de conciliación (debug)">
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-sm text-slate-600">
+          Penalizaciones · Día-isla trabajo: <b>{safeConciliacion(conciliacion).penalizaDiaIslaTrabajo}</b> ·
+          Día-isla libre: <b>{safeConciliacion(conciliacion).penalizaDiaIslaLibre}</b> ·
+          Cortes/semana: <b>{safeConciliacion(conciliacion).penalizaCortesSemana}</b>
+        </div>
+        <label className="text-sm flex items-center gap-2">
+          <input type="checkbox" checked={!!applyConciliation} onChange={e=>onToggleApply(e.target.checked)} />
+          Aplicar mejorador
+        </label>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm border-collapse">
+          <thead>
+            <tr className="border-b">
+              <th className="text-left p-2">Semana</th>
+              <th className="text-left p-2">Cortes W↔L</th>
+              <th className="text-left p-2">Islas trabajo</th>
+              <th className="text-left p-2">Islas libre</th>
+              <th className="text-left p-2">Score</th>
+            </tr>
+          </thead>
+          <tbody>
+            {breakdown.byWeek.map(w=>(
+              <tr key={w.week} className="border-b">
+                <td className="p-2">#{w.week}</td>
+                <td className="p-2">{w.cortes}</td>
+                <td className="p-2">{w.islasTrabajo}</td>
+                <td className="p-2">{w.islasLibre}</td>
+                <td className="p-2">{w.score}</td>
+              </tr>
+            ))}
+            <tr>
+              <td className="p-2 font-medium" colSpan={4}>Total</td>
+              <td className="p-2 font-medium">{breakdown.total}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p className="mt-2 text-xs text-slate-500">* Cuanto más bajo el score, mejor conciliación.</p>
+    </Card>
+  );
+}
+
+// === Panel: Auditoría de fines de semana (solo Admin)
+) {
+  if (!isAdmin) return null;
+
+  // Calcula para cada persona: total de fines trabajados, racha máxima y nº de infracciones
+  const rows = React.useMemo(() => {
+    const maxCons = Number(rules?.maxConsecutiveWeekends ?? 1);
+    const out = [];
+
+    const workedWeekend = (pid, w) => {
+      const sat = toDateValue(addDays(startDate, w*7 + 5));
+      const sun = toDateValue(addDays(startDate, w*7 + 6));
+      const satC = assignments[sat] || [];
+      const sunC = assignments[sun] || [];
+      return satC.some(a=>a.personId===pid) || sunC.some(a=>a.personId===pid);
+    };
+
+    for (const p of people){
+      let total=0, streak=0, maxStreak=0, viol=0;
+      for (let w=0; w<weeks; w++){
+        const wk = workedWeekend(p.id, w);
+        if (wk){ total++; streak++; } else { streak=0; }
+        if (streak>maxStreak) maxStreak=streak;
+        if (maxCons>0 && streak>maxCons) viol++;
+      }
+      out.push({ id:p.id, name:p.name, weekends:total, maxStreak, violations:viol });
+    }
+    return out.sort((a,b)=> a.name.localeCompare(b.name));
+  }, [assignments, people, startDate, weeks, rules]);
+
+  return (
+    <Card title="Auditoría de fines de semana">
+      <div className="text-xs text-slate-600 mb-2">
+        Regla vigente · máx. fines de semana consecutivos: <b>{rules?.maxConsecutiveWeekends ?? 1}</b>
+      </div>
+      <table className="w-full text-sm border-collapse">
+        <thead>
+          <tr className="border-b">
+            <th className="text-left p-2">Persona</th>
+            <th className="text-left p-2">Fines trabajados</th>
+            <th className="text-left p-2">Racha máx.</th>
+            <th className="text-left p-2">Infracciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(r=>(
+            <tr key={r.id} className="border-b">
+              <td className="p-2">{r.name}</td>
+              <td className="p-2">{r.weekends}</td>
+              <td className="p-2">{r.maxStreak}</td>
+              <td className={\`p-2 \${r.violations ? 'text-rose-700' : ''}\`}>{r.violations}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </Card>
+  );
+}
+){
   const breakdown = useMemo(()=> scoreConciliacionBreakdown({
     assignments, people, startDate, weeks, conciliacion
   }), [assignments, people, startDate, weeks, conciliacion]);

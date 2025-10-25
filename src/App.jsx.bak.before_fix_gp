@@ -1,10 +1,10 @@
 import React, { useEffect, useMemo, useState } from "react";
 
-// === Defaults para autoload de usuarios no-admin ===
-const PUBLIC_SPACE = { id: "turnos-2025", readToken: "READ-2025" };
-
 // ===================== Config API (proxy Apache → Flask) =====================
 const API_BASE = "/api";
+// ===== Predeterminados para no-admin (ajusta el token):
+const DEFAULT_SPACE_ID = "turnos-2025";
+const DEFAULT_READ_TOKEN = "RTK-4987d8ae5a5f14c0497b59fcd4aeb43602d188ebae1c8680"; // <-- Sustituye por tu token corporativo
 
 // ===================== Helper fetch con/ sin JWT =====================
 async function api(path, opts = {}, token = "", extraHeaders = {}) {
@@ -112,42 +112,6 @@ function indexTimeOff(timeOffs, opts){
     }
   }
   return map;
-}
-
-
-// --- Helpers fines de semana (consecutivos) ---
-function saturdayOfWeekend(d){
-  const dt = new Date(d);
-  const day = dt.getDay(); // 6=Sat, 0=Sun
-  const sat = new Date(dt);
-  if(day===6){ /* sábado */ }
-  else if(day===0){ sat.setDate(sat.getDate()-1); }
-  else{
-    const dm = (dt.getDay()+6)%7; // 0..6 (L..D)
-    const off = 5 - dm; // 5 = sábado
-    sat.setDate(sat.getDate()+off);
-  }
-  sat.setHours(0,0,0,0);
-  return sat;
-}
-function weekendKeyStr(d){ return toDateValue(saturdayOfWeekend(d)); }
-function workedOnWeekend(assignments, satStr, personId){
-  const sat = assignments[satStr] || [];
-  const sunStr = toDateValue(addDays(parseDateValue(satStr),1));
-  const sun = assignments[sunStr] || [];
-  return sat.some(a=>a.personId===personId) || sun.some(a=>a.personId===personId);
-}
-function countPrevConsecutiveWeekends(assignmentsSoFar, date, personId){
-  // cuenta hacia atrás (sin contar el fin de semana actual)
-  let c=0;
-  const thisSat = saturdayOfWeekend(date);
-  let sat = new Date(thisSat); sat.setDate(sat.getDate()-7);
-  for(let i=0;i<60;i++){
-    const satStr = toDateValue(sat);
-    if(workedOnWeekend(assignmentsSoFar, satStr, personId)){ c++; sat.setDate(sat.getDate()-7); }
-    else break;
-  }
-  return c;
 }
 
 // ===================== Reglas duras convenio =====================
@@ -364,22 +328,18 @@ function dayWorks(assignments, dateStr, personId){
 
 // Fallback de pesos por si vienen vacíos desde localStorage/nube
 function safeConciliacion(c){
-  const def = { penalizaDiaIslaTrabajo:3, penalizaDiaIslaLibre:2, penalizaCortesSemana:1, penalizaFinDeSemanaExtra:1, penalizaFinesConsecutivos:2 };
+  const def = { penalizaDiaIslaTrabajo:3, penalizaDiaIslaLibre:2, penalizaCortesSemana:1 };
   return c ? { ...def, ...c } : def;
 }
 
 // Score de conciliación
-
 function scoreConciliacion({assignments, people, startDate, weeks, conciliacion}){
   conciliacion = safeConciliacion(conciliacion);
   let score = 0;
-
-  // cortes e islas
   for (const p of people){
     for (let w=0; w<weeks; w++){
       const weekDays = [...Array(7)].map((_,i)=> toDateValue(addDays(startDate, w*7+i)));
       const works = weekDays.map(ds => dayWorks(assignments, ds, p.id) ? 1 : 0);
-
       for (let i=1;i<7;i++){
         if (works[i] !== works[i-1]) score += conciliacion.penalizaCortesSemana;
       }
@@ -389,23 +349,6 @@ function scoreConciliacion({assignments, people, startDate, weeks, conciliacion}
       }
     }
   }
-
-  // penalización soft por fines de semana (extra y consecutivos)
-  if (conciliacion.penalizaFinDeSemanaExtra || conciliacion.penalizaFinesConsecutivos){
-    for (const p of people){
-      let totalWE = 0;
-      let consec = 0;
-      for (let w=0; w<weeks; w++){
-        const sat = toDateValue(addDays(startDate, w*7+5));
-        const sun = toDateValue(addDays(startDate, w*7+6));
-        const workedWE = dayWorks(assignments, sat, p.id) || dayWorks(assignments, sun, p.id);
-        if (workedWE){ totalWE++; consec++; } else { consec=0; }
-        if (consec >= 3) score += (conciliacion.penalizaFinesConsecutivos||0);
-      }
-      if (totalWE > 3) score += (totalWE - 3) * (conciliacion.penalizaFinDeSemanaExtra||0);
-    }
-  }
-
   return score;
 }
 
@@ -685,22 +628,14 @@ export default function App(){
     setAuth({ token:data.token, user:data.user });
   }
   function doLogout(){
-  try{ localStorage.removeItem("turnos_auth"); }catch(e){}
-  setAuth({ token:"", user:null });
-  // Evita renders intermedios inconsistentes tras logout
-  setTimeout(()=>{ window.location.reload(); }, 0);
-}
+    try { localStorage.removeItem("turnos_auth"); } catch {}
+    if (typeof setAutoCloudLoaded === "function") { try { setAutoCloudLoaded(false); } catch {} }
+    setAuth({ token:"", user:null });
+  }
   
   // --- ui feedback (banner + toast) ---
   const [ui, setUI] = useState({ sync:null, toast:null });
-  
-  
-  // Modal día (compartido)
-  const [modalDay, setModalDay] = useState(null);
-function showToast(msg){ setUI(prev=>({...prev, toast:msg})); setTimeout(()=>setUI(prev=>({...prev, toast:null})), 2000); }
-
-
-
+  function showToast(msg){ setUI(prev=>({...prev, toast:msg})); setTimeout(()=>setUI(prev=>({...prev, toast:null})), 2000); }
 
   // --- permisos UI ---
   const isAdmin = auth.user?.role === 'admin';
@@ -725,7 +660,7 @@ function showToast(msg){ setUI(prev=>({...prev, toast:msg})); setTimeout(()=>set
     swaps: [], showArchivedSwaps:false,
     rules: { enforce:true, maxDailyHours:9, maxWeeklyHours:40, minRestHours:12, maxDaysPerWeek:5, maxConsecutiveWeekends:1 },
     applyConciliation: true,
-    conciliacion: { penalizaDiaIslaTrabajo:3, penalizaDiaIslaLibre:2, penalizaCortesSemana:1, penalizaFinDeSemanaExtra:1, penalizaFinesConsecutivos:2 },
+    conciliacion: { penalizaDiaIslaTrabajo:3, penalizaDiaIslaLibre:2, penalizaCortesSemana:1 },
   
     offPolicy: {
       enableLimitOffOnVacationWeek: true,
@@ -760,18 +695,17 @@ function showToast(msg){ setUI(prev=>({...prev, toast:msg})); setTimeout(()=>set
   }, [state.offPolicy, state.customHolidaysByYear]);
 
   // ---------- Cloud (SQLite) ----------
-  const [cloud, setCloud] = useState({ spaceId:"turnos-2025", readToken:"READ-2025", writeToken:"WRT-1234", apiKey:"" });
+  const [cloud, setCloud] = useState(() => ({ spaceId: (typeof DEFAULT_SPACE_ID!=="undefined" ? DEFAULT_SPACE_ID : "turnos-2025"), readToken: (typeof DEFAULT_READ_TOKEN!=="undefined" ? DEFAULT_READ_TOKEN : ""), writeToken: "", apiKey: "" }));
   async function cloudLoad() { setUI(prev=>({...prev, sync:"loading"}));
     // (no-admin) intentamos cargar aunque no haya readToken; el backend decidirá
-// // No cortamos a no-admin por falta de readToken; el backend decidirá.
+// // No bloqueamos en clientes no-admin por falta de token (el backend validará)
 // if (!isAdmin && !cloud.readToken) { showToast("Falta ReadToken"); setUI(prev=>({...prev, sync:"error"})); return; }
     try{
       const extra={}; if(cloud.apiKey) extra["X-API-Key"]=cloud.apiKey; if(cloud.readToken) extra["X-Read-Token"]=cloud.readToken;
       const data = await api(`/state/${encodeURIComponent(cloud.spaceId)}`, { method:"GET" }, auth.token, extra);
       if(!data.payload){ alert("No hay datos guardados para ese Space ID"); return; }
       const payload = { ...data.payload };
-      payload.conciliacion = safeConciliacion(payload.conciliacion || {});
-if (!payload.conciliacion) payload.conciliacion = safeConciliacion();
+      if (!payload.conciliacion) payload.conciliacion = safeConciliacion();
       if (typeof payload.applyConciliation === 'undefined') payload.applyConciliation = true;
       // Defaults de offPolicy si no existen en la nube
       if (!payload.offPolicy) {
@@ -869,69 +803,10 @@ function goToday(){
   }
   const weeklyStart=useMemo(()=> addDays(startDate, weekIndex*7), [startDate, weekIndex]);
   const canPrev=weekIndex>0, canNext=weekIndex<state.weeks-1, canNextRange=weekIndex<state.weeks-userWeeks;
+  const [modalDay,setModalDay]=useState(null);
 
   // ---------- Auth-only: login screen ----------
-  
-
-if (!auth.user || !auth.token) {
-  // Renderiza el header una vez existen state/isAdmin/ui y handlers
-  // Header como componente (recibe todo lo que necesita vía props)
-  // Header como componente robusto: usa props y mapea state desde props
-  function HeaderBar(props){
-    const state = props?.state;
-    const {
-      setState, isAdmin, ui, cloud, setCloud,
-      showToast, doLogout, exportCSV, exportJSON,
-      importJSON, cloudLoad, cloudSave
-    } = props || {};
-    if (!state) return null;
-    return (
-<header className="sticky top-0 z-10 bg-white/90 backdrop-blur border-b border-slate-200">
-        <div className="w-full max-w-[1800px] mx-auto px-6 py-3 flex items-center justify-between">
-          <h1 className="text-lg font-semibold">Gestor de Turnos · Usuarios + SQLite</h1>
-          <div className="flex items-center gap-2 text-sm">
-            <span className="px-2 py-1 rounded bg-slate-100 border">
-              {auth.user?.name || auth.user?.email || "Usuario"} · {auth.user?.role || ""}
-            </span>
-            {isAdmin && (<button onClick={()=>setState(prev=>({...prev, rebalance:!prev.rebalance}))}
-              className={`px-3 py-1.5 rounded-lg border ${state.rebalance?'bg-emerald-50 border-emerald-300':'border-slate-300 hover:bg-slate-100'}`}>
-              {state.rebalance? 'Reequilibrio ON':'Reequilibrar'}
-            </button>)}
-
-            {/* Export/Import local */}{/* Controles Nube */}{isAdmin && (
-<>
-<>
-            <button onClick={props.exportCSV} className="px-3 py-1.5 rounded-lg border">CSV</button>
-            <button onClick={props.exportJSON} className="px-3 py-1.5 rounded-lg border">Export JSON</button>
-            <label className="px-3 py-1.5 rounded-lg border cursor-pointer">Import JSON
-              <input type="file" accept="application/json" className="hidden" onChange={(e)=> e.target.files && props.importJSON(e.target.files[0])}/>
-            </label>
-
-            
-</>
-<input className="border rounded px-2 py-1 w-32" placeholder="Space ID"
-              value={cloud.spaceId} onChange={e=>setCloud({...cloud,spaceId:e.target.value})}/>
-            <input className="border rounded px-2 py-1 w-28" placeholder="ReadToken"
-              value={cloud.readToken} onChange={e=>setCloud({...cloud,readToken:e.target.value})}/>
-            <input className="border rounded px-2 py-1 w-28" placeholder="WriteToken"
-              value={cloud.writeToken} onChange={e=>setCloud({...cloud,writeToken:e.target.value})}/>
-            <button onClick={props.cloudLoad} className="px-3 py-1.5 rounded-lg border">Cargar nube</button>
-            <button onClick={props.cloudSave} className="px-3 py-1.5 rounded-lg border">Guardar nube</button>
-  </>
-)}
-{ui.sync==="loading" && <span className="px-2 py-1 rounded bg-amber-100 border border-amber-300">Sincronizando…</span>}
-            {ui.sync==="ok" && <span className="px-2 py-1 rounded bg-emerald-100 border border-emerald-300">¡Listo!</span>}
-            {ui.sync==="error" && <span className="px-2 py-1 rounded bg-rose-100 border border-rose-300">Error</span>}
-            {ui.toast && (<div className="fixed right-4 bottom-4 z-50 bg-black text-white px-3 py-2 rounded-lg shadow">{ui.toast}</div>)}
-            <button onClick={()=>props.setAuth({ token:"", user:null })} className="px-2 py-1 rounded border">Salir</button>
-          </div>
-        </div>
-      </header>
-    );
-  }
-
-
-
+  if (!auth.user || !auth.token) {
     return (
       <div className="min-h-screen grid place-items-center bg-slate-50 text-slate-900">
         <div className="bg-white rounded-2xl shadow p-6 w-full max-w-sm border border-slate-200">
@@ -960,711 +835,41 @@ if (!auth.user || !auth.token) {
   }
 
   // ---------- Exportaciones (CSV/ICS/Nómina) ----------
-  function exportCSV(){
-    const rows = buildCSV(ASS, state.people);
-    const blob = new Blob([rows.join("\\n")], {type:"text/csv;charset=utf-8;"});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = `turnos_${state.startDate}_${state.weeks}w.csv`; a.click();
-    URL.revokeObjectURL(url);
-  }
-  function exportJSON(){
-    const blob = new Blob([JSON.stringify(state,null,2)], {type:'application/json'});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = `turnos_backup_${state.startDate}.json`; a.click();
-    URL.revokeObjectURL(url);
-  }
-  function importJSON(file){
-    const r = new FileReader();
-    r.onload = ()=>{ try{ setState(JSON.parse(r.result)); }catch{ alert('JSON inválido'); } };
-    r.readAsText(file);
-  }
-  function exportICS(personId){
-    const ics = buildICS({ assignments: ASS, people: state.people, personId, startDate, weeks: state.weeks });
-    const blob = new Blob([ics], {type:'text/calendar;charset=utf-8'});
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob); a.download = `turnos_${personId}.ics`; a.click();
-  }
+  function exportCSV(){ const rows=buildCSV(ASS, state.people); const blob=new Blob([rows.join("\n")],{type:"text/csv;charset=utf-8;"}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=`turnos_${state.startDate}_${state.weeks}w.csv`; a.click(); URL.revokeObjectURL(url); }
+  function exportJSON(){ const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=`turnos_backup_${state.startDate}.json`; a.click(); URL.revokeObjectURL(url); }
+  function importJSON(file){ const r=new FileReader(); r.onload=()=>{ try{ setState(JSON.parse(r.result)); }catch{ alert('JSON inválido'); } }; r.readAsText(file); }
+  function exportICS(personId){ const ics=buildICS({assignments:ASS, people:state.people, personId, startDate, weeks:state.weeks}); const blob=new Blob([ics],{type:'text/calendar;charset=utf-8'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`turnos_${personId}.ics`; a.click(); }
+
   function exportPayroll(){
     const header=['persona','desde','hasta','horas_lv','horas_sd','horas_refuerzo','horas_totales'];
     const rows=[header.join(',')];
-    const from = parseDateValue(payroll.from), to = parseDateValue(payroll.to);
+    const from=parseDateValue(payroll.from), to=parseDateValue(payroll.to);
     const days=[]; for(let d=new Date(from); d<=to; d=addDays(d,1)) days.push(toDateValue(d));
     const byPerson=new Map(state.people.map(p=>[p.id,{lv:0,sd:0,ref:0}]));
-    for(const dateStr of days){
-      const cell=ASS[dateStr]||[];
-      for(const a of cell){
-        if(!a.personId) continue;
-        const dur = effectiveMinutes(a.shift)/60;
-        const rec = byPerson.get(a.personId);
-        const isWE = isWeekend(parseDateValue(dateStr));
-        const isRef = (a.shift.label||'').toLowerCase().includes('refuerzo');
-        if(isRef) rec.ref += dur; else if(isWE) rec.sd += dur; else rec.lv += dur;
-      }
-    }
-    for(const p of state.people){
-      const r=byPerson.get(p.id);
-      const total=(r.lv+r.sd+r.ref).toFixed(1);
-      rows.push([p.name,payroll.from,payroll.to,r.lv.toFixed(1),r.sd.toFixed(1),r.ref.toFixed(1),total].join(','));
-    }
-    const blob=new Blob([rows.join("\\n")],{type:'text/csv;charset=utf-8;'});
-    const a=document.createElement('a');
-    a.href=URL.createObjectURL(blob);
-    a.download=`nomina_${payroll.from}_${payroll.to}.csv`;
-    a.click();
+    for(const dateStr of days){ const cell=ASS[dateStr]||[]; for(const a of cell){ if(!a.personId) continue; const dur = effectiveMinutes(a.shift)/60; const rec=byPerson.get(a.personId); const isWE=isWeekend(parseDateValue(dateStr)); const isRef=(a.shift.label||'').toLowerCase().includes('refuerzo'); if(isRef) rec.ref+=dur; else if(isWE) rec.sd+=dur; else rec.lv+=dur; } }
+    for(const p of state.people){ const r=byPerson.get(p.id); const total=(r.lv+r.sd+r.ref).toFixed(1); rows.push([p.name,payroll.from,payroll.to,r.lv.toFixed(1),r.sd.toFixed(1),r.ref.toFixed(1),total].join(',')); }
+    const blob=new Blob([rows.join("\n")],{type:'text/csv;charset=utf-8;'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`nomina_${payroll.from}_${payroll.to}.csv`; a.click();
   }
 
-return (
-  <AuthenticatedApp
-  auth={auth}
-  setAuth={setAuth}
-  ui={ui}
-  setUI={setUI}
-  showToast={showToast}
   
-  modalDay={modalDay}
-  setModalDay={setModalDay}
-state={state}
-  setState={setState}
-  cloud={cloud}
-  setCloud={setCloud}
-  cloudLoad={cloudLoad}
-  cloudSave={cloudSave}
-  startDate={startDate}
-  weeklyStart={weeklyStart}
-  userWeeks={userWeeks}
-  setUserWeeks={setUserWeeks}
-  weekIndex={weekIndex}
-  setWeekIndex={setWeekIndex}
-  canPrev={canPrev}
-  canNext={canNext}
-  canNextRange={canNextRange}
-  payroll={payroll}
-  setPayroll={setPayroll}
-  ASS={ASS}
-  controls={controls}
-  exportCSV={exportCSV}
-  exportJSON={exportJSON}
-  importJSON={importJSON}
-  exportICS={exportICS}
-  exportPayroll={exportPayroll}
-  up={up}
-  upPerson={upPerson}
-  forceAssign={forceAssign}
-/>
-);
-}
-
-// ===================== UI base =====================
-function Card({title,children}){ return (<div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4">{title && <h2 className="text-base font-semibold mb-3">{title}</h2>}{children}</div>); }
-
-// ===== Config Panels =====
-function ConfigBasica({ state, up }){
-  return (
-    <Card title="Configuración básica">
-      <div className="grid grid-cols-2 gap-3">
-        <label className="col-span-2 text-sm">Fecha de inicio (lunes recomendado)</label>
-        <input type="date" value={state.startDate} onChange={(e)=>up(['startDate'],e.target.value)} className="col-span-2 px-3 py-2 rounded-lg border"/>
-        <div><label className="text-sm">Semanas a mostrar</label><input type="number" min={1} max={52} value={state.weeks} onChange={(e)=>up(['weeks'],Number(e.target.value))} className="w-full px-3 py-2 rounded-lg border"/></div>
-        <div className="col-span-2">
-          <button
-            type="button"
-            className="px-3 py-2 rounded-lg border"
-            title="Calcular semanas hasta el 31/12"
-            onClick={() => { const s = parseDateValue(state.startDate); const end = new Date(s.getFullYear(), 11, 31); const days = Math.max(1, Math.floor((end - s)/(24*3600*1000)) + 1); const w = Math.ceil(days/7); up(['weeks'], w); }}
-          >Hasta fin de año</button>
-        </div>
-        <div><label className="text-sm">Horas objetivo/año</label><input type="number" min={1400} max={2200} value={state.annualTargetHours} onChange={(e)=>up(['annualTargetHours'],Number(e.target.value))} className="w-full px-3 py-2 rounded-lg border"/></div>
-        <div><label className="text-sm">Vacaciones (días laborables)</label><input type="number" min={0} max={60} value={state.vacationDaysNatural} onChange={(e)=>up(['vacationDaysNatural'],Number(e.target.value))} className="w-full px-3 py-2 rounded-lg border"/></div>
-        <div><label className="text-sm">Horas por día de VIAJE</label><input type="number" min={0} max={12} value={state.travelDefaultHours} onChange={(e)=>up(['travelDefaultHours'],Number(e.target.value))} className="w-full px-3 py-2 rounded-lg border"/></div>
-        <div className="col-span-2 flex items-center gap-2">
-          <label className="text-sm flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={state.applyConciliation}
-              onChange={e=>up(['applyConciliation'], e.target.checked)}
-            />
-            Aplicar mejorador de conciliación
-          </label>
-        </div>
-      </div>
-    </Card>
-  );
-}
-
-function ConciliacionPanel({ state, up }){
-  // valores actuales (con fallback por si el payload era antiguo)
-  const c = state.conciliacion || { penalizaDiaIslaTrabajo:3, penalizaDiaIslaLibre:2, penalizaCortesSemana:1 };
-
-  function setNum(path, val){
-    const n = Number(val);
-    if (Number.isNaN(n)) return;
-    up(['conciliacion', path], Math.max(0, Math.min(20, n))); // clamp 0..20
-  }
-
-  function resetDefaults(){
-    up(['conciliacion'], { penalizaDiaIslaTrabajo:3, penalizaDiaIslaLibre:2, penalizaCortesSemana:1 });
-  }
-
-  return (
-    <Card title="Conciliación (pesos de penalización)">
-      <div className="grid grid-cols-12 gap-3">
-        <div className="col-span-12 text-xs text-slate-600">
-          Ajusta cuánto penalizamos cada patrón al mejorar el cuadrante. Activa/Desactiva el mejorador en <b>Configuración básica</b>.
-        </div>
-
-        <div className="col-span-12 sm:col-span-6">
-          <label className="text-xs block mb-1">Día isla de trabajo <span className="text-slate-400">(0–20)</span></label>
-          <input
-            type="number" min={0} max={20}
-            value={c.penalizaDiaIslaTrabajo}
-            onChange={e=>setNum('penalizaDiaIslaTrabajo', e.target.value)}
-            className="w-full border rounded px-2 py-1"
-          />
-          <div className="text-[11px] text-slate-500 mt-1">Patrón 0–1–0 (trabaja solo entre libres).</div>
-        </div>
-
-        <div className="col-span-12 sm:col-span-6">
-          <label className="text-xs block mb-1">Día isla libre <span className="text-slate-400">(0–20)</span></label>
-          <input
-            type="number" min={0} max={20}
-            value={c.penalizaDiaIslaLibre}
-            onChange={e=>setNum('penalizaDiaIslaLibre', e.target.value)}
-            className="w-full border rounded px-2 py-1"
-          />
-          <div className="text-[11px] text-slate-500 mt-1">Patrón 1–0–1 (libra un único día entre trabajo).</div>
-        </div>
-
-        <div className="col-span-12 sm:col-span-6">
-          <label className="text-xs block mb-1">Cortes W↔L por semana <span className="text-slate-400">(0–20)</span></label>
-          <input
-            type="number" min={0} max={20}
-            value={c.penalizaCortesSemana}
-            onChange={e=>setNum('penalizaCortesSemana', e.target.value)}
-            className="w-full border rounded px-2 py-1"
-          />
-          <div className="text-[11px] text-slate-500 mt-1">Transiciones Trabajo↔Libre dentro de la semana.</div>
-        </div>
-
-        <div className="col-span-12 flex gap-2">
-          <button onClick={resetDefaults} className="px-3 py-1.5 rounded-lg border">Restaurar valores por defecto</button>
-        </div>
-
-        <div className="col-span-12 text-[11px] text-slate-500">
-          Sugerencia: empieza con 3 / 2 / 1. Sube la penalización si aún ves “días isla”.
-        </div>
-      </div>
-    </Card>
-  );
-}
-
-
-
-function ReglasPanel({ state, up }){
-  return (
-    <Card title="Reglas duras del convenio">
-      <div className="grid grid-cols-12 gap-2">
-        <div className="col-span-12 flex items-center gap-2">
-          <label className="text-xs flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={!!state.rules.enforce}
-              onChange={(e)=>up(['rules','enforce'], e.target.checked)}
-            />
-            Enforzar reglas
-          </label>
-        </div>
-
-        <div className="col-span-3">
-          <label className="text-xs">Máx horas/día</label>
-          <input
-            type="number" min={1} max={12}
-            value={state.rules.maxDailyHours}
-            onChange={(e)=>up(['rules','maxDailyHours'], Number(e.target.value))}
-            className="w-full px-2 py-1 rounded border"
-          />
-        </div>
-
-        <div className="col-span-3">
-          <label className="text-xs">Máx horas/semana</label>
-          <input
-            type="number" min={5} max={60}
-            value={state.rules.maxWeeklyHours}
-            onChange={(e)=>up(['rules','maxWeeklyHours'], Number(e.target.value))}
-            className="w-full px-2 py-1 rounded border"
-          />
-        </div>
-
-        <div className="col-span-3">
-          <label className="text-xs">Descanso mínimo (h)</label>
-          <input
-            type="number" min={0} max={24}
-            value={state.rules.minRestHours}
-            onChange={(e)=>up(['rules','minRestHours'], Number(e.target.value))}
-            className="w-full px-2 py-1 rounded border"
-          />
-        </div>
-
-        <div className="col-span-3">
-          <label className="text-xs">Fines consecutivos (máx)</label>
-          <input
-            type="number" min={0} max={6}
-            value={state.rules.maxConsecutiveWeekends ?? 1}
-            onChange={(e)=>up(['rules','maxConsecutiveWeekends'], Math.max(0, Number(e.target.value)||0))}
-            className="w-full px-2 py-1 rounded border"
-          />
-        </div>
-      </div>
-
-      <p className="mt-2 text-xs text-slate-500">
-        Si no hay turnos encadenados, el descanso mínimo se ignora.
-      </p>
-    </Card>
-  );
-}
-function PersonasPanel({ state, upPerson }){
-  return (
-    <Card title="Personas (offset = semana OFF)">
-      <div className="space-y-3">
-        {state.people.map(p=> (
-          <div key={p.id} className="grid grid-cols-12 items-center gap-2 p-2 rounded-lg border">
-            <div className="col-span-5 flex items-center gap-2"><span className="h-4 w-4 rounded" style={{background:p.color}}/><input value={p.name} onChange={(e)=>upPerson(p.id,{name:e.target.value})} className="px-2 py-1 rounded border w-full"/></div>
-            <div className="col-span-4 flex items-center gap-2"><label className="text-sm">Offset</label><input type="number" min={0} max={3} value={p.offset} onChange={(e)=>upPerson(p.id,{offset:Number(e.target.value)})} className="px-2 py-1 rounded border w-full"/></div>
-            <div className="col-span-3"><input type="color" value={p.color} onChange={(e)=>upPerson(p.id,{color:e.target.value})} className="w-full h-8"/></div>
-          </div>
-        ))}
-        <p className="text-xs text-slate-500">Offsets 0,1,2,3 → cada semana 1 persona OFF.</p>
-      </div>
-    </Card>
-  );
-}
-function TurnosPanel({ state, up }){
-  return (
-    <Card title="Turnos (Admin)">
-      <div className="space-y-4">
-        <div>
-          <div className="text-sm font-medium mb-2">Entre semana (2 turnos)</div>
-          {state.weekdayShifts.map((s,idx)=> (
-            <div key={idx} className="grid grid-cols-12 items-end gap-2 mb-2">
-              <div className="col-span-4"><label className="text-xs">Inicio</label><input type="time" value={s.start} onChange={(e)=>up(['weekdayShifts',idx,'start'],e.target.value)} className="px-2 py-1 rounded border w-full"/></div>
-              <div className="col-span-4"><label className="text-xs">Fin</label><input type="time" value={s.end} onChange={(e)=>up(['weekdayShifts',idx,'end'],e.target.value)} className="px-2 py-1 rounded border w-full"/></div>
-              <div className="col-span-4"><label className="text-xs">Etiqueta</label><input value={s.label||''} onChange={(e)=>up(['weekdayShifts',idx,'label'],e.target.value)} className="px-2 py-1 rounded border w-full"/></div>
-              <div className="col-span-4"><label className="text-xs">Comida (min)</label><input type="number" min={0} max={180} value={s.lunchMinutes||0} onChange={(e)=>up(['weekdayShifts',idx,'lunchMinutes'], Number(e.target.value)||0)} className="px-2 py-1 rounded border w-full"/></div>
-              <div className="col-span-12 text-[11px] text-slate-500">Horas: {(minutesDiff(s.start,s.end)/60).toFixed(1)}h brutas · {(effectiveMinutes(s)/60).toFixed(1)}h netas{(s.lunchMinutes||0) ? (" (comida "+(s.lunchMinutes)+"m)") : ""}</div>
-            </div>
-          ))}
-        </div>
-        <div>
-          <div className="text-sm font-medium mb-2">Fin de semana (1 turno base)</div>
-          <div className="grid grid-cols-12 items-end gap-2">
-            <div className="col-span-4"><label className="text-xs">Inicio</label><input type="time" value={state.weekendShift.start} onChange={(e)=>up(['weekendShift','start'],e.target.value)} className="px-2 py-1 rounded border w-full"/></div>
-            <div className="col-span-4"><label className="text-xs">Fin</label><input type="time" value={state.weekendShift.end} onChange={(e)=>up(['weekendShift','end'],e.target.value)} className="px-2 py-1 rounded border w-full"/></div>
-            <div className="col-span-4"><label className="text-xs">Etiqueta</label><input value={state.weekendShift.label||''} onChange={(e)=>up(['weekendShift','label'],e.target.value)} className="px-2 py-1 rounded border w-full"/></div>
-          </div>
-        </div>
-        <div>
-          <div className="text-sm font-medium mb-2">Turno de Refuerzo (L–V)</div>
-          <div className="grid grid-cols-12 items-end gap-2">
-            <div className="col-span-4"><label className="text-xs">Inicio</label><input type="time" value={state.refuerzoWeekdayShift.start} onChange={(e)=>up(['refuerzoWeekdayShift','start'],e.target.value)} className="px-2 py-1 rounded border w-full"/></div>
-            <div className="col-span-4"><label className="text-xs">Fin</label><input type="time" value={state.refuerzoWeekdayShift.end} onChange={(e)=>up(['refuerzoWeekdayShift','end'],e.target.value)} className="px-2 py-1 rounded border w-full"/></div>
-            <div className="col-span-4"><label className="text-xs">Etiqueta</label><input value={state.refuerzoWeekdayShift.label||''} onChange={(e)=>up(['refuerzoWeekdayShift','label'],e.target.value)} className="px-2 py-1 rounded border w-full"/></div>
-            <div className="col-span-4"><label className="text-xs">Comida (min)</label><input type="number" min={0} max={180} value={state.refuerzoWeekdayShift.lunchMinutes||0} onChange={(e)=>up(['refuerzoWeekdayShift','lunchMinutes'], Number(e.target.value)||0)} className="px-2 py-1 rounded border w-full"/></div>
-            <div className="col-span-12 text-[11px] text-slate-500">Horas: {(minutesDiff(state.refuerzoWeekdayShift.start,state.refuerzoWeekdayShift.end)/60).toFixed(1)}h brutas · {(effectiveMinutes(state.refuerzoWeekdayShift)/60).toFixed(1)}h netas{(state.refuerzoWeekdayShift.lunchMinutes||0) ? (" (comida "+(state.refuerzoWeekdayShift.lunchMinutes)+"m)") : ""}</div>
-          </div>
-        </div>
-      </div>
-    </Card>
-  );
-}
-function FestivosPanel({ state, up }){
-  return (
-    <Card title="Festivos (2025)">
-      <div className="grid grid-cols-12 gap-2">
-        <div className="col-span-7"><label className="text-xs">Provincia</label><select value={state.province} onChange={(e)=>up(['province'],e.target.value)} className="w-full px-2 py-1 rounded border">{Object.keys(HOLIDAYS_2025).map(p=> <option key={p} value={p}>{p}</option>)}</select></div>
-        <div className="col-span-5 flex flex-col justify-end gap-2">
-          <label className="text-xs flex items-center gap-2">
-            <input type="checkbox" checked={state.consumeVacationOnHoliday} onChange={(e)=>up(['consumeVacationOnHoliday'],e.target.checked)} />
-            Consumir vacaciones en festivos
-          </label>
-          <label className="text-xs flex items-center gap-2">
-            <input type="checkbox" checked={state.closeOnHolidays} onChange={(e)=>up(['closeOnHolidays'], e.target.checked)} />
-            Cerrar tienda en festivos oficiales
-          </label>
-        </div>
-        <div className="col-span-12 text-xs bg-slate-50 border rounded p-2">{(HOLIDAYS_2025[state.province]||[]).join(', ') || 'Sin datos'}</div>
-      </div>
-    </Card>
-  );
-}
-
-// ===== Calendarios =====
-
-function CustomHolidaysPanel({ state, up }){
-  const years = (()=>{ const y = new Date().getFullYear(); return [y-1, y, y+1, y+2]; })();
-  const [year,setYear] = React.useState(new Date().getFullYear());
-  const dates = (state.customHolidaysByYear && state.customHolidaysByYear[year]) ? state.customHolidaysByYear[year] : [];
-  const [newDate, setNewDate] = React.useState(String(year) + "-12-25");
-
-  function save(list){
-    const next = structuredClone(state.customHolidaysByYear || {});
-    next[year] = list;
-    up(['customHolidaysByYear'], next);
-  }
-  function add(){
-    if(!newDate || !/^\d{4}-\d{2}-\d{2}$/.test(newDate)) return;
-    if(!String(newDate).startsWith(String(year))) { alert('La fecha debe pertenecer al año seleccionado.'); return; }
-    if(dates.includes(newDate)) return;
-    const list = [...dates, newDate].sort();
-    save(list);
-  }
-  function remove(idx){
-    const list = dates.filter((_,i)=> i!==idx);
-    save(list);
-  }
-  function copyProvinceDefaults(){
-    const prov = state.province || 'Madrid';
-    if (year !== 2025) { alert('Sólo hay plantilla oficial incrustada para 2025. Añade manualmente para otros años.'); return; }
-    const base = (HOLIDAYS_2025[prov] || []);
-    save(base.slice().sort());
-  }
-  function clearAll(){ if (confirm('¿Vaciar festivos personalizados del año ' + year + '?')) save([]); }
-
-  return (
-    <Card title="Festivos personalizados (por año)">
-      <div className="grid grid-cols-12 gap-2 text-sm">
-        <div className="col-span-6">
-          <label className="text-xs">Año</label>
-          <select className="w-full border rounded px-2 py-1" value={year} onChange={(e)=>setYear(Number(e.target.value))}>
-            {years.map(y=> <option key={y} value={y}>{y}</option>)}
-          </select>
-        </div>
-        <div className="col-span-6 flex items-end gap-2">
-          <button onClick={copyProvinceDefaults} className="px-3 py-1.5 rounded-lg border w-full">Copiar oficiales {state.province} (2025)</button>
-        </div>
-
-        <div className="col-span-8">
-          <label className="text-xs">Añadir fecha</label>
-          <input type="date" className="w-full border rounded px-2 py-1" value={newDate} onChange={(e)=>setNewDate(e.target.value)} />
-        </div>
-        <div className="col-span-4 flex items-end">
-          <button onClick={add} className="px-3 py-1.5 rounded-lg border w-full">Añadir</button>
-        </div>
-
-        <div className="col-span-12">
-          <div className="flex items-center justify-between mb-1">
-            <div className="text-xs text-slate-600">Fechas marcadas como festivo para {year} (se combinan con las oficiales si el cierre en festivos está activado):</div>
-            <button onClick={clearAll} className="text-rose-700 text-xs underline">Vaciar año</button>
-          </div>
-          <div className="border rounded-lg p-2 bg-white max-h-40 overflow-auto">
-            {dates.length===0 && <div className="text-sm text-slate-500">No has añadido festivos personalizados para {year}.</div>}
-            {dates.map((d,idx)=>(
-              <div key={d} className="flex items-center justify-between text-sm py-1">
-                <div>{d}</div>
-                <button onClick={()=>remove(idx)} className="text-rose-700 underline text-xs">Eliminar</button>
-              </div>
-            ))}
-          </div>
-          <div className="text-[11px] text-slate-500 mt-1">
-            * Requiere tener marcada la opción “Cerrar tienda en festivos oficiales”.<br/>
-            * Los festivos personalizados aplican solo al año seleccionado.
-          </div>
-        </div>
-      </div>
-    </Card>
-  );
-}
-
-
-function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmin, onQuickAssign, province, closeOnHolidays, closedExtraDates, customHolidaysByYear }){ const todayStr = toDateValue(new Date());
-  const days=[]; for(let w=0;w<weeks;w++) for(let d=0;d<7;d++) days.push(addDays(startDate, w*7+d));
-  const personMap=new Map(people.map(p=>[p.id,p]));
-  return (
-    <div className="overflow-x-auto">
-      <div className="grid grid-cols-7 gap-4 w-full">
-        {days.map(date=>{
-          const dateStr=toDateValue(date); const wd=date.toLocaleDateString(undefined,{weekday:'short'}); const day=date.getDate(); const isWE=isWeekend(date); const cell=assignments[dateStr]||[]; const hasConflict=cell.some(c=>c.conflict);
-          const sorted=[...cell].sort((a,b)=> minutesFromHHMM(a.shift.start)-minutesFromHHMM(b.shift.start));
-          const isClosed = isClosedBusinessDay2(dateStr, province, closeOnHolidays, closedExtraDates, customHolidaysByYear);
-          return (
-            <div key={dateStr} className={`rounded-2xl border p-2 ${isWE? 'bg-slate-50':'bg-white'} ${hasConflict? 'border-red-400':'border-slate-200'}`}>
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-baseline gap-2">
-                  <span className="text-lg font-bold leading-none">{day}</span>
-                  <span className="text-[11px] uppercase tracking-wide text-slate-500">{wd}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="text-[10px] text-slate-500">{dateStr}</div>
-                  <button className="h-6 w-6 grid place-items-center rounded-full border hover:bg-slate-100 text-xs" title="Ampliar día" aria-label="Ampliar día" onClick={()=>onOpenDay(dateStr)}>🔍</button>
-                </div>
-              </div>
-              <div className="space-y-1.5">
-                {isClosed && (
-                  <div className="rounded-xl px-2 py-1.5 border text-sm flex items-center justify-between bg-slate-50">
-                    <div className="truncate">
-                      <span className="text-[11px] mr-1 rounded px-1 py-0.5 border bg-amber-50">🎌 Cerrado (festivo)</span>
-                      <span className="text-slate-700">No se programan turnos</span>
-                    </div>
-                  </div>
-                )}
-                {(isClosed? [] : sorted).map((c,i)=>{ const p=c.personId?personMap.get(c.personId):null; const span=formatSpan(c.shift.start,c.shift.end); const dur = effectiveMinutes(c.shift)/60; const lbl=(c.shift.label|| (isWE?'Finde':`T${i+1}`)); const emblem = /mañana/i.test(lbl)? '☀️' : /tarde/i.test(lbl)? '🌙' : isWE? '🗓️' : '➕'; return (
-                  <div key={i} className={`rounded-xl px-2 py-1.5 border text-sm flex items-center justify-between ${c.conflict? 'border-red-300 bg-red-50':'border-slate-200'}`} title={`${lbl} · ${span} (${dur}h)`}>
-                    <div className="truncate">
-                      <span className="text-[11px] mr-1 rounded px-1 py-0.5 border bg-slate-50">{emblem} {lbl}</span>
-                      <span className="text-slate-700">{span}</span>
-                      <span className="text-[11px] ml-1 text-slate-500">({dur}h{c.shift.lunchMinutes ? " · comida "+(c.shift.lunchMinutes)+"m" : ""})</span>
-                    </div>
-                    <div className="flex items-center gap-1">{p? (<span className="chip inline-flex items-center gap-1 px-1.5 py-0.5 rounded-lg" style={{background:`${p.color}20`, border:`1px solid ${p.color}55`}}><span className="h-2.5 w-2.5 rounded" style={{background:p.color}}/><span className="text-sm">{p.name}</span></span>): (<span className="text-red-600 text-sm">⚠ Falta asignar</span>)}</div>
-                  </div>
-                );})}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-function WeeklyView({ startDate, weeks, assignments, people, timeOffs, province, closeOnHolidays, closedExtraDates, customHolidaysByYear, consumeVacationOnHoliday }){
-  const header=[]; for(let d=0; d<7*weeks; d++){ const date=addDays(startDate,d); header.push({ dateStr:toDateValue(date), label: date.toLocaleDateString(undefined,{weekday:'short'})+' '+date.getDate() }); }
-  // Helpers: TO aprobadas
-  const isClosedDay = (dateStr) => isClosedBusinessDay2(dateStr, province, closeOnHolidays, closedExtraDates, customHolidaysByYear);
-  const hasApprovedTO = (dateStr, personId) => {
-    const d = parseDateValue(dateStr);
-    const dow = d.getDay();
-    const hit = (timeOffs||[]).find(to => to.personId===personId && to.status==="aprobada" && parseDateValue(to.start) <= d && d <= parseDateValue(to.end));
-    if(!hit) return false;
-    if(hit.type==='vacaciones'){ return true; }
-    return true;
-  };
-  const getTOType = (dateStr, personId) => {
-    const d = parseDateValue(dateStr);
-    const hit = (timeOffs||[]).find(to => to.personId===personId && to.status==="aprobada" && parseDateValue(to.start) <= d && d <= parseDateValue(to.end));
-    return hit ? hit.type : null;
-  };
-  return (
-    <div className="overflow-x-auto print-only:block">
-      <table className="w-full text-sm border-collapse">
-        <thead>
-          <tr>
-            <th className="text-left p-2 border-b">Persona</th>
-            {header.map(h=> <th key={h.dateStr} className="text-left p-2 border-b">{h.label}</th>)}
-          </tr>
-        </thead>
-        <tbody>
-          {people.map(p=> (
-            <tr key={p.id}>
-              <td className="p-2 align-top"><div className="inline-flex items-center gap-2"><span className="h-3 w-3 rounded" style={{background:p.color}}/> {p.name}</div></td>
-              {header.map(h=>{ const cell=(assignments[h.dateStr]||[]).filter(c=>c.personId===p.id).sort((a,b)=> minutesFromHHMM(a.shift.start)-minutesFromHHMM(b.shift.start)); return (
-                <td key={h.dateStr} className="p-2 align-top">
-                  {cell.length===0 ? (
-                    (hasApprovedTO(h.dateStr, p.id)
-                      ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[11px] bg-amber-50 border-amber-300 text-amber-800">
-                          {(() => {
-                            const t = getTOType(h.dateStr, p.id);
-                            return t==='vacaciones' ? '🏖️ Vacaciones' : t==='libranza' ? '🛌 Libranza' : t==='viaje' ? '✈️ Viaje' : 'Ausencia';
-                          })()}
-                        </span>
-                      : (isClosedDay(h.dateStr) ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[11px] bg-slate-50">🎌 Festivo</span> : <span className="text-slate-400">—</span>)
-                    )
-                  ) : ( cell.map((c,i)=>{ const span=formatSpan(c.shift.start,c.shift.end); const dur = effectiveMinutes(c.shift)/60; return (
-                    <div key={i} className="rounded-lg border px-2 py-1 mb-1" style={{borderColor:`${p.color}55`,background:`${p.color}10`}}>
-                      <div className="text-[11px] font-medium">{((c.shift.label||"").toLowerCase().includes("refuerzo")?"➕ ":"")}{c.shift.label||"Turno"}</div>
-                      {((c.shift.label||"").toLowerCase().includes("refuerzo")) && <span className="ml-1 px-1 border rounded text-[10px]">Refuerzo</span>}
-                      <div className="text-[12px]">{span} <span className="text-[11px] text-slate-500">({dur}h{c.shift.lunchMinutes ? " · comida "+(c.shift.lunchMinutes)+"m" : ""})</span></div>
-                    </div>
-                  ); })
-                  )}
-                </td>
-              ); })}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-// ===== Vacaciones / Libranzas / Viajes =====
-function TimeOffPanel({ state, setState, controls, isAdmin, currentUser }){
-  const [newTO,setNewTO]=useState({ personId: state.people[0]?.id||"P1", start: state.startDate, end: state.startDate, type:'vacaciones', note:'', hoursPerDay: state.travelDefaultHours, status: 'pendiente' });
-
-  function addTimeOff(){
-    const rec={...newTO};
-    if(rec.type==='vacaciones' && rec.status==='aprobada'){
-      const adding=countVacationDaysConsideringHolidays(rec.start,rec.end,state.province,state.consumeVacationOnHoliday);
-      const used=controls.vacationUsedNaturalByPerson.get(rec.personId)||0; const allowed=state.vacationDaysNatural;
-      if(used+adding>allowed){ alert(`No se puede añadir: excede las vacaciones (${used}+${adding} > ${allowed}).`); return; }
+  // Auto-cargar nube una única vez para usuarios no-admin
+  const [autoCloudLoaded, setAutoCloudLoaded] = useState(false);
+  useEffect(() => {
+    if (auth.user && auth.token && !isAdmin && !autoCloudLoaded) {
+      (async () => {
+        try { await cloudLoad(); } catch(e) {}
+        finally { setAutoCloudLoaded(true); }
+      })();
     }
-    setState(prev=>({...prev, timeOffs:[...prev.timeOffs, rec]}));
-    setNewTO({...newTO, note:''});
-  }
-  function removeTimeOff(idx){ setState(prev=>({...prev, timeOffs: prev.timeOffs.filter((_,i)=>i!==idx)})); }
-  function setTOStatus(idx,status){
-    if (!isAdmin) return;
-    setState(prev=>({...prev, timeOffs: prev.timeOffs.map((t,i)=> i===idx? {...t,status}:t)}));
-    setState(prev=> ({...prev, audit:[...(prev.audit||[]), {
-      ts:new Date().toISOString(), actor:(currentUser?.email||'unknown'), action:'vacaciones:'+status,
-      personId: (prev.timeOffs[idx]? prev.timeOffs[idx].personId : null)
-    }]}));
-  }
-
-  return (
-    <Card title="Vacaciones / Libranzas / Viajes">
-      <div className="grid grid-cols-12 gap-2 mb-3">
-        <div className="col-span-4"><label className="text-xs">Persona</label>
-          <select value={newTO.personId} onChange={(e)=>setNewTO({...newTO,personId:e.target.value})} className="w-full px-2 py-1 rounded border">
-            {state.people.map(p=> <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
-        </div>
-        <div className="col-span-4"><label className="text-xs">Desde</label><input type="date" value={newTO.start} onChange={(e)=>setNewTO({...newTO,start:e.target.value})} className="w-full px-2 py-1 rounded border"/></div>
-        <div className="col-span-4"><label className="text-xs">Hasta</label><input type="date" value={newTO.end} onChange={(e)=>setNewTO({...newTO,end:e.target.value})} className="w-full px-2 py-1 rounded border"/></div>
-        <div className="col-span-4"><label className="text-xs">Tipo</label>
-          <select value={newTO.type} onChange={(e)=>setNewTO({...newTO,type:e.target.value})} className="w-full px-2 py-1 rounded border">
-            <option value="vacaciones">Vacaciones</option>
-            <option value="libranza">Libranza</option>
-            <option value="viaje">Viaje (día entero)</option>
-          </select>
-        </div>
-        {newTO.type==='viaje' && (
-          <div className="col-span-4"><label className="text-xs">Horas por día</label><input type="number" min={0} max={12} value={newTO.hoursPerDay} onChange={(e)=>setNewTO({...newTO,hoursPerDay:Number(e.target.value)})} className="w-full px-2 py-1 rounded border"/></div>
-        )}
-        <div className="col-span-8"><label className="text-xs">Nota</label><input value={newTO.note} onChange={(e)=>setNewTO({...newTO,note:e.target.value})} className="w-full px-2 py-1 rounded border"/></div>
-        <div className="col-span-12"><button onClick={addTimeOff} className="px-3 py-1.5 rounded-lg border w-full">Añadir / Solicitar</button></div>
-      </div>
-
-      <div className="text-xs bg-slate-100 border p-2 rounded-lg mb-2">
-        <div><b>Vacaciones usadas (laborables):</b> {controls.vacationsUsedNatural} / {state.vacationDaysNatural} días (festivos: {state.consumeVacationOnHoliday? 'consumen':'no consumen'})</div>
-        <div className="mt-1">Por persona:
-          <ul className="list-disc ml-4">{state.people.map(p=> (<li key={p.id}>{p.name}: {controls.vacationUsedNaturalByPerson.get(p.id)||0} días</li>))}</ul>
-        </div>
-      </div>
-
-      <div className="border rounded-lg divide-y">
-        {state.timeOffs.length===0 && <div className="p-3 text-sm text-slate-500">Sin registros todavía.</div>}
-        {state.timeOffs.map((t,idx)=> (
-          <div key={idx} className="flex items-center justify-between p-2 text-sm">
-            <div className="flex-1"><b>{state.people.find(p=>p.id===t.personId)?.name}</b> · {t.type} · {t.start} → {t.end}
-              {t.type==='viaje' && (<span className="ml-1 text-slate-500">({t.hoursPerDay} h/día)</span>)}
-              {t.note? <span className="text-slate-500"> · {t.note}</span>:null}
-              <span className={`ml-2 text-xs px-2 py-0.5 rounded-full border ${t.status==='aprobada'?'bg-emerald-50 border-emerald-300 text-emerald-700':t.status==='pendiente'?'bg-amber-50 border-amber-300 text-amber-700':'bg-rose-50 border-rose-300 text-rose-700'}`}>{t.status||'pendiente'}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              {t.status!=='aprobada' && <button onClick={()=>setTOStatus(idx,'aprobada')} className="text-emerald-700 hover:underline">Aprobar</button>}
-              {t.status!=='denegada' && <button onClick={()=>setTOStatus(idx,'denegada')} className="text-rose-700 hover:underline">Denegar</button>}
-              <button onClick={()=>removeTimeOff(idx)} className="text-red-600 hover:underline">Eliminar</button>
-            </div>
-          </div>
-        ))}
-      </div>
-    </Card>
-  );
-}
-
-// ===== Swaps =====
-function SwapsPanel({ state, setState, assignments, isAdmin, currentUser }){
-  const [swapDraft,setSwapDraft]=useState({ dateA: state.startDate, shiftIndexA:0, dateB: state.startDate, shiftIndexB:0 });
-
-  function proposeSwap(){ const req={...swapDraft, requestedBy: "user", status:'pendiente'}; setState(prev=>({...prev, swaps:[...prev.swaps, req]})); }
-  function approveSwap(i){
-    if (!isAdmin) return;
-    const sw=state.swaps[i];
-    const A=assignments[sw.dateA]?.[sw.shiftIndexA]; const B=assignments[sw.dateB]?.[sw.shiftIndexB];
-    if(!A||!B||!A.personId||!B.personId){ alert('No encuentro asignaciones válidas'); return; }
-    const keyA=`${A.shift.start}-${A.shift.end}-${A.shift.label||`T${sw.shiftIndexA+1}`}`;
-    const keyB=`${B.shift.start}-${B.shift.end}-${B.shift.label||`T${sw.shiftIndexB+1}`}`;
-    const overrides=structuredClone(state.overrides||{});
-    overrides[sw.dateA]=overrides[sw.dateA]||{}; overrides[sw.dateB]=overrides[sw.dateB]||{};
-    overrides[sw.dateA][keyA]=B.personId; overrides[sw.dateB][keyB]=A.personId;
-    const swaps=state.swaps.map((r,idx)=> idx===i? {...r,status:'aprobada'}:r);
-    setState(prev=>({...prev, overrides, swaps }));
-  }
-  function denySwap(i){ setState(prev=>({...prev, swaps: prev.swaps.map((r,idx)=> idx===i? {...r,status:'denegada'}:r)})); }
-    if (!isAdmin) return;
-  function archiveSwap(i){ setState(prev=>({...prev, swaps: prev.swaps.map((r,idx)=> idx===i? {...r,status:'archivada'}:r)})); }
-    if (!isAdmin) return;
-  function deleteSwap(i){ setState(prev=>({...prev, swaps: prev.swaps.filter((_,idx)=> idx!==i)})); }
-
-  return (
-    <Card title="Swaps (intercambios)">
-      <div className="space-y-2">
-        <div className="grid grid-cols-12 gap-2">
-          <div className="col-span-6"><label className="text-xs">Fecha A</label><input type="date" value={swapDraft.dateA} onChange={(e)=>setSwapDraft({...swapDraft,dateA:e.target.value})} className="w-full px-2 py-1 rounded border"/></div>
-          <div className="col-span-6"><label className="text-xs">Shift # A</label><input type="number" min={0} value={swapDraft.shiftIndexA} onChange={(e)=>setSwapDraft({...swapDraft,shiftIndexA:Number(e.target.value)})} className="w-full px-2 py-1 rounded border"/></div>
-          <div className="col-span-6"><label className="text-xs">Fecha B</label><input type="date" value={swapDraft.dateB} onChange={(e)=>setSwapDraft({...swapDraft,dateB:e.target.value})} className="w-full px-2 py-1 rounded border"/></div>
-          <div className="col-span-6"><label className="text-xs">Shift # B</label><input type="number" min={0} value={swapDraft.shiftIndexB} onChange={(e)=>setSwapDraft({...swapDraft,shiftIndexB:Number(e.target.value)})} className="w-full px-2 py-1 rounded border"/></div>
-          <div className="col-span-12"><button onClick={proposeSwap} className="px-3 py-1.5 rounded-lg border w-full">Proponer swap</button></div>
-        </div>
-        <div className="flex items-center justify-between text-xs"><label className="flex items-center gap-2"><input type="checkbox" checked={state.showArchivedSwaps} onChange={(e)=>setState(prev=>({...prev, showArchivedSwaps:e.target.checked}))} /> Mostrar archivados</label></div>
-        <div className="border rounded-lg divide-y">
-          {state.swaps.filter(sw=> state.showArchivedSwaps || sw.status!=='archivada').length===0 && <div className="p-3 text-sm text-slate-500">Sin swaps.</div>}
-          {state.swaps.map((sw,idx)=> (
-            (state.showArchivedSwaps || sw.status!=='archivada') && (
-              <div key={idx} className="flex items-center justify-between p-2 text-sm">
-                <div>Swap #{idx+1}: {sw.dateA} [#{sw.shiftIndexA}] ⇄ {sw.dateB} [#{sw.shiftIndexB}] · Estado: <b>{sw.status}</b></div>
-                <div className="flex items-center gap-3">
-                  {sw.status!=='aprobada' && <button className="text-emerald-700 hover:underline" onClick={()=>approveSwap(idx)}>Aprobar</button>}
-                  {sw.status!=='denegada' && <button className="text-rose-700 hover:underline" onClick={()=>denySwap(idx)}>Denegar</button>}
-                  {sw.status!=='archivada' && <button className="text-slate-600 hover:underline" onClick={()=>archiveSwap(idx)}>Archivar</button>}
-                  <button className="text-red-600 hover:underline" onClick={()=>deleteSwap(idx)}>Eliminar</button>
-                </div>
-              </div>
-            )
-          ))}
-        </div>
-      </div>
-    </Card>
-  );
-}
-
-// ===== Refuerzos =====
-function RefuerzosPanel({ state, up }){
-  const [ev,setEv]=useState({ label:'Black Friday', start: state.startDate, end: state.startDate, weekdaysExtraSlots:1, weekendExtraSlots:1 });
-
-  function add(){ up(['events'], [...state.events, {...ev}]); }
-  function del(i){ up(['events'], state.events.filter((_,idx)=> idx!==i)); }
-  function setField(i, field, value){
-    const next = state.events.map((e,idx)=> idx===i? {...e, [field]: value}: e);
-    up(['events'], next);
-  }
-
-  return (
-    <Card title="Eventos de Refuerzo (Admin)">
-      {/* Alta rápida */}
-      <div className="grid grid-cols-12 gap-2 mb-3">
-        <div className="col-span-4"><label className="text-xs">Etiqueta</label><input value={ev.label} onChange={(e)=>setEv({...ev,label:e.target.value})} className="w-full border rounded px-2 py-1"/></div>
-        <div className="col-span-2"><label className="text-xs">Desde</label><input type="date" value={ev.start} onChange={(e)=>setEv({...ev,start:e.target.value})} className="w-full border rounded px-2 py-1"/></div>
-        <div className="col-span-2"><label className="text-xs">Hasta</label><input type="date" value={ev.end} onChange={(e)=>setEv({...ev,end:e.target.value})} className="w-full border rounded px-2 py-1"/></div>
-        <div className="col-span-2"><label className="text-xs">L–V +</label><input type="number" min={0} max={9} value={ev.weekdaysExtraSlots} onChange={(e)=>setEv({...ev,weekdaysExtraSlots:Number(e.target.value)})} className="w-full border rounded px-2 py-1"/></div>
-        <div className="col-span-2"><label className="text-xs">S–D +</label><input type="number" min={0} max={9} value={ev.weekendExtraSlots} onChange={(e)=>setEv({...ev,weekendExtraSlots:Number(e.target.value)})} className="w-full border rounded px-2 py-1"/></div>
-        <div className="col-span-12"><button onClick={add} className="px-3 py-1.5 rounded-lg border w-full">Añadir evento</button></div>
-      </div>
-
-      {/* Lista editable */}
-      <div className="border rounded-lg divide-y">
-        {state.events.length===0 && <div className="p-3 text-sm text-slate-500">Sin eventos.</div>}
-        {state.events.map((e,idx)=> (
-          <div key={idx} className="p-2 grid grid-cols-12 gap-2 items-end">
-            <input className="col-span-3 border rounded px-2 py-1" value={e.label||''} onChange={(ev)=>setField(idx,'label',ev.target.value)} />
-            <input className="col-span-2 border rounded px-2 py-1" type="date" value={e.start} onChange={(ev)=>setField(idx,'start',ev.target.value)} />
-            <input className="col-span-2 border rounded px-2 py-1" type="date" value={e.end} onChange={(ev)=>setField(idx,'end',ev.target.value)} />
-            <input className="col-span-2 border rounded px-2 py-1" type="number" min={0} max={9} value={e.weekdaysExtraSlots||0} onChange={(ev)=>setField(idx,'weekdaysExtraSlots',Number(ev.target.value))} />
-            <input className="col-span-2 border rounded px-2 py-1" type="number" min={0} max={9} value={e.weekendExtraSlots||0} onChange={(ev)=>setField(idx,'weekendExtraSlots',Number(ev.target.value))} />
-            <button onClick={()=>del(idx)} className="col-span-1 text-red-600 hover:underline text-sm">Eliminar</button>
-          </div>
-        ))}
-      </div>
-    </Card>
-  );
-}
-
-function GeneradorPicos({ state, up }){
+  }, [auth.user, auth.token, isAdmin, autoCloudLoaded]);function GeneradorPicos({ state, up }){
   const [anio,setAnio] = useState(new Date().getFullYear());
+
   function generar(){
     const nuevos = generarPicosParaAnio(Number(anio));
     up(['events'], [...state.events, ...nuevos]);
     alert(`Añadidos ${nuevos.length} eventos de picos para ${anio}`);
   }
+
   return (
     <Card title="Generar picos (Black Friday, Navidad, Rebajas)">
       <div className="flex items-center gap-2">
@@ -1675,6 +880,7 @@ function GeneradorPicos({ state, up }){
     </Card>
   );
 }
+
 function PropuestaCierre({ state, startDate, weeks, people, assignments, onApply, annualTarget }){
   const [sugs,setSugs] = useState(null);
   const [mode,setMode] = useState('replace'); // 'replace' | 'append'
@@ -1952,7 +1158,6 @@ function DayModal({ dateStr, date, assignments, people, onOverride, onClose, isA
 function buildCSV(assignments, people){ const header=["fecha","turno","inicio","fin","persona","tipo","conflicto"]; const rows=[header.join(',')]; const pmap=new Map(people.map(p=>[p.id,p.name])); const dates=Object.keys(assignments).sort(); for(const d of dates){ for(const a of assignments[d]){ rows.push([d,a.shift.label||"",a.shift.start,a.shift.end,a.personId?pmap.get(a.personId):"", isWeekend(parseDateValue(d))?"fin_de_semana":"laborable", a.conflict?"SI":"NO"].join(',')); } } return rows; }
 function buildICS({ assignments, people, personId, startDate, weeks }){ const prod='-//Gestor Turnos 4P//ES'; let ics=`BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:${prod}\nCALSCALE:GREGORIAN\nMETHOD:PUBLISH\n`; const person=people.find(p=>p.id===personId); const fmt=(d)=> d.getFullYear().toString().padStart(4,'0')+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0')+'T'+String(d.getHours()).padStart(2,'0')+String(d.getMinutes()).padStart(2,'0')+'00'; for(let w=0;w<weeks;w++){ for(let d=0;d<7;d++){ const date=addDays(startDate,w*7+d); const ds=toDateValue(date); const cell=assignments[ds]||[]; for(const c of cell){ if(c.personId!==personId) continue; const [sh,sm]=c.shift.start.split(':').map(Number); const [eh,em]=c.shift.end.split(':').map(Number); const s=new Date(date.getFullYear(),date.getMonth(),date.getDate(),sh,sm||0,0); const e=new Date(date.getFullYear(),date.getMonth(),date.getDate(),eh,em||0,0); const uid=`${personId}-${ds}-${c.shift.start.replace(':','')}`; const summary=`${c.shift.label||'Turno'} · ${person?.name||personId}`; ics+=`BEGIN:VEVENT\nUID:${uid}@turnos4p\nDTSTAMP:${fmt(new Date())}\nDTSTART:${fmt(s)}\nDTEND:${fmt(e)}\nSUMMARY:${summary}\nDESCRIPTION:${isWeekend(date)?'Fin de semana':'Laborable'}\nEND:VEVENT\n`; } } } ics+='END:VCALENDAR\n'; return ics; }
 
-
 function AdminUsersAndPerms({ auth }) {
   const [users, setUsers] = useState([]);
   const [creating, setCreating] = useState({ email:'', name:'', role:'user', password:'' });
@@ -2138,9 +1343,6 @@ function AdminUsersAndPerms({ auth }) {
   );
 }
 
-export { }
-
-
 function OffPolicyPanel({ state, up }){
   const p = state.offPolicy || {};
   const days = [
@@ -2305,255 +1507,5 @@ function VacationPolicyPanel({ state, up }){
     </Card>
   );
 }
-
-
-function AuthenticatedApp(props){
-  const { auth, setAuth, ui, setUI, showToast,
-          state, setState,
-          cloud, setCloud, cloudLoad, cloudSave,
-          startDate, weeklyStart,
-          userWeeks, setUserWeeks, weekIndex, setWeekIndex,
-          canPrev, canNext, canNextRange,
-          payroll, setPayroll,
-          ASS, controls,
-          exportCSV, exportJSON, importJSON, exportICS, exportPayroll,
-          up, upPerson, forceAssign } = props;
-
-  // --- scope admin (robusto tras refactor) ---
-  // Aliases seguros para modal del día (local o via props)
-  const modalDayProp = (typeof modalDay !== 'undefined') ? modalDay : (props.modalDay ?? null);
-  const setModalDayProp = (typeof setModalDay !== 'undefined') ? setModalDay : props.setModalDay;
-
-  const __ap_props = (typeof arguments !== "undefined" && arguments.length ? arguments[0] : {});
-  const __ap_auth = (typeof auth !== "undefined" && auth) ? auth : (__ap_props && (__ap_props.auth || __ap_props.Auth || null));
-  const isAdmin = !!(__ap_auth && __ap_auth.user && __ap_auth.user.role === "admin");
-
-  // ---------- Exportaciones (CSV/ICS/Nómina) ----------
-  
-  
-  
-  
-
-  
-
-  
-  // Auto-cargar nube una única vez para usuarios no-admin
-  const [autoCloudLoaded, setAutoCloudLoaded] = useState(false);
-  useEffect(() => {
-    // Si el usuario NO es admin y le falta spaceId/readToken, rellenamos con los públicos
-    if (auth.user && !isAdmin && (!cloud?.spaceId || !cloud?.readToken)) {
-      setCloud(prev => ({ ...prev, spaceId: PUBLIC_SPACE.id, readToken: PUBLIC_SPACE.readToken }));
-    }
-  }, [auth.user, isAdmin]);
-
-  useEffect(() => {
-    if (auth.user && !isAdmin && !autoCloudLoaded) {
-      (async () => {
-        try { await cloudLoad(); } catch(e) {}
-        finally { setAutoCloudLoaded(true); }
-      })();
-    }
-  }, [auth.user, isAdmin, autoCloudLoaded]);
-
-// ---------- Render principal ----------
-  return (
-    <div className="min-h-screen bg-slate-50 text-slate-900">
-      <style>{`
-        :root { color-scheme: light !important; }
-        html, body { background: #f8fafc; color: #0f172a; }
-        input, select, textarea, button { background:#fff!important; color:#0f172a!important; border-color: rgba(15,23,42,0.15)!important; }
-        ::placeholder { color:#94a3b8; }
-        .chip { background-color: rgba(15,23,42,0.04); border:1px solid rgba(15,23,42,0.15); }
-      `}</style>
-
-      <header className="sticky top-0 z-10 bg-white/90 backdrop-blur border-b border-slate-200">
-        <div className="w-full max-w-[1800px] mx-auto px-6 py-3 flex items-center justify-between">
-          <h1 className="text-lg font-semibold">Gestor de Turnos · Usuarios + SQLite</h1>
-          <div className="flex items-center gap-2 text-sm">
-            <span className="px-2 py-1 rounded bg-slate-100 border">
-              {auth.user?.name || auth.user?.email || "Usuario"} · {auth.user?.role || ""}
-            </span>
-            {isAdmin && (<button onClick={()=>setState(prev=>({...prev, rebalance:!prev.rebalance}))}
-              className={`px-3 py-1.5 rounded-lg border ${state.rebalance?'bg-emerald-50 border-emerald-300':'border-slate-300 hover:bg-slate-100'}`}>
-              {state.rebalance? 'Reequilibrio ON':'Reequilibrar'}
-            </button>)}
-
-            {/* Export/Import local */}{/* Controles Nube */}{isAdmin && (
-<>
-<>
-            <button onClick={props.exportCSV} className="px-3 py-1.5 rounded-lg border">CSV</button>
-            <button onClick={props.exportJSON} className="px-3 py-1.5 rounded-lg border">Export JSON</button>
-            <label className="px-3 py-1.5 rounded-lg border cursor-pointer">Import JSON
-              <input type="file" accept="application/json" className="hidden" onChange={(e)=> e.target.files && props.importJSON(e.target.files[0])}/>
-            </label>
-
-            
-</>
-<input className="border rounded px-2 py-1 w-32" placeholder="Space ID"
-              value={cloud.spaceId} onChange={e=>setCloud({...cloud,spaceId:e.target.value})}/>
-            <input className="border rounded px-2 py-1 w-28" placeholder="ReadToken"
-              value={cloud.readToken} onChange={e=>setCloud({...cloud,readToken:e.target.value})}/>
-            <input className="border rounded px-2 py-1 w-28" placeholder="WriteToken"
-              value={cloud.writeToken} onChange={e=>setCloud({...cloud,writeToken:e.target.value})}/>
-            <button onClick={props.cloudLoad} className="px-3 py-1.5 rounded-lg border">Cargar nube</button>
-            <button onClick={props.cloudSave} className="px-3 py-1.5 rounded-lg border">Guardar nube</button>
-  </>
-)}
-{ui.sync==="loading" && <span className="px-2 py-1 rounded bg-amber-100 border border-amber-300">Sincronizando…</span>}
-            {ui.sync==="ok" && <span className="px-2 py-1 rounded bg-emerald-100 border border-emerald-300">¡Listo!</span>}
-            {ui.sync==="error" && <span className="px-2 py-1 rounded bg-rose-100 border border-rose-300">Error</span>}
-            {ui.toast && (<div className="fixed right-4 bottom-4 z-50 bg-black text-white px-3 py-2 rounded-lg shadow">{ui.toast}</div>)}
-            <button onClick={()=>props.setAuth({ token:"", user:null })} className="px-2 py-1 rounded border">Salir</button>
-          </div>
-        </div>
-      </header>
-
-      <main className="w-full max-w-[1800px] mx-auto px-6 py-6 grid lg:grid-cols-3 gap-6">
-        {/* Configuración */}
-        <section className="lg:col-span-1 space-y-6">
-          {isAdmin && (<><ConfigBasica state={state} up={up} />
-          <ReglasPanel state={state} up={up} isAdmin={isAdmin} />
-          
-          <OffPolicyPanel state={state} up={up} />
-          <VacationPolicyPanel state={state} up={up} />
-          <RefuerzoPolicyPanel state={state} up={up} />
-<ConciliacionPanel state={state} up={up} />
-          <PersonasPanel state={state} upPerson={upPerson} />
-          <TurnosPanel state={state} up={up} />
-          <FestivosPanel state={state} up={up} />
-          <CustomHolidaysPanel state={state} up={up} /></>)}
-        </section>
-
-        {/* Calendarios y reportes */}
-        <section className="lg:col-span-2 space-y-6">
-          <Card title="Vista semanal por persona (principal)">
-  <div className="flex items-center justify-between mb-2">
-    <div className="text-sm">
-      {(() => { 
-         const s = weeklyStart; 
-         const e = addDays(weeklyStart, userWeeks*7 - 1);
-         const fmt = d => d.toLocaleDateString(undefined,{ day:"2-digit", month:"short", year:"numeric"});
-         return s ? `${fmt(s)} – ${fmt(e)}` : "";
-      })()}
-    </div>
-    <div className="flex items-center gap-2">
-      <button disabled={!canPrev} onClick={()=>setWeekIndex(w=>Math.max(0,w-1))}
-        className={`px-2 py-1 rounded border ${canPrev? "hover:bg-slate-100":"opacity-50 cursor-not-allowed"}`}>◀︎</button>
-      <button onClick={()=>{ const t=startOfWeekMonday(new Date()); const idx=Math.max(0, Math.min(state.weeks-1, Math.floor((t - startDate)/(7*24*3600*1000)))); setWeekIndex(idx); }}
-        className="px-2 py-1 rounded border">Hoy</button>
-      <button disabled={!canNextRange} onClick={()=>setWeekIndex(w=> Math.min(state.weeks-userWeeks, w+1))}
-        className={`px-2 py-1 rounded border ${canNextRange? "hover:bg-slate-100":"opacity-50 cursor-not-allowed"}`}>▶︎</button>
-      <select value={userWeeks} onChange={e=>setUserWeeks(Number(e.target.value))}
-        className="ml-2 border rounded px-2 py-1 text-sm">
-        <option value={1}>1 semana</option>
-        <option value={2}>2 semanas</option>
-        <option value={4}>4 semanas</option>
-        <option value={8}>8 semanas</option>
-      </select>
-    </div>
-  </div>
-  
-  {/* Leyenda (visible para todos) */}
-  <div className="flex flex-wrap items-center gap-2 mb-3 text-[11px]">
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border bg-slate-50">➕ Refuerzo</span>
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border bg-slate-50">🎌 Festivo</span>
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border bg-slate-50">🗓️ Finde</span>
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border bg-slate-50">🍽️ Comida restada</span>
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border bg-slate-50">🏖️ Vacaciones</span>
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border bg-slate-50">🛌 Libranza</span>
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border bg-slate-50">✈️ Viaje</span>
-  </div>
-<WeeklyView
-    startDate={weeklyStart}
-    weeks={userWeeks}
-    assignments={ASS}
-    people={state.people}
-    timeOffs={state.timeOffs}
-    province={state.province}
-    closeOnHolidays={state.closeOnHolidays}
-    closedExtraDates={state.closedExtraDates}
-    customHolidaysByYear={state.customHolidaysByYear}
-    consumeVacationOnHoliday={state.consumeVacationOnHoliday}
-  />
-</Card>
-
-          {isAdmin && (<Card title="Vista semanal por persona">
-            <div className="flex items-center justify-between mb-2">
-              <div className="text-sm">Semana {weekIndex+1} / {state.weeks} · {(() => { const s=weeklyStart; const e=addDays(weeklyStart,6); const fmt=d=>d.toLocaleDateString(undefined,{ day:"2-digit", month:"short", year:"numeric"}); return s ? `${fmt(s)} – ${fmt(e)}` : ""; })()}</div>
-              <div className="flex items-center gap-2">
-                <button disabled={!canPrev} onClick={()=>setWeekIndex(w=>Math.max(0,w-1))} className={`px-2 py-1 rounded border ${canPrev? 'hover:bg-slate-100':'opacity-50 cursor-not-allowed'}`}>◀︎</button>
-                <button disabled={!canNext} onClick={()=>setWeekIndex(w=>Math.min(state.weeks-1,w+1))} className={`px-2 py-1 rounded border ${canNext? 'hover:bg-slate-100':'opacity-50 cursor-not-allowed'}`}>▶︎</button>
-                <button onClick={()=>window.print()} className="px-3 py-1.5 rounded-lg border">Imprimir / PDF</button>
-              </div>
-            </div>
-            <WeeklyView startDate={weeklyStart} weeks={1} assignments={ASS} people={state.people} timeOffs={state.timeOffs} province={state.province} closeOnHolidays={state.closeOnHolidays} closedExtraDates={state.closedExtraDates} customHolidaysByYear={state.customHolidaysByYear} consumeVacationOnHoliday={state.consumeVacationOnHoliday} />
-          </Card>)}
-
-          <TimeOffPanel state={state} setState={setState} controls={controls} isAdmin={isAdmin} currentUser={auth.user} />
-          <SwapsPanel state={state} setState={setState} assignments={ASS}  isAdmin={isAdmin} currentUser={auth.user} />
-          {isAdmin && <RefuerzosPanel state={state} up={up} />}
-          {isAdmin && <GeneradorPicos state={state} up={up} />}{isAdmin && (
-                    <PropuestaCierre
-            state={state}
-            startDate={startDate}
-            weeks={state.weeks}
-            people={state.people}
-            assignments={ASS}
-            onApply={(evs, mode='append', batchId=null) => {
-              const tag = (e)=> ({...e, meta:{ ...(e.meta||{}), source:'conciliacion', batchId }});
-              const tagged = (evs||[]).map(tag);
-              const base = mode==='replace'
-                ? (state.events||[]).filter(e=> !(e?.meta?.source==='conciliacion'))
-                : (state.events||[]);
-              const next = [...base, ...tagged];
-              up(['events'], next);
-              if (batchId) up(['managed','lastConciliationBatchId'], batchId);
-            }
-            }annualTarget={state.annualTargetHours}
-          />
-
-            )}{isAdmin && (<ScoreDebugPanel
-            assignments={ASS}
-            people={state.people}
-            startDate={startDate}
-            weeks={state.weeks}
-            conciliacion={state.conciliacion}
-            applyConciliation={state.applyConciliation}
-            onToggleApply={(v)=>up(['applyConciliation'], v)}
-          />
-
-          )}{isAdmin && (<Card title="Nómina (CSV por rango)">
-            <div className="grid grid-cols-12 gap-2">
-              <div className="col-span-6"><label className="text-xs">Desde</label><input type="date" value={payroll.from} onChange={(e)=>setPayroll({...payroll,from:e.target.value})} className="w-full px-2 py-1 rounded border"/></div>
-              <div className="col-span-6"><label className="text-xs">Hasta</label><input type="date" value={payroll.to} onChange={(e)=>setPayroll({...payroll,to:e.target.value})} className="w-full px-2 py-1 rounded border"/></div>
-              <div className="col-span-12"><button onClick={props.exportPayroll} className="px-3 py-1.5 rounded-lg border w-full">Exportar Nómina (CSV)</button></div>
-            </div>
-          </Card>
-
-          )}{isAdmin && (<ResumenPanel controls={controls} annualTarget={state.annualTargetHours} onExportICS={exportICS} />
-        )}</section>
-
-        {auth.user.role === 'admin' && (
-          <section className="lg:col-span-3 space-y-6">
-            <AdminUsersAndPerms auth={auth} />
-          </section>
-        )}
-      </main>
-
-      <footer className="w-full max-w-[1800px] mx-auto px-6 pb-10 text-xs text-slate-500">Persistencia local + Nube SQLite. </footer>
-
-       {modalDayProp && (
-        <DayModal
-          dateStr={modalDay}
-          date={parseDateValue(modalDay)}
-          assignments={ASS[modalDay]||[]}
-          people={state.people}
-          onOverride={forceAssign}
-          isAdmin={isAdmin}
-          onClose={()=>setModalDayProp(null)}
-        />
-      )}
-    </div>
-  );
 }
-
+/* << auto-fix: añadidas 1 llaves de cierre >> */

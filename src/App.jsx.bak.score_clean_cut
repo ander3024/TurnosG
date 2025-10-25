@@ -426,7 +426,44 @@ function scoreConciliacionBreakdown({assignments, people, startDate, weeks, conc
       for (let i=1; i<7; i++){
         if (works[i] !== works[i-1]) cortes++;
       }
-      // día isla trabajo = 0-1-0 ; día isla libre = 1-0-1
+      
+
+// --- Auditoría de fines de semana ---
+function weekendAudit({assignments, people, startDate, weeks, rules}){
+  const res = [];
+  const maxConsAllowed = Number(rules?.maxConsecutiveWeekends ?? 1);
+
+  // Devuelve true si la persona trabaja sábado o domingo de esa semana
+  const worksWeekend = (pid, w) => {
+    const sat = toDateValue(addDays(startDate, w*7 + 5)); // sábado
+    const sun = toDateValue(addDays(startDate, w*7 + 6)); // domingo
+    const satC = assignments[sat] || [];
+    const sunC = assignments[sun] || [];
+    return satC.some(a => a.personId===pid) || sunC.some(a => a.personId===pid);
+  };
+
+  for(const p of people){
+    let total = 0, streak = 0, maxStreak = 0, viol = 0;
+    for(let w=0; w<weeks; w++){
+      const wWorked = worksWeekend(p.id, w) ? 1 : 0;
+      total += wWorked;
+      if (wWorked){ streak++; maxStreak = Math.max(maxStreak, streak); }
+      else { 
+        // si cerramos racha, comprobar si excedía el máximo permitido
+        if (streak > maxConsAllowed) viol++;
+        streak = 0;
+      }
+    }
+    // si la racha termina al final del periodo
+    if (streak > maxConsAllowed) viol++;
+    res.push({ id:p.id, name:p.name, weekends: total, maxStreak, violations: viol });
+  }
+  // orden útil: más violaciones > más fines > nombre
+  res.sort((a,b)=> (b.violations-a.violations) || (b.weekends-a.weekends) || a.name.localeCompare(b.name));
+  return res;
+}
+
+// día isla trabajo = 0-1-0 ; día isla libre = 1-0-1
       for (let i=1; i<6; i++){
         if (works[i-1]===0 && works[i]===1 && works[i+1]===0) islasTrabajo++;
         if (works[i-1]===1 && works[i]===0 && works[i+1]===1) islasLibre++;
@@ -1750,61 +1787,19 @@ function PropuestaCierre({ state, startDate, weeks, people, assignments, onApply
   );
 }
 
+
 function ScoreDebugPanel({ assignments, people, startDate, weeks, conciliacion, applyConciliation, onToggleApply }){
-  const breakdown = useMemo(()=> scoreConciliacionBreakdown({
-    assignments, people, startDate, weeks, conciliacion
-  }), [assignments, people, startDate, weeks, conciliacion]);
-
-  return (
-    <Card title="Score de conciliación (debug)">
-      <div className="flex items-center justify-between mb-2">
-        <div className="text-sm text-slate-600">
-          Penalizaciones · Día-isla trabajo: <b>{safeConciliacion(conciliacion).penalizaDiaIslaTrabajo}</b> ·
-          Día-isla libre: <b>{safeConciliacion(conciliacion).penalizaDiaIslaLibre}</b> ·
-          Cortes/semana: <b>{safeConciliacion(conciliacion).penalizaCortesSemana}</b>
-        </div>
-        <label className="text-sm flex items-center gap-2">
-          <input type="checkbox" checked={!!applyConciliation} onChange={e=>onToggleApply(e.target.checked)} />
-          Aplicar mejorador
-        </label>
-      </div>
-
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm border-collapse">
-          <thead>
-            <tr className="border-b">
-              <th className="text-left p-2">Semana</th>
-              <th className="text-left p-2">Cortes W↔L</th>
-              <th className="text-left p-2">Islas trabajo</th>
-              <th className="text-left p-2">Islas libre</th>
-              <th className="text-left p-2">Score</th>
-            </tr>
-          </thead>
-          <tbody>
-            {breakdown.byWeek.map(w=>(
-              <tr key={w.week} className="border-b">
-                <td className="p-2">#{w.week}</td>
-                <td className="p-2">{w.cortes}</td>
-                <td className="p-2">{w.islasTrabajo}</td>
-                <td className="p-2">{w.islasLibre}</td>
-                <td className="p-2">{w.score}</td>
-              </tr>
-            ))}
-            <tr>
-              <td className="p-2 font-medium" colSpan={4}>Total</td>
-              <td className="p-2 font-medium">{breakdown.total}</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-
-      <p className="mt-2 text-xs text-slate-500">
-        * Cuanto más bajo el score, mejor conciliación (menos cortes y menos días-isla).
-      </p>
-    </Card>
+  const breakdown = React.useMemo(() => {
+    return scoreConciliacionBreakdown({
+      assignments, people, startDate, weeks, conciliacion
+    });
+  }, [assignments, people, startDate, weeks, conciliacion]);
+}){
+  const breakdown = React.useMemo(
+    ()=> scoreConciliacionBreakdown({ assignments, people, startDate, weeks, conciliacion }),
+    [assignments, people, startDate, weeks, conciliacion]
   );
 }
-
 // ===== Resumen y Modal Día =====
 function buildControls({
   assignments, people, weekdayShifts, weekendShift,
@@ -2544,9 +2539,9 @@ function AuthenticatedApp(props){
 
        {modalDayProp && (
         <DayModal
-          dateStr={modalDay}
-          date={parseDateValue(modalDay)}
-          assignments={ASS[modalDay]||[]}
+          dateStr={modalDayProp}
+          date={parseDateValue(modalDayProp)}
+          assignments={ASS[modalDayProp]||[]}
           people={state.people}
           onOverride={forceAssign}
           isAdmin={isAdmin}
