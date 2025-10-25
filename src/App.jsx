@@ -1414,7 +1414,7 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
                       <span className="text-slate-700">{span}</span>
                       <span className="text-[11px] ml-1 text-slate-500">({dur}h{c.shift.lunchMinutes ? " · comida "+(c.shift.lunchMinutes)+"m" : ""})</span>
                     </div>
-                    <div className="flex items-center gap-1">{p ? (<span className="chip inline-flex items-center gap-1 px-1.5 py-0.5 rounded-lg" style={{background:`20`, border:`1px solid 55`}}><span className="h-2.5 w-2.5 rounded" style={{background:p.color}}/><span className="text-sm">{p.name}</span></span>) : (<span className="text-red-600 text-sm">⚠ Falta asignar</span>)}</div>
+                    <div className="flex items-center gap-1">{p? (<span className="chip inline-flex items-center gap-1 px-1.5 py-0.5 rounded-lg" style={{background:`${p.color}20`, border:`1px solid ${p.color}55`}}><span className="h-2.5 w-2.5 rounded" style={{background:p.color}}/><span className="text-sm">{p.name}</span></span>): (<span className="text-red-600 text-sm">⚠ Falta asignar</span>)}</div>
                   </div>
                 );})}
               </div>
@@ -1563,27 +1563,47 @@ function TimeOffPanel({ state, setState, controls, isAdmin, currentUser }){
 
 // ===== Swaps =====
 function SwapsPanel({ state, setState, assignments, isAdmin, currentUser }){
-  const [swapDraft,setSwapDraft]=useState({ dateA: state.startDate, shiftIndexA:0, dateB: state.startDate, shiftIndexB:0 });
+  const [swapDraft,setSwapDraft]=useState({
+    dateA: state.startDate, shiftIndexA:0,
+    dateB: state.startDate, shiftIndexB:0
+  });
 
-  function proposeSwap(){ const req={...swapDraft, requestedBy: "user", status:'pendiente'}; setState(prev=>({...prev, swaps:[...prev.swaps, req]})); }
+  function proposeSwap(){
+    const {dateA, shiftIndexA, dateB, shiftIndexB} = swapDraft;
+    if (!dateA || !dateB){ alert("Falta fecha A/B"); return; }
+    if (shiftIndexA == null || shiftIndexB == null){ alert("Falta shift A/B"); return; }
+    if (dateA === dateB && shiftIndexA === shiftIndexB){ alert("Intercambio idéntico"); return; }
+    const A = (assignments[dateA]||[])[shiftIndexA];
+    const B = (assignments[dateB]||[])[shiftIndexB];
+    if (!A || !B || !A.personId || !B.personId){ alert("Ambos turnos deben tener persona asignada"); return; }
+    if (A.personId === B.personId){ alert("No tiene sentido intercambiar la misma persona"); return; }
+    const exists = (state.swaps||[]).some(sw=>{
+      const sameAB = sw.dateA===dateA && sw.shiftIndexA===shiftIndexA && sw.dateB===dateB && sw.shiftIndexB===shiftIndexB;
+      const sameBA = sw.dateA===dateB && sw.shiftIndexA===shiftIndexB && sw.dateB===dateA && sw.shiftIndexB===shiftIndexA;
+      return sameAB || sameBA;
+    });
+    if (exists){ alert("Ya hay un swap igual o inverso"); return; }
+    const req = {...swapDraft, requestedBy: (currentUser&&currentUser.id)||"user", status:"pendiente"};
+    setState(prev=>({...prev, swaps:[...(prev.swaps||[]), req]}));
+  }
+
   function approveSwap(i){
     if (!isAdmin) return;
     const sw=state.swaps[i];
-    const A=assignments[sw.dateA]?.[sw.shiftIndexA]; const B=assignments[sw.dateB]?.[sw.shiftIndexB];
-    if(!A||!B||!A.personId||!B.personId){ alert('No encuentro asignaciones válidas'); return; }
-    const keyA=`${A.shift.start}-${A.shift.end}-${A.shift.label||`T${sw.shiftIndexA+1}`}`;
-    const keyB=`${B.shift.start}-${B.shift.end}-${B.shift.label||`T${sw.shiftIndexB+1}`}`;
+    const A=(assignments[sw.dateA]||[])[sw.shiftIndexA];
+    const B=(assignments[sw.dateB]||[])[sw.shiftIndexB];
+    if(!A||!B||!A.personId||!B.personId){ alert("No encuentro asignaciones válidas"); return; }
+    const keyA = `${A.shift.start}-${A.shift.end}-${(A.shift.label || ('T'+(sw.shiftIndexA+1)))}`;
+    const keyB = `${B.shift.start}-${B.shift.end}-${(B.shift.label || ('T'+(sw.shiftIndexB+1)))}`;
     const overrides=structuredClone(state.overrides||{});
     overrides[sw.dateA]=overrides[sw.dateA]||{}; overrides[sw.dateB]=overrides[sw.dateB]||{};
     overrides[sw.dateA][keyA]=B.personId; overrides[sw.dateB][keyB]=A.personId;
     const swaps=state.swaps.map((r,idx)=> idx===i? {...r,status:'aprobada'}:r);
     setState(prev=>({...prev, overrides, swaps }));
   }
-  function denySwap(i){ setState(prev=>({...prev, swaps: prev.swaps.map((r,idx)=> idx===i? {...r,status:'denegada'}:r)})); }
-    if (!isAdmin) return;
-  function archiveSwap(i){ setState(prev=>({...prev, swaps: prev.swaps.map((r,idx)=> idx===i? {...r,status:'archivada'}:r)})); }
-    if (!isAdmin) return;
-  function deleteSwap(i){ setState(prev=>({...prev, swaps: prev.swaps.filter((_,idx)=> idx!==i)})); }
+  function denySwap(i){ if (!isAdmin) return; setState(prev=>({...prev, swaps: prev.swaps.map((r,idx)=> idx===i? {...r,status:'denegada'}:r)})); }
+  function archiveSwap(i){ if (!isAdmin) return; setState(prev=>({...prev, swaps: prev.swaps.map((r,idx)=> idx===i? {...r,status:'archivada'}:r)})); }
+  function deleteSwap(i){ if (!isAdmin) return; setState(prev=>({...prev, swaps: prev.swaps.filter((_,idx)=> idx!==i)})); }
 
   return (
     <Card title="Swaps (intercambios)">
@@ -1595,11 +1615,21 @@ function SwapsPanel({ state, setState, assignments, isAdmin, currentUser }){
           <div className="col-span-6"><label className="text-xs">Shift # B</label><input type="number" min={0} value={swapDraft.shiftIndexB} onChange={(e)=>setSwapDraft({...swapDraft,shiftIndexB:Number(e.target.value)})} className="w-full px-2 py-1 rounded border"/></div>
           <div className="col-span-12"><button onClick={proposeSwap} className="px-3 py-1.5 rounded-lg border w-full">Proponer swap</button></div>
         </div>
-        <div className="flex items-center justify-between text-xs"><label className="flex items-center gap-2"><input type="checkbox" checked={state.showArchivedSwaps} onChange={(e)=>setState(prev=>({...prev, showArchivedSwaps:e.target.checked}))} /> Mostrar archivados</label></div>
+
+        <div className="flex items-center justify-between text-xs">
+          <label className="flex items-center gap-2">
+            <input type="checkbox" checked={state.showArchivedSwaps} onChange={(e)=>setState(prev=>({...prev, showArchivedSwaps:e.target.checked}))} />
+            Mostrar archivados
+          </label>
+        </div>
+
         <div className="border rounded-lg divide-y">
-          {state.swaps.filter(sw=> state.showArchivedSwaps || sw.status!=='archivada').length===0 && <div className="p-3 text-sm text-slate-500">Sin swaps.</div>}
-          {state.swaps.map((sw,idx)=> (
-            (state.showArchivedSwaps || sw.status!=='archivada') && (
+          {(state.swaps||[]).filter(sw => state.showArchivedSwaps || sw.status!=='archivada').length===0 &&
+            <div className="p-3 text-sm text-slate-500">Sin swaps.</div>
+          }
+          {(state.swaps||[])
+            .filter(sw => state.showArchivedSwaps || sw.status!=='archivada')
+            .map((sw,idx) => (
               <div key={idx} className="flex items-center justify-between p-2 text-sm">
                 <div>Swap #{idx+1}: {sw.dateA} [#{sw.shiftIndexA}] ⇄ {sw.dateB} [#{sw.shiftIndexB}] · Estado: <b>{sw.status}</b></div>
                 <div className="flex items-center gap-3">
@@ -1609,14 +1639,13 @@ function SwapsPanel({ state, setState, assignments, isAdmin, currentUser }){
                   <button className="text-red-600 hover:underline" onClick={()=>deleteSwap(idx)}>Eliminar</button>
                 </div>
               </div>
-            )
-          ))}
+            ))}
         </div>
       </div>
     </Card>
   );
 }
-
+// ===== Refuerzos =====
 // ===== Refuerzos =====
 function RefuerzosPanel({ state, up }){
   const [ev,setEv]=useState({ label:'Black Friday', start: state.startDate, end: state.startDate, weekdaysExtraSlots:1, weekendExtraSlots:1 });
