@@ -1,0 +1,19 @@
+diff --git a/src/App.jsx b/src/App.jsx
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@
+-      {modalDayProp && (
++      {modalDayProp && (
+         <DayModal
+-          dateStr={modalDay}
+-          date={parseDateValue(modalDay)}
+-          assignments={ASS[modalDay]||[]}
++          dateStr={modalDayProp}
++          date={parseDateValue(modalDayProp)}
++          assignments={ASS[modalDayProp]||[]}
+           people={state.people}
+           onOverride={forceAssign}
+           isAdmin={isAdmin}
+-          onClose={()=>setModalDayProp(null)}
++          onClose={()=>setModalDayProp(null)}
+         />
