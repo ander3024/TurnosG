@@ -2530,7 +2530,7 @@ function AuthenticatedApp(props){
 
           <TimeOffPanel state={state} setState={setState} controls={controls} isAdmin={isAdmin} currentUser={auth.user} />
           <SwapsPanel state={state} setState={setState} assignments={ASS}  isAdmin={isAdmin} currentUser={auth.user} />
-          {isAdmin && <RefuerzosPanel state={state} up={up} />}
+          {isAdmin && <RefuerzosPanelLite state={state} up={up} />}
           {isAdmin && <GeneradorPicos state={state} up={up} />}{isAdmin && (
                     <PropuestaCierre
             state={state}
@@ -2604,5 +2604,172 @@ function AuthenticatedApp(props){
         />
       )}
     </div>
+  );
+}
+function RefuerzosPanelLite({ state, up }){
+  const [ev,setEv] = useState({
+    label:'Black Friday',
+    start: state.startDate,
+    end: state.startDate,
+    weekdaysExtraSlots:1,
+    weekendExtraSlots:1
+  });
+
+  // alta rápida
+  const add = ()=> up(['events'], [...(state.events||[]), {...ev}]);
+  const delAtIndex = (absIdx)=> up(['events'], (state.events||[]).filter((_,i)=> i!==absIdx));
+  const setFieldAt = (absIdx, field, value)=> up(['events'], (state.events||[]).map((e,i)=> i===absIdx? {...e, [field]: value}: e));
+
+  // tabla + filtros
+  const events = state.events || [];
+  const [q,setQ]       = useState('');
+  const [from,setFrom] = useState('');
+  const [to,setTo]     = useState('');
+  const [sort,setSort] = useState({ key:'start', dir:'asc' });
+  const [page,setPage] = useState(0);
+  const [pageSize,setPageSize] = useState(25);
+
+  const inRange = (e)=> (!from || e.start>=from) && (!to || e.end<=to);
+  const matches = (e)=> !q || (e.label||'').toLowerCase().includes(q.toLowerCase());
+  const toggleSort = (k)=> setSort(prev=> prev.key===k ? {key:k,dir:(prev.dir==='asc'?'desc':'asc')} : {key:k,dir:'asc'});
+  const compare = (a,b)=> {
+    const av = (a?.[sort.key] ?? ''), bv = (b?.[sort.key] ?? '');
+    if (av<bv) return sort.dir==='asc'?-1:1;
+    if (av>bv) return sort.dir==='asc'? 1:-1;
+    return 0;
+  };
+
+  const filtered = useMemo(()=> events.filter(inRange).filter(matches).sort(compare), [events,q,from,to,sort]);
+  const total = filtered.length;
+  const pages = Math.max(1, Math.ceil(total/(pageSize||25)));
+  const pageClamped = Math.min(page, pages-1);
+  const startIdx = pageClamped*(pageSize||25);
+  const rows = filtered.slice(startIdx, startIdx+(pageSize||25));
+  const goto = (p)=> setPage(Math.max(0, Math.min(pages-1,p)));
+
+  return (
+    <Card title="Eventos de Refuerzo (Admin)">
+      {/* Alta rápida */}
+      <div className="grid grid-cols-12 gap-2 mb-3">
+        <div className="col-span-4">
+          <label className="text-xs">Etiqueta</label>
+          <input value={ev.label} onChange={e=>setEv({...ev,label:e.target.value})} className="w-full border rounded px-2 py-1"/>
+        </div>
+        <div className="col-span-2">
+          <label className="text-xs">Desde</label>
+          <input type="date" value={ev.start} onChange={e=>setEv({...ev,start:e.target.value})} className="w-full border rounded px-2 py-1"/>
+        </div>
+        <div className="col-span-2">
+          <label className="text-xs">Hasta</label>
+          <input type="date" value={ev.end} onChange={e=>setEv({...ev,end:e.target.value})} className="w-full border rounded px-2 py-1"/>
+        </div>
+        <div className="col-span-2">
+          <label className="text-xs">L–V +</label>
+          <input type="number" min={0} max={9} value={ev.weekdaysExtraSlots}
+                 onChange={e=>setEv({...ev,weekdaysExtraSlots:Number(e.target.value)||0})}
+                 className="w-full border rounded px-2 py-1"/>
+        </div>
+        <div className="col-span-2">
+          <label className="text-xs">S–D +</label>
+          <input type="number" min={0} max={9} value={ev.weekendExtraSlots}
+                 onChange={e=>setEv({...ev,weekendExtraSlots:Number(e.target.value)||0})}
+                 className="w-full border rounded px-2 py-1"/>
+        </div>
+        <div className="col-span-12"><button onClick={add} className="px-3 py-1.5 rounded-lg border w-full">Añadir evento</button></div>
+      </div>
+
+      {/* Filtros / orden / tamaño de página */}
+      <div className="border rounded-lg p-2 mb-2 grid grid-cols-12 gap-2 text-sm bg-white">
+        <div className="col-span-4">
+          <label className="text-xs">Buscar etiqueta</label>
+          <input className="w-full border rounded px-2 py-1" placeholder="buscar…"
+                 value={q} onChange={e=>{ setQ(e.target.value); setPage(0); }}/>
+        </div>
+        <div className="col-span-3">
+          <label className="text-xs">Desde</label>
+          <input type="date" className="w-full border rounded px-2 py-1"
+                 value={from} onChange={e=>{ setFrom(e.target.value); setPage(0); }}/>
+        </div>
+        <div className="col-span-3">
+          <label className="text-xs">Hasta</label>
+          <input type="date" className="w-full border rounded px-2 py-1"
+                 value={to} onChange={e=>{ setTo(e.target.value); setPage(0); }}/>
+        </div>
+        <div className="col-span-2">
+          <label className="text-xs">Items/página</label>
+          <select className="w-full border rounded px-2 py-1" value={pageSize}
+                  onChange={e=>{ setPageSize(Number(e.target.value)||25); setPage(0); }}>
+            <option>10</option><option>25</option><option>50</option><option>100</option>
+          </select>
+        </div>
+      </div>
+
+      {/* Tabla paginada */}
+      <div className="border rounded-lg overflow-x-auto">
+        {total===0 && <div className="p-3 text-sm text-slate-500">Sin eventos.</div>}
+        {total>0 && (
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b">
+                <th className="text-left p-2 cursor-pointer" onClick={()=>toggleSort('label')}>Etiqueta</th>
+                <th className="text-left p-2 cursor-pointer" onClick={()=>toggleSort('start')}>Desde</th>
+                <th className="text-left p-2 cursor-pointer" onClick={()=>toggleSort('end')}>Hasta</th>
+                <th className="text-right p-2">L–V +</th>
+                <th className="text-right p-2">S–D +</th>
+                <th className="text-right p-2">Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((e,i)=>{
+                const absIdx = events.indexOf(e);
+                return (
+                  <tr key={`${e.start}-${e.end}-${i}`} className="border-b">
+                    <td className="p-2">
+                      <input className="border rounded px-2 py-1 w-full" value={e.label||''}
+                             onChange={ev=>setFieldAt(absIdx,'label',ev.target.value)} />
+                    </td>
+                    <td className="p-2">
+                      <input type="date" className="border rounded px-2 py-1 w-full" value={e.start}
+                             onChange={ev=>setFieldAt(absIdx,'start',ev.target.value)} />
+                    </td>
+                    <td className="p-2">
+                      <input type="date" className="border rounded px-2 py-1 w-full" value={e.end}
+                             onChange={ev=>setFieldAt(absIdx,'end',ev.target.value)} />
+                    </td>
+                    <td className="p-2 text-right">
+                      <input type="number" min={0} max={9} className="border rounded px-2 py-1 w-20 text-right"
+                             value={e.weekdaysExtraSlots||0}
+                             onChange={ev=>setFieldAt(absIdx,'weekdaysExtraSlots',Number(ev.target.value)||0)} />
+                    </td>
+                    <td className="p-2 text-right">
+                      <input type="number" min={0} max={9} className="border rounded px-2 py-1 w-20 text-right"
+                             value={e.weekendExtraSlots||0}
+                             onChange={ev=>setFieldAt(absIdx,'weekendExtraSlots',Number(ev.target.value)||0)} />
+                    </td>
+                    <td className="p-2 text-right">
+                      <button onClick={()=>delAtIndex(absIdx)} className="text-red-600 hover:underline">Eliminar</button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* Paginación */}
+      {total>0 && (
+        <div className="flex items-center justify-between mt-2 text-xs">
+          <div>{startIdx+1}-{Math.min(total, startIdx+rows.length)} de {total}</div>
+          <div className="flex items-center gap-2">
+            <button className="px-2 py-1 rounded border" disabled={pageClamped===0}
+                    onClick={()=>goto(pageClamped-1)}>Prev</button>
+            <span>Página {pageClamped+1}/{pages}</span>
+            <button className="px-2 py-1 rounded border" disabled={pageClamped>=pages-1}
+                    onClick={()=>goto(pageClamped+1)}>Next</button>
+          </div>
+        </div>
+      )}
+    </Card>
   );
 }
