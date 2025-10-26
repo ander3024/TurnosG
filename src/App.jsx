@@ -1,4 +1,4 @@
-import React, {  useEffect, useMemo, useState , useRef, useCallback } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 
 import WeekendAuditPanel from "./components/WeekendAuditPanel";
 // === Defaults para autoload de usuarios no-admin ===
@@ -1456,71 +1456,35 @@ function WeeklyView({ startDate, weeks, assignments, people, timeOffs, province,
             {header.map(h=> <th key={h.dateStr} className="text-left p-2 border-b">{h.label}</th>)}
           </tr>
         </thead>
-            <tbody>
-              {rows.map((e,i)=>{
-                const absIdx = events.indexOf(e);
-                const m = countImpact(e);
-                const pid = e.assigneeId || "";
-                const ppl = (state.people || []);
-                const avail = availabilityFor(e, pid);
-                return (
-                  <tr key={`${e.start}-${e.end}-${i}`} className="border-b">
-                    <td className="p-2">
-                      <input className="border rounded px-2 py-1 w-full" value={e.label||''}
-                             onChange={ev=>setFieldAt(absIdx,'label',ev.target.value)} />
-                    </td>
-                    <td className="p-2">
-                      <input type="date" className="border rounded px-2 py-1 w-full" value={e.start}
-                             onChange={ev=>setFieldAt(absIdx,'start',ev.target.value)} />
-                    </td>
-                    <td className="p-2">
-                      <input type="date" className="border rounded px-2 py-1 w-full" value={e.end}
-                             onChange={ev=>setFieldAt(absIdx,'end',ev.target.value)} />
-                    </td>
-                    <td className="p-2 text-right">
-                      <input type="number" min={0} max={9} className="border rounded px-2 py-1 w-20 text-right"
-                             value={e.weekdaysExtraSlots||0}
-                             onChange={ev=>setFieldAt(absIdx,'weekdaysExtraSlots',Number(ev.target.value)||0)} />
-                    </td>
-                    <td className="p-2 text-right">
-                      <input type="number" min={0} max={9} className="border rounded px-2 py-1 w-20 text-right"
-                             value={e.weekendExtraSlots||0}
-                             onChange={ev=>setFieldAt(absIdx,'weekendExtraSlots',Number(ev.target.value)||0)} />
-                    </td>
-
-                    {/* Impacto */}
-                    <td className="p-2 text-right">
-                      <span title={`L–V: ${m.wk}, S–D: ${m.we}`}>{m.slots}</span>
-                    </td>
-
-                    {/* Asignación forzada (opcional) */}
-                    <td className="p-2">
-                      <div className="flex items-center gap-2 justify-end">
-                        <select className="border rounded px-2 py-1" value={pid}
-                                onChange={ev=>setAssignee(absIdx, ev.target.value)}>
-                          <option value="">—</option>
-                          {ppl.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
-                        </select>
-                        <label className="text-xs flex items-center gap-1">
-                          <input type="checkbox" checked={!!e.assigneeForced}
-                                 onChange={ev=>toggleForceAssignee(absIdx, ev.target.checked)} /> Forzar
-                        </label>
-                        {pid &&
-                          <span className={avail.free===avail.total ? "text-emerald-600 text-xs" : "text-amber-600 text-xs"}
-                                title="días libres/total">
-                            libre {avail.free}/{avail.total}
-                          </span>}
-                      </div>
-                    </td>
-
-                    {/* Acciones */}
-                    <td className="p-2 text-right">
-                      <button onClick={()=>delAtIndex(absIdx)} className="text-red-600 hover:underline">Eliminar</button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
+        <tbody>
+          {people.map(p=> (
+            <tr key={p.id}>
+              <td className="p-2 align-top"><div className="inline-flex items-center gap-2"><span className="h-3 w-3 rounded" style={{background:p.color}}/> {p.name}</div></td>
+              {header.map(h=>{ const cell=(assignments[h.dateStr]||[]).filter(c=>c.personId===p.id).sort((a,b)=> minutesFromHHMM(a.shift.start)-minutesFromHHMM(b.shift.start)); return (
+                <td key={h.dateStr} className="p-2 align-top">
+                  {cell.length===0 ? (
+                    (hasApprovedTO(h.dateStr, p.id)
+                      ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[11px] bg-amber-50 border-amber-300 text-amber-800">
+                          {(() => {
+                            const t = getTOType(h.dateStr, p.id);
+                            return t==='vacaciones' ? '🏖️ Vacaciones' : t==='libranza' ? '🛌 Libranza' : t==='viaje' ? '✈️ Viaje' : 'Ausencia';
+                          })()}
+                        </span>
+                      : (isClosedDay(h.dateStr) ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[11px] bg-slate-50">🎌 Festivo</span> : <span className="text-slate-400">—</span>)
+                    )
+                  ) : ( cell.map((c,i)=>{ const span=formatSpan(c.shift.start,c.shift.end); const dur = effectiveMinutes(c.shift)/60; return (
+                    <div key={i} className="rounded-lg border px-2 py-1 mb-1" style={{borderColor:`${p.color}55`,background:`${p.color}10`}}>
+                      <div className="text-[11px] font-medium">{((c.shift.label||"").toLowerCase().includes("refuerzo")?"➕ ":"")}{c.shift.label||"Turno"}</div>
+                      {((c.shift.label||"").toLowerCase().includes("refuerzo")) && <span className="ml-1 px-1 border rounded text-[10px]">Refuerzo</span>}
+                      <div className="text-[12px]">{span} <span className="text-[11px] text-slate-500">({dur}h{c.shift.lunchMinutes ? " · comida "+(c.shift.lunchMinutes)+"m" : ""})</span></div>
+                    </div>
+                  ); })
+                  )}
+                </td>
+              ); })}
+            </tr>
+          ))}
+        </tbody>
       </table>
     </div>
   );
@@ -2566,7 +2530,7 @@ function AuthenticatedApp(props){
 
           <TimeOffPanel state={state} setState={setState} controls={controls} isAdmin={isAdmin} currentUser={auth.user} />
           <SwapsPanel state={state} setState={setState} assignments={ASS}  isAdmin={isAdmin} currentUser={auth.user} />
-          {isAdmin && <RefuerzosPanelLite state={state} up={up} assignments={ASS} />}
+          {isAdmin && <RefuerzosPanelLite state={state} up={up} />}
           {isAdmin && <GeneradorPicos state={state} up={up} />}{isAdmin && (
                     <PropuestaCierre
             state={state}
@@ -2642,7 +2606,7 @@ function AuthenticatedApp(props){
     </div>
   );
 }
-function RefuerzosPanelLite({ state, up, assignments }){
+function RefuerzosPanelLite({ state, up }){
   const [ev,setEv] = useState({
     label:'Black Friday',
     start: state.startDate,
@@ -2680,7 +2644,7 @@ function RefuerzosPanelLite({ state, up, assignments }){
   const pages = Math.max(1, Math.ceil(total/(pageSize||25)));
   const pageClamped = Math.min(page, pages-1);
   const startIdx = pageClamped*(pageSize||25);
-  const rows = filtered.slice(startIdx, startIdx + (pageSize||25));
+  const rows = filtered.slice(startIdx, startIdx+(pageSize||25));
   const goto = (p)=> setPage(Math.max(0, Math.min(pages-1,p)));
 
   return (
@@ -2738,18 +2702,6 @@ function RefuerzosPanelLite({ state, up, assignments }){
             <option>10</option><option>25</option><option>50</option><option>100</option>
           </select>
         </div>
-      {/* Añadir en lote (CSV o líneas) */}
-      <details className="mb-2">
-        <summary className="text-sm cursor-pointer">Añadir en lote (CSV o líneas)</summary>
-        <div className="mt-2 space-y-2">
-          <div className="text-xs text-slate-500">Formato por línea: <code>Etiqueta;YYYY-MM-DD;YYYY-MM-DD;LV+;SD+</code> — separador ; o ,</div>
-          <textarea ref={bulkRef} className="w-full border rounded p-2 h-28" placeholder="Rebajas;2025-01-02;2025-01-10;1;1&#10;Navidad;2025-12-20;2025-12-27;2;2"></textarea>
-          <div className="flex items-center gap-2">
-            <button className="px-3 py-1.5 rounded-lg border" onClick={handleBulkPreview}>Previsualizar</button>
-            <span className="text-xs text-slate-500">Después de previsualizar, confirma en el diálogo de React.</span>
-          </div>
-        </div>
-      </details>
       </div>
 
       {/* Tabla paginada */}
@@ -2764,8 +2716,6 @@ function RefuerzosPanelLite({ state, up, assignments }){
                 <th className="text-left p-2 cursor-pointer" onClick={()=>toggleSort('end')}>Hasta</th>
                 <th className="text-right p-2">L–V +</th>
                 <th className="text-right p-2">S–D +</th>
-                <th className="text-right p-2">Impacto</th>
-                <th className="text-right p-2">Asignación</th>
                 <th className="text-right p-2">Acciones</th>
               </tr>
             </thead>
