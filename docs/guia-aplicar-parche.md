@@ -69,7 +69,7 @@ El mensaje `error: corrupt patch at line 79` indica que `changes.patch` está in
    ```bash
    git apply --check changes.patch
    ```
-   Si aquí vuelve a fallar, revisa que tu árbol esté limpio (paso 1) y que el parche se generó en el paso anterior.
+   Si aquí vuelve a fallar con `patch does not apply`, salta al apartado **3.1**. Si el error vuelve a ser `corrupt patch`, regresa a la sección 2 y regenera el archivo.
 
 2. Aplica el parche. Tienes dos opciones:
    - Mantener autor y mensaje original del commit:
@@ -88,6 +88,47 @@ El mensaje `error: corrupt patch at line 79` indica que `changes.patch` está in
    git status -sb
    git diff HEAD^ HEAD        # revisa los cambios si usaste git am
    ```
+
+### 3.1. Si aparece `patch does not apply`
+
+Este mensaje indica que tu `src/App.jsx` es distinto al del commit base del parche. Para integrarlo igualmente:
+
+1. Asegúrate de estar sincronizado con la rama objetivo:
+   ```bash
+   git checkout main
+   git pull --ff-only
+   ```
+
+2. Trae el commit original (si no lo hiciste antes):
+   ```bash
+   git fetch origin 205d536fda4fb1e998fe9303777fc9e3c36d4942
+   ```
+
+3. Cherry-pick del commit completo usando el merge de tres vías (esto reemplaza al parche):
+   ```bash
+   git cherry-pick --allow-empty-message --keep-redundant-commits 205d536fda4fb1e998fe9303777fc9e3c36d4942
+   ```
+   Si prefieres conservar la autoría exacta, puedes usar `git cherry-pick -x 205d536fda4fb1e998fe9303777fc9e3c36d4942`.
+
+4. Si surgen conflictos (es habitual porque `src/App.jsx` evolucionó), edita el archivo indicado, resuelve las marcas `<<<<<<<`, guarda los cambios y marca el conflicto como resuelto:
+   ```bash
+   git status -sb          # identifica los archivos en conflicto
+   # edita src/App.jsx y deja la versión correcta
+   git add src/App.jsx
+   git cherry-pick --continue
+   ```
+
+5. Comprueba el resultado final:
+   ```bash
+   git status -sb
+   git log -1 --stat
+   ```
+
+Si prefieres seguir usando `changes.patch`, otra alternativa es:
+```bash
+git apply --3way changes.patch
+```
+Lo que hará Git es intentar la fusión de manera automática utilizando el contexto de la base original. Si quedan conflictos, resuélvelos igual que en el paso 4 y ejecuta `git add src/App.jsx` seguido de `git commit`.
 
 ---
 
