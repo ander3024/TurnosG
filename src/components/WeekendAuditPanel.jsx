@@ -1,112 +1,123 @@
-import { useMemo } from "react";
+import React, { useMemo } from "react";
 
-function isWE(dateStr){ const d=new Date(dateStr); const w=d.getDay(); return w===0||w===6; }
-function fmt(n){ return new Intl.NumberFormat('es-ES').format(n); }
-
-export default function WeekendAuditPanel({ assignments = {}, people = [], startDate, weeks }){
-  const data = useMemo(()=>{
-    const map = new Map(people.map(p=>[p.id,{id:p.id,name:p.name,color:p.color,weekends:0,total:0,lastWasWE:false,maxStreak:0,streak:0}]));
-    let weDays=0,weSlots=0,weUnassigned=0,totSlots=0;
-    const weGaps = []; // <- huecos sin persona en WE
+/**
+ * props:
+ *  - assignments: { [dateStr: string]: Array<{ personId: string, shift: {start:string,end:string,label?:string}, ... }> }
+ *  - people: Array<{ id:string, name:string, color?:string }>
+ *  - startDate: Date
+ *  - weeks: number
+ */
+export default function WeekendAuditPanel({ assignments = {}, people = [], startDate, weeks }) {
+  const data = useMemo(() => {
+    const byId = new Map(people.map(p => [p.id, { id: p.id, name: p.name, color: p.color, weekends: 0, total: 0, maxStreak: 0 }]));
+    let weDays = 0, weSlots = 0, weUnassigned = 0, totSlots = 0;
 
     const keys = Object.keys(assignments).sort();
-    const from = startDate? new Date(startDate) : null;
-    const to   = startDate? new Date(startDate.getTime()+(weeks*7-1)*86400000) : null;
+    const from = startDate instanceof Date ? startDate : (startDate ? new Date(startDate) : null);
+    const to   = startDate instanceof Date && Number.isFinite(+weeks)
+      ? new Date(+startDate + (weeks*7-1)*24*3600*1000)
+      : null;
 
-    for(const k of keys){
-      const inRange = !from || (new Date(k) >= from && new Date(k) <= to);
-      if(!inRange) continue;
-      const weekend = isWE(k);
-      const arr = assignments[k]||[];
-      totSlots += arr.length;
-      if(weekend){ weDays++; weSlots += arr.length; }
+    const inRange = (ds) => {
+      if (!from || !to) return true;
+      const d = new Date(ds);
+      return d >= from && d <= to;
+    };
+    const isWE = (ds) => {
+      const d = new Date(ds);
+      const dow = d.getDay();
+      return dow === 0 || dow === 6;
+    };
 
-      // Huecos sin persona
-      if(weekend){
-        for(const a of arr){
-          if(!a?.personId){
-            weUnassigned++;
-            weGaps.push({
-              date:k,
-              label:a?.shift?.label ?? "",
-              start:a?.shift?.start ?? "",
-              end:a?.shift?.end ?? "",
-            });
-          }
-        }
-      }
+    // simple “racha” por persona: contamos días WE consecutivos
+    const streaks = new Map(); // id -> { lastWasWE:boolean, run:number }
+    for (const id of byId.keys()) streaks.set(id, { lastWasWE:false, run:0 });
 
-      for(const a of arr){
-        if(!a?.personId) continue;
-        const rec = map.get(a.personId); if(!rec) continue;
+    for (const ds of keys) {
+      if (!inRange(ds)) continue;
+      const arr = Array.isArray(assignments[ds]) ? assignments[ds] : [];
+      const weekend = isWE(ds);
+      tot_slots: for (const a of arr) {
+        // total de slots
+        totSlots++;
+        if (weekend) weSlots++;
+
+        const pid = a?.personId;
+        if (!pid) { if (weekend) weUnslide: weUnassigned++; continue tot_slots; }
+
+        const rec = byId.get(pid);
+        if (!rec) continue;
         rec.total++;
-        if(weekend){
+
+        if (weekend) {
+          weDays += 0; // contamos por día aparte; ya contamos weSlots arriba
+          const st = streaks.get(pid) || { lastWasWE:false, run:0 };
+          st.run = st.lastWasWE ? (st.run + 1) : 1;
+          st.lastWasWe = true;
+          streaks.set(pid, st);
+          if (st.run > rec.maxStreak) rec.maxStreak = st.run;
           rec.weekends++;
-          rec.streak = rec.lastWasWE ? rec.streak+1 : 1;
-          rec.maxStreak = Math.max(rec.maxStreak, rec.streak);
-          rec.lastWasWE = true;
-        }else{
-          rec.lastWasWE=false; rec.streak=0;
+        } else {
+          const st = streaks.get(pid);
+          if (st) { st.lastWasWe = false; st.run = 0; streaks.set(pid, st); }
         }
       }
     }
 
-    const rows = [...map.values()].map(r=>({...r,ratio:r.total? r.weekends/r.total:0})).sort((a,b)=>b.weekends-a.weekends);
-    const avgWE = rows.length? rows.reduce((s,r)=>s+r.weekends,0)/rows.length : 0;
-    const stdev = rows.length? Math.sqrt(rows.reduce((s,r)=>s+Math.pow(r.weekends-(avgWE||0),2),0)/rows.length) : 0;
-    const top3 = rows.slice(0,3), bottom3=[...rows].reverse().slice(0,3);
+    const rows = Array.from(byId.values()).map(r => ({
+      ...r,
+      ratio: r.total ? r.total === 0 ? 0 : r.weekends / r.total : 0
+    })).sort((a,b) => b.weekends - a.weekends || a.name.localeCompare(b.name));
 
-    return { weDays,weSlots,weUnassigned,totSlots,avgWE,stdev,rows,top3,bottom3,weGaps };
-  },[assignments,people,startDate,weeks]);
+    const avgWE = rows.length ? rows.reduce((s,r)=>s + r.weekends, 0) / rows.length : 0;
+    const stdev = rows.length ? Math.sqrt(rows.reduce((s,r)=> s + Math.pow(r.weekends - avgWE, 2), 0) / rows.length) : 0;
+    const top3 = rows.slice(0, 3);
 
-  function exportCSV(){
-    const rows = data.rows||[];
+    return { rows, top3, weDays, weSlots, weUnassigned, totSlots, avgWE, stdev };
+  }, [assignments, people, startDate, weeks]);
+
+  const exportCSV = () => {
     const header = ["id","name","weekends","total","ratio","maxStreak"];
-    const lines = [header.join(",")].concat(rows.map(r=>[
-      r.id, JSON.stringify(r.name), r.weekends, r.total, (r.ratio*100).toFixed(0)+"%", r.maxStreak
-    ].join(",")));
-    const blob = new Blob([lines.join("\n")],{type:"text/csv;charset=utf-8;"});
-    const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download="weekend-audit.csv"; a.click(); URL.revokeObjectURL(a.href);
-  }
+    const body = data.rows.map(r => [
+      r.id, JSON.stringify(r.name??""), r.weekends, r.total, ((r.ratio*100)|0)+"%", r.maxStreak
+    ].join(","));
+    const blob = new Blob([ [header.join(","), ...body].join("\n") ], { type:"text/csv;charset=utf-8;" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "weekend-audit.csv";
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
 
-  function exportGapsCSV(){
-    const rows = data.weGaps||[];
-    const header = ["date","label","start","end"];
-    const lines = [header.join(",")].concat(rows.map(r=>[
-      r.date, JSON.stringify(r.label||""), r.start, r.end
-    ].join(",")));
-    const blob = new Blob([lines.join("\n")],{type:"text/csv;charset=utf-8;"});
-    const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download="weekend-gaps.csv"; a.click(); URL.revokeObjectURL(a.href);
-  }
+  const fmt = (n) => new Intl.NumberFormat("es-ES").format(n);
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="text-sm font-medium">Weekend audit — rango visible</div>
-        <div className="text-xs text-slate-500">
-          Días WE: <b>{fmt(data.weDays)}</b> · Slots WE: <b>{fmt(data.weSlots)}</b> ·
-          Sin asignar WE: <b className={data.weUnassigned? "text-rose-600": ""}>{fmt(data.weUnassigned)}</b> ·
-          Slots totales: <b>{fmt(data.totSlots)}</b>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="text-sm font-medium">Weekend audit (rango visible)</div>
+        <div className="text-xs text-slate-600">
+          WE días: <b>{fmt(data.weDays)}</b> · WE slots: <b>{fmt(data.weSlots)}</b> ·
+          sin asignar: <b className={data.weUnassigned? "text-rose-600": ""}>{fmt(data.weUnassigned)}</b> ·
+          total slots: <b>{fmt(data.totSlots)}</b>
         </div>
       </div>
 
-      <div className="flex items-center justify-end gap-2">
+      <div className="flex justify-end">
         <button onClick={exportCSV} className="px-3 py-1.5 rounded-lg border text-sm">Exportar CSV</button>
-        <button onClick={exportGapsCSV} className="px-3 py-1.5 rounded-lg border text-sm">Exportar huecos WE</button>
       </div>
 
       <div className="grid md:grid-cols-3 gap-3">
-        {data.top3.map(p=>{
-          const z = data.stdev ? (p.weekends - (data.avgWE||0))/data.stdev : 0;
-          const tag = z>=1 ? "🔴" : z>=0.5 ? "🟡" : "🟢";
+        {data.top3.map(p => {
+          const z = data.stdev ? (p.weekends - data.avgWE) / data.stdev : 0;
+          const tag = z >= 1 ? "🔴" : z >= 0.5 ? "🟡" : "🟢";
           return (
             <div key={p.id} className="rounded-xl border p-3">
               <div className="flex items-center gap-2 mb-1">
-                <span className="h-3 w-3 rounded" style={{background:p.color}}/>
+                <span className="h-3 w-3 rounded" style={{background:p.color}} />
                 <div className="text-sm font-medium">{p.name} <span className="opacity-70">{tag}</span></div>
               </div>
               <div className="text-xs text-slate-600">
-                WE: <b>{p.weekends}</b> · Total: {p.total} · Ratio WE: {(p.ratio*100).toFixed(0)}% · Racha máx: {p.maxStreak}
+                WE: <b>{p.weekends}</b> · Total: {p.total} · Ratio WE: {(p.ratio*100|0)}% · Racha máx: {p.maxStreak}
               </div>
             </div>
           );
@@ -125,7 +136,7 @@ export default function WeekendAuditPanel({ assignments = {}, people = [], start
             </tr>
           </thead>
           <tbody>
-            {data.rows.map(p=>(
+            {data.rows.map(p => (
               <tr key={p.id} className="border-b">
                 <td className="p-2">
                   <div className="inline-flex items-center gap-2">
@@ -133,25 +144,14 @@ export default function WeekendAuditPanel({ assignments = {}, people = [], start
                     {p.name}
                   </div>
                 </td>
-                <td className="p-2 text-right">{fmt(p.weekends)}</td>
-                <td className="p-2 text-right">{fmt(p.total)}</td>
-                <td className="p-2 text-right">{(p.ratio*100).toFixed(0)}%</td>
-                <td className="p-2 text-right">{fmt(p.maxStreak)}</td>
+                <td className="p-2 text-end">{fmt(p.weekends)}</td>
+                <td className="p-2 text-end">{fmt(p.total)}</td>
+                <td className="p-2 text-end">{(p.xRatio||p.ratio).toLocaleString(undefined,{maximumFractionDigits:0})}%</td>
+                <td className=" p-2 text-end">{fmt(p.maxStreak)}</td>
               </tr>
             ))}
           </tbody>
         </table>
-      </div>
-
-      <div className="text-xs">
-        {data.weUnassigned>0 && (
-          <div className="text-rose-600">⚠ Hay {fmt(data.weUnassigned)} huecos de fin de semana sin asignar.</div>
-        )}
-        {data.rows.length>0 && (
-          <div className="text-slate-600">
-            Media WE por persona: <b>{fmt(Number(data.avgWE).toFixed(1))}</b>
-          </div>
-        )}
       </div>
     </div>
   );
