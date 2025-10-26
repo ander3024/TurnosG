@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 
+import WeekendAuditPanel from "./components/WeekendAuditPanel";
 // === Defaults para autoload de usuarios no-admin ===
 const PUBLIC_SPACE = { id: "turnos-2025", readToken: "READ-2025" };
 
@@ -1438,10 +1439,14 @@ function WeeklyView({ startDate, weeks, assignments, people, timeOffs, province,
     return true;
   };
   const getTOType = (dateStr, personId) => {
-    const d = parseDateValue(dateStr);
-    const hit = (timeOffs||[]).find(to => to.personId===personId && to.status==="aprobada" && parseDateValue(to.start) <= d && d <= parseDateValue(to.end));
-    return hit ? hit.type : null;
-  };
+  const d_ = parseDateValue(dateStr);
+  const hit = (timeOffs||[]).find(to => (
+    to.personId === personId &&
+    to.status === "aprobada" &&
+    parseDateValue(to.start) <= d_ && d_ <= parseDateValue(to.end)
+  ));
+  return hit ? hit.type : null;
+};
   return (
     <div className="overflow-x-auto print-only:block">
       <table className="w-full text-sm border-collapse">
@@ -1576,14 +1581,14 @@ function SwapsPanel({ state, setState, assignments, isAdmin, currentUser }){
     const overrides=structuredClone(state.overrides||{});
     overrides[sw.dateA]=overrides[sw.dateA]||{}; overrides[sw.dateB]=overrides[sw.dateB]||{};
     overrides[sw.dateA][keyA]=B.personId; overrides[sw.dateB][keyB]=A.personId;
-    const swaps=state.swaps.map((r,idx)=> idx===i? {...r,status:'aprobada'}:r);
+    const swaps = state.swaps.map((r,idx)=> idx===i ? {...r, status:'aprobada', approvedBy:(currentUser?.name||currentUser?.id||"admin"), approvedAt:new Date().toISOString()} : r);
     setState(prev=>({...prev, overrides, swaps }));
   }
-  function denySwap(i){ setState(prev=>({...prev, swaps: prev.swaps.map((r,idx)=> idx===i? {...r,status:'denegada'}:r)})); }
+  function denySwap(i){ if (!isAdmin) return;  setState(prev=>({...prev, swaps: prev.swaps.map((r,idx)=> idx===i? {...r,status:'denegada'}:r)})); }
     if (!isAdmin) return;
-  function archiveSwap(i){ setState(prev=>({...prev, swaps: prev.swaps.map((r,idx)=> idx===i? {...r,status:'archivada'}:r)})); }
+  function archiveSwap(i){ if (!isAdmin) return;  setState(prev=>({...prev, swaps: prev.swaps.map((r,idx)=> idx===i? {...r,status:'archivada'}:r)})); }
     if (!isAdmin) return;
-  function deleteSwap(i){ setState(prev=>({...prev, swaps: prev.swaps.filter((_,idx)=> idx!==i)})); }
+  function deleteSwap(i){ if (!isAdmin) return;  setState(prev=>({...prev, swaps: prev.swaps.filter((_,idx)=> idx!==i)})); }
 
   return (
     <Card title="Swaps (intercambios)">
@@ -1601,7 +1606,7 @@ function SwapsPanel({ state, setState, assignments, isAdmin, currentUser }){
           {state.swaps.map((sw,idx)=> (
             (state.showArchivedSwaps || sw.status!=='archivada') && (
               <div key={idx} className="flex items-center justify-between p-2 text-sm">
-                <div>Swap #{idx+1}: {sw.dateA} [#{sw.shiftIndexA}] ⇄ {sw.dateB} [#{sw.shiftIndexB}] · Estado: <b>{sw.status}</b></div>
+                <div>Swap #{idx+1}: {sw.dateA} [#{sw.shiftIndexA}] ⇄ {sw.dateB} [#{sw.shiftIndexB}] · Estado: <b>{sw.status}</b>{sw.status==='aprobada' && (<span> · Aprobado por <b>{sw.approvedBy||'admin'}</b>{sw.approvedAt?` el ${new Date(sw.approvedAt).toLocaleString()}`:""}</span>)}</div>
                 <div className="flex items-center gap-3">
                   {sw.status!=='aprobada' && <button className="text-emerald-700 hover:underline" onClick={()=>approveSwap(idx)}>Aprobar</button>}
                   {sw.status!=='denegada' && <button className="text-rose-700 hover:underline" onClick={()=>denySwap(idx)}>Denegar</button>}
@@ -2418,6 +2423,40 @@ function AuthenticatedApp(props){
           <VacationPolicyPanel state={state} up={up} />
           <RefuerzoPolicyPanel state={state} up={up} />
 <ConciliacionPanel state={state} up={up} />
+          <Card title="Debug">
+            <div className="space-y-2 text-sm">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={!!(state?.debug?.score)}
+                  onChange={e=>up(['debug','score'], e.target.checked)}
+                />
+                Mostrar ScoreDebugPanel
+              </label>
+
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={!!(state?.debug?.weekendAudit)}
+                  onChange={e=>up(['debug','weekendAudit'], e.target.checked)}
+                />
+                Mostrar WeekendAuditPanel
+              </label>
+
+              {state?.debug?.weekendAudit === true && (
+                <div className="mt-3">
+                  <Card title="Weekend audit (Admin)">
+                    <WeekendAuditPanel
+                      assignments={ASS}
+                      people={state.people}
+                      startDate={startDate}
+                      weeks={state.weeks}
+                    />
+                  </Card>
+                </div>
+              )}
+            </div>
+          </Card>
           <PersonasPanel state={state} upPerson={upPerson} />
           <TurnosPanel state={state} up={up} />
           <FestivosPanel state={state} up={up} />
@@ -2512,7 +2551,7 @@ function AuthenticatedApp(props){
             }annualTarget={state.annualTargetHours}
           />
 
-            )}{isAdmin && (<ScoreDebugPanel
+            )}{(isAdmin && (state?.debug?.score===true)) && (<ScoreDebugPanel
             assignments={ASS}
             people={state.people}
             startDate={startDate}
@@ -2556,4 +2595,3 @@ function AuthenticatedApp(props){
     </div>
   );
 }
-

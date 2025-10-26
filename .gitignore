@@ -9,3 +9,7 @@ build/
 *.backup
 src/App.jsx.bak.*
 src/App.jsx.backup_*
+
+# build
+/dist
+

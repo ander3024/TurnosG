@@ -1,0 +1,58 @@
+diff --git a/src/App.jsx b/src/App.jsx
+index fca8182..9b0b602 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -1,4 +1,5 @@
+ import React, { useEffect, useMemo, useState } from "react";
++import WeekendAuditPanel from "./components/WeekendAuditPanel";
+ 
+ // === Defaults para autoload de usuarios no-admin ===
+ const PUBLIC_SPACE = { id: "turnos-2025", readToken: "READ-2025" };
+@@ -2541,7 +2542,7 @@ function AuthenticatedApp(props){
+             }annualTarget={state.annualTargetHours}
+           />
+ 
+-            )}{(isAdmin && (state?.debug?.score===true)) && (<ScoreDebugPanel
++            )}{(isAdmin && (state?.debug?.weekendAudit===true)) && (<WeekendAuditPanel assignments={ASS} />)}{(isAdmin && (state?.debug?.score===true)) && (<ScoreDebugPanel
+             assignments={ASS}
+             people={state.people}
+             startDate={startDate}
+@@ -2573,6 +2574,16 @@ function AuthenticatedApp(props){
+                   onChange={(e)=>up(['debug','score'], e.target.checked)}
+                 />
+                 Mostrar ScoreDebugPanel
++            <div className="mt-2">
++              <label className="text-sm flex items-center gap-2">
++                <input
++                  type="checkbox"
++                  checked={!!(state?.debug?.weekendAudit)}
++                  onChange={(e)=>up(['debug','weekendAudit'], e.target.checked)}
++                />
++                Mostrar WeekendAuditPanel
++              </label>
++            </div>
+               </label>
+             </div>
+           </section>
+diff --git a/src/components/WeekendAuditPanel.jsx b/src/components/WeekendAuditPanel.jsx
+new file mode 100644
+index 0000000..34b2615
+--- /dev/null
++++ b/src/components/WeekendAuditPanel.jsx
+@@ -0,0 +1,16 @@
++export default function WeekendAuditPanel({ assignments }) {
++  // Cuenta asignaciones en sábados/domingos visibles
++  const days = Object.keys(assignments||{});
++  let tot = 0;
++  for (const d of days) {
++    const dt = new Date(d);
++    const dow = dt.getDay(); // 0=dom,6=sáb
++    if (dow===0 || dow===6) tot += (assignments[d]?.length||0);
++  }
++  return (
++    <div className="border rounded-xl p-3">
++      <div className="text-sm font-medium mb-1">Weekend audit</div>
++      <div className="text-sm text-slate-600">Asignaciones en findes (rango visible): <b>{tot}</b></div>
++    </div>
++  );
++}

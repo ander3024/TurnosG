@@ -1,0 +1,28 @@
+diff --git a/src/App.jsx b/src/App.jsx
+index 088b8a9..9e259d2 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -2542,7 +2542,9 @@ function AuthenticatedApp(props){
+             }annualTarget={state.annualTargetHours}
+           />
+ 
+-            )}{(isAdmin && (state?.debug?.weekendAudit===true)) && (<WeekendAuditPanel assignments={ASS} people={state.people} startDate={startDate} weeks={state.weeks} />)}{(isAdmin && (state?.debug?.score===true)) && (<ScoreDebugPanel
++            )}{(isAdmin && (state?.debug?.weekendAudit===true)) && (<Card title="Weekend audit (Admin)">
++  <WeekendAuditPanel assignments={ASS} people={state.people} startDate={startDate} weeks={state.weeks} />
++</Card>)}{(isAdmin && (state?.debug?.score===true)) && (<ScoreDebugPanel
+             assignments={ASS}
+             people={state.people}
+             startDate={startDate}
+diff --git a/src/components/WeekendAuditPanel.jsx b/src/components/WeekendAuditPanel.jsx
+index c540cec..bba8af0 100644
+--- a/src/components/WeekendAuditPanel.jsx
++++ b/src/components/WeekendAuditPanel.jsx
+@@ -72,7 +72,7 @@ export default function WeekendAuditPanel({ assignments = {}, people = [], start
+   }, [assignments, people, startDate, weeks]);
+ 
+   return (
+-    <div className="border rounded-2xl p-4 space-y-4">
++    <div className="space-y-4">
+       <div className="flex items-center justify-between">
+         <div className="text-sm font-medium">Weekend audit — rango visible</div>
+         <div className="text-xs text-slate-500">
