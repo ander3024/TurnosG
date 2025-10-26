@@ -237,6 +237,19 @@ function generateSchedule({ startDate, weeks, people, weekdayShifts, weekendShif
   const weekendLoad=new Map(people.map(p=>[p.id,0]));
   const timeOffIndex = indexTimeOff(timeOffs, { province, consumeVacationOnHoliday, customHolidaysByYear });
 
+  function buildForcedShift(event, personId, isWeekend, index){
+    if (!personId) return null;
+    const baseShift = isWeekend ? weekendShift : refuerzoWeekdayShift;
+    const suffix = index > 0 ? ` #${index+1}` : '';
+    const labelBase = event?.label || baseShift.label || 'Refuerzo';
+    return {
+      ...baseShift,
+      label: `${labelBase}${suffix} · asignado`,
+      __forcedPersonId: personId,
+      __eventLabel: event?.label || null
+    };
+  }
+
   
   // --- OFF condicionado por vacaciones (configurable) ---
   const OFFP = (typeof window !== "undefined" && window.__OFF_POLICY__) ? window.__OFF_POLICY__ : {};
@@ -294,17 +307,38 @@ const nextOff=computeOffPersonId(people,w+1);
       const offAllowedToday = offLimitedThisWeek ? limitDays.includes(dayIdx) : true;
       const working = people.filter(p => p.id !== offId || !offAllowedToday);
       const mustWorkOffToday = !offAllowedToday;
-let required = isWE? [{...weekendShift}] : [...weekdayShifts];
+      let required = isWE? [{...weekendShift}] : [...weekdayShifts];
 
-      // Refuerzos en calendario de eventos
+      // Refuerzos en calendario de eventos (con asignaciones forzadas opcionales)
       const active=events.filter(ev=> parseDateValue(ev.start)<=date && date<=parseDateValue(ev.end));
+      let extraW = 0;
+      let extraWE = 0;
+      const forcedExtras = [];
       if(active.length){
-        const extraW = active.reduce((a,ev)=> a + (ev.weekdaysExtraSlots||0), 0);
-        // Para fines de semana, NO contar weekendExtraSlots de eventos de conciliación
-        const extraWE = active.reduce((a,ev)=> a + ((ev.meta && ev.meta.source==='conciliacion') ? 0 : (ev.weekendExtraSlots||0)), 0);
-        if(isWE && extraWE>0){ for(let i=0;i<extraWE;i++) required.push({...weekendShift,label:`Refuerzo ${i+1}`}); }
-        if(!isWE && extraW>0){ for(let i=0;i<extraW;i++) required.push({...refuerzoWeekdayShift,label:refuerzoWeekdayShift.label||`Refuerzo ${i+1}`}); }
+        for (const ev of active){
+          const assignedList = Array.isArray(ev?.assignees?.[dateStr]) ? ev.assignees[dateStr].filter(Boolean) : [];
+          if(isWE){
+            const total = (ev?.meta && ev.meta.source==='conciliacion') ? 0 : (ev.weekendExtraSlots||0);
+            const forced = assignedList.slice(0, total);
+            forced.forEach((personId, idx)=>{
+              const shift = buildForcedShift(ev, personId, true, idx);
+              if (shift) forcedExtras.push(shift);
+            });
+            extraWE += Math.max(0, total - forced.length);
+          } else {
+            const total = ev.weekdaysExtraSlots||0;
+            const forced = assignedList.slice(0, total);
+            forced.forEach((personId, idx)=>{
+              const shift = buildForcedShift(ev, personId, false, idx);
+              if (shift) forcedExtras.push(shift);
+            });
+            extraW += Math.max(0, total - forced.length);
+          }
+        }
       }
+      if(isWE && extraWE>0){ for(let i=0;i<extraWE;i++) required.push({...weekendShift,label:`Refuerzo ${i+1}`}); }
+      if(!isWE && extraW>0){ for(let i=0;i<extraW;i++) required.push({...refuerzoWeekdayShift,label:refuerzoWeekdayShift.label||`Refuerzo ${i+1}`}); }
+      if(forcedExtras.length){ required = [...required, ...forcedExtras]; }
 
       const dayAssignments=[]; const assigned=new Set();
       assignments[dateStr] = assignments[dateStr] || [];
@@ -328,6 +362,8 @@ let required = isWE? [{...weekendShift}] : [...weekdayShifts];
       for(let s=0; s<required.length; s++){
         const shift=required[s]; const key=`${shift.start}-${shift.end}-${shift.label||`T${s+1}`}`;
 
+        const forcedEventPersonId = shift.__forcedPersonId || null;
+
         // Candidatos básicos
         let pool=working
           .filter(p=>!assigned.has(p.id))
@@ -343,9 +379,10 @@ let required = isWE? [{...weekendShift}] : [...weekdayShifts];
         pool = pool.filter(p => respectsRules({ personId:p.id, date, shift, assignmentsSoFar: assignments, weeklyMinutes, weeklyDays, rules }));
 
         // Overrides y preferencia finde
-        let chosen=null; const forced=overrides?.[dateStr]?.[key];
-        if(forced && pool.some(p=>p.id===forced)) chosen=forced;
-        if(!chosen && mustWorkOffToday && pool.some(p=>p.id===offId)) chosen = offId;
+        let chosen=null; const forcedOverride=overrides?.[dateStr]?.[key];
+        if(forcedOverride && pool.some(p=>p.id===forcedOverride)) chosen=forcedOverride;
+        else if(forcedEventPersonId && pool.some(p=>p.id===forcedEventPersonId)) chosen=forcedEventPersonId;
+        else if(mustWorkOffToday && pool.some(p=>p.id===offId)) chosen = offId;
         else if(isWE && s===0 && weekendFixedId && pool.some(p=>p.id===weekendFixedId)) chosen=weekendFixedId;
         else if(isWE && s===0 && !weekendFixedId){
           const prefer=pool.find(p=>p.id===nextOff);
@@ -558,6 +595,65 @@ function countExtrasForDate(events, dateStr, isWE){
   return isWE ? weExtra : wExtra;
 }
 
+function listEventDates(ev){
+  if (!ev || !ev.start || !ev.end) return [];
+  const start = parseDateValue(ev.start);
+  const end = parseDateValue(ev.end);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) return [];
+  const out = [];
+  for (let d = new Date(start); d <= end; d = addDays(d,1)){
+    out.push(toDateValue(d));
+  }
+  return out;
+}
+
+function normalizeEventAssignees(ev){
+  if (!ev) return ev;
+  const current = (ev.assignees && typeof ev.assignees === 'object') ? ev.assignees : {};
+  const normalized = {};
+  for (const dateStr of listEventDates(ev)){
+    const date = parseDateValue(dateStr);
+    const slots = isWeekend(date) ? (ev.weekendExtraSlots||0) : (ev.weekdaysExtraSlots||0);
+    if (slots <= 0) continue;
+    const arr = Array.isArray(current[dateStr]) ? current[dateStr].slice(0, slots) : [];
+    while (arr.length < slots) arr.push('');
+    if (arr.some(Boolean)) normalized[dateStr] = arr;
+  }
+  return { ...ev, assignees: normalized };
+}
+
+function setEventAssignee(ev, dateStr, slotIdx, personId){
+  if (!ev) return ev;
+  const base = normalizeEventAssignees(ev);
+  const date = parseDateValue(dateStr);
+  if (Number.isNaN(date.getTime())) return base;
+  const slots = isWeekend(date) ? (base.weekendExtraSlots||0) : (base.weekdaysExtraSlots||0);
+  if (slots <= 0){
+    const next = { ...(base.assignees||{}) };
+    delete next[dateStr];
+    return { ...base, assignees: next };
+  }
+  const arr = Array.from({ length: slots }, (_, idx) => base.assignees?.[dateStr]?.[idx] || '');
+  arr[slotIdx] = personId || '';
+  const next = { ...(base.assignees || {}) };
+  if (arr.some(Boolean)) next[dateStr] = arr;
+  else delete next[dateStr];
+  return { ...base, assignees: next };
+}
+
+function summarizeEventAssignees(ev, people){
+  if (!ev) return 'Sin asignar';
+  const normalized = normalizeEventAssignees(ev);
+  const nameMap = new Map((people||[]).map(p => [p.id, p.name]));
+  const pieces = [];
+  for (const [dateStr, arr] of Object.entries(normalized.assignees || {})){
+    const names = (arr||[]).filter(Boolean).map(pid => nameMap.get(pid) || pid);
+    if (!names.length) continue;
+    pieces.push(`${dateStr}: ${names.join(', ')}`);
+  }
+  return pieces.length ? pieces.join(' · ') : 'Sin asignar';
+}
+
 function peopleAvailableThatDay({people, startDate, dateStr, timeOffs}){
   // Excluye persona OFF esa semana y quien tenga time off ese día
   const w = weekIndexFromDate(startDate, dateStr);
@@ -681,17 +777,20 @@ function proponerCierreHoras({
   }
 
   // Convertimos propuestas en eventos por día: count propuestos -> weekdaysExtraSlots
-  const eventosByDay = new Map(); // ds -> count
+  const eventosByDay = new Map(); // ds -> { count, assignees }
   for (const p of propuestas){
-    const c = eventosByDay.get(p.dateStr) || 0;
-    eventosByDay.set(p.dateStr, c+1);
+    const entry = eventosByDay.get(p.dateStr) || { count:0, assignees:[] };
+    entry.count += 1;
+    if (p.personId) entry.assignees.push(p.personId);
+    eventosByDay.set(p.dateStr, entry);
   }
-  const eventosSugeridos = [...eventosByDay.entries()].map(([ds,count]) => ({
+  const eventosSugeridos = [...eventosByDay.entries()].map(([ds,info]) => ({
     label: 'Refuerzo conciliación',
     start: ds,
     end: ds,
-    weekdaysExtraSlots: count,
-    weekendExtraSlots: 0
+    weekdaysExtraSlots: info.count,
+    weekendExtraSlots: 0,
+    assignees: info.assignees.length ? { [ds]: info.assignees } : {}
   }));
 
   return { propuestas, eventosSugeridos };
@@ -1698,13 +1797,72 @@ function SwapsPanel({ state, setState, assignments, isAdmin, currentUser }){
 }
 
 // ===== Refuerzos =====
+function EventAssignmentsEditor({ event, people, onChange }){
+  const dates = listEventDates(event);
+  if (!event || !event.start || !event.end){
+    return <div className="text-xs text-slate-500">Configura un rango válido para editar asignaciones.</div>;
+  }
+  if (!dates.length){
+    return <div className="text-xs text-slate-500">Sin días dentro del rango.</div>;
+  }
+  const normalized = normalizeEventAssignees(event);
+  return (
+    <div className="space-y-3">
+      {dates.map(dateStr => {
+        const date = parseDateValue(dateStr);
+        const label = date.toLocaleDateString(undefined,{ weekday:'short', day:'2-digit', month:'short' });
+        const slots = isWeekend(date) ? (event.weekendExtraSlots||0) : (event.weekdaysExtraSlots||0);
+        if (slots <= 0){
+          return <div key={dateStr} className="text-xs text-slate-500">{label}: sin refuerzos configurados.</div>;
+        }
+        const arr = normalized.assignees?.[dateStr] || Array.from({ length: slots }, ()=>'');
+        return (
+          <div key={dateStr}>
+            <div className="text-xs font-medium mb-1">{label}</div>
+            <div className="flex flex-wrap gap-2">
+              {Array.from({ length: slots }).map((_, idx) => (
+                <select
+                  key={idx}
+                  value={arr[idx] || ''}
+                  onChange={e=>onChange(dateStr, idx, e.target.value)}
+                  className="border rounded px-2 py-1 text-sm"
+                >
+                  <option value="">Sin asignar</option>
+                  {(people||[]).map(p => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function RefuerzosPanel({ state, up }){
   const [ev,setEv]=useState({ label:'Black Friday', start: state.startDate, end: state.startDate, weekdaysExtraSlots:1, weekendExtraSlots:1 });
+  const events = state.events || [];
+  const people = state.people || [];
+  const [expanded, setExpanded] = useState(null);
+  useEffect(() => {
+    if (expanded !== null && (expanded < 0 || expanded >= events.length)) {
+      setExpanded(null);
+    }
+  }, [expanded, events.length]);
 
-  function add(){ up(['events'], [...state.events, {...ev}]); }
-  function del(i){ up(['events'], state.events.filter((_,idx)=> idx!==i)); }
+  function add(){
+    const created = normalizeEventAssignees({ ...ev, assignees:{} });
+    up(['events'], [...events, created]);
+  }
+  function del(i){ up(['events'], events.filter((_,idx)=> idx!==i)); }
   function setField(i, field, value){
-    const next = state.events.map((e,idx)=> idx===i? {...e, [field]: value}: e);
+    const next = events.map((e,idx)=> idx===i? normalizeEventAssignees({ ...e, [field]: value }) : e);
+    up(['events'], next);
+  }
+  function setAssignee(i, dateStr, slotIdx, personId){
+    const next = events.map((e,idx)=> idx===i? setEventAssignee(e, dateStr, slotIdx, personId) : e);
     up(['events'], next);
   }
 
@@ -1722,22 +1880,40 @@ function RefuerzosPanel({ state, up }){
 
       {/* Lista editable */}
       <div className="border rounded-lg divide-y">
-        {state.events.length===0 && <div className="p-3 text-sm text-slate-500">Sin eventos.</div>}
-        {state.events.map((e,idx)=> (
-          <div key={idx} className="p-2 grid grid-cols-12 gap-2 items-end">
-            <input className="col-span-3 border rounded px-2 py-1" value={e.label||''} onChange={(ev)=>setField(idx,'label',ev.target.value)} />
-            <input className="col-span-2 border rounded px-2 py-1" type="date" value={e.start} onChange={(ev)=>setField(idx,'start',ev.target.value)} />
-            <input className="col-span-2 border rounded px-2 py-1" type="date" value={e.end} onChange={(ev)=>setField(idx,'end',ev.target.value)} />
-            <input className="col-span-2 border rounded px-2 py-1" type="number" min={0} max={9} value={e.weekdaysExtraSlots||0} onChange={(ev)=>setField(idx,'weekdaysExtraSlots',Number(ev.target.value))} />
-            <input className="col-span-2 border rounded px-2 py-1" type="number" min={0} max={9} value={e.weekendExtraSlots||0} onChange={(ev)=>setField(idx,'weekendExtraSlots',Number(ev.target.value))} />
-            <button onClick={()=>del(idx)} className="col-span-1 text-red-600 hover:underline text-sm">Eliminar</button>
-          </div>
-        ))}
+        {events.length===0 && <div className="p-3 text-sm text-slate-500">Sin eventos.</div>}
+        {events.map((e,idx)=> {
+          const summary = summarizeEventAssignees(e, people);
+          const isOpen = expanded === idx;
+          return (
+            <div key={idx} className="p-2">
+              <div className="grid grid-cols-12 gap-2 items-end">
+                <input className="col-span-3 border rounded px-2 py-1" value={e.label||''} onChange={(ev)=>setField(idx,'label',ev.target.value)} />
+                <input className="col-span-2 border rounded px-2 py-1" type="date" value={e.start} onChange={(ev)=>setField(idx,'start',ev.target.value)} />
+                <input className="col-span-2 border rounded px-2 py-1" type="date" value={e.end} onChange={(ev)=>setField(idx,'end',ev.target.value)} />
+                <input className="col-span-2 border rounded px-2 py-1" type="number" min={0} max={9} value={e.weekdaysExtraSlots||0} onChange={(ev)=>setField(idx,'weekdaysExtraSlots',Number(ev.target.value))} />
+                <input className="col-span-2 border rounded px-2 py-1" type="number" min={0} max={9} value={e.weekendExtraSlots||0} onChange={(ev)=>setField(idx,'weekendExtraSlots',Number(ev.target.value))} />
+                <div className="col-span-1 flex flex-col gap-1 text-right text-sm">
+                  <button onClick={()=>setExpanded(isOpen?null:idx)} className="text-blue-600 hover:underline">{isOpen?'Cerrar':'Asignar'}</button>
+                  <button onClick={()=>del(idx)} className="text-red-600 hover:underline">Eliminar</button>
+                </div>
+              </div>
+              <div className="mt-2 text-xs text-slate-600">Asignado a: {summary}</div>
+              {isOpen && (
+                <div className="mt-3 p-3 bg-slate-50 border rounded-lg">
+                  <EventAssignmentsEditor
+                    event={e}
+                    people={people}
+                    onChange={(dateStr, slotIdx, personId)=>setAssignee(idx,dateStr,slotIdx,personId)}
+                  />
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
     </Card>
   );
 }
-
 function GeneradorPicos({ state, up }){
   const [anio,setAnio] = useState(new Date().getFullYear());
   function generar(){
@@ -2691,12 +2867,26 @@ function RefuerzosPanelLite({ state, up }){
   });
 
   // alta rápida
-  const add = ()=> up(['events'], [...(state.events||[]), {...ev}]);
+  const people = state.people || [];
+  const events = state.events || [];
+  const add = ()=> up(['events'], [...(state.events||[]), normalizeEventAssignees({ ...ev, assignees:{} })]);
   const delAtIndex = (absIdx)=> up(['events'], (state.events||[]).filter((_,i)=> i!==absIdx));
-  const setFieldAt = (absIdx, field, value)=> up(['events'], (state.events||[]).map((e,i)=> i===absIdx? {...e, [field]: value}: e));
+  const setFieldAt = (absIdx, field, value)=> {
+    const next = (state.events||[]).map((e,i)=> i===absIdx? normalizeEventAssignees({ ...e, [field]: value}):e);
+    up(['events'], next);
+  };
+  const setAssigneeAt = (absIdx, dateStr, slotIdx, personId)=> {
+    const next = (state.events||[]).map((e,i)=> i===absIdx? setEventAssignee(e, dateStr, slotIdx, personId):e);
+    up(['events'], next);
+  };
+  const [expanded, setExpanded] = useState(null);
+  useEffect(() => {
+    if (expanded !== null && (expanded < 0 || expanded >= events.length)) {
+      setExpanded(null);
+    }
+  }, [expanded, events.length]);
 
   // tabla + filtros
-  const events = state.events || [];
   const [q,setQ]       = useState('');
   const [from,setFrom] = useState('');
   const [to,setTo]     = useState('');
@@ -2791,40 +2981,61 @@ function RefuerzosPanelLite({ state, up }){
                 <th className="text-left p-2 cursor-pointer" onClick={()=>toggleSort('end')}>Hasta</th>
                 <th className="text-right p-2">L–V +</th>
                 <th className="text-right p-2">S–D +</th>
+                <th className="text-left p-2">Asignaciones</th>
                 <th className="text-right p-2">Acciones</th>
               </tr>
             </thead>
   <tbody>
-     {(filtered.slice(startIdx, startIdx + (pageSize||25))).map((e,i)=>{
+    {(filtered.slice(startIdx, startIdx + (pageSize||25))).map((e,i)=>{
       const absIdx = (state.events||[]).indexOf(e);
+      if (absIdx === -1) return null;
+      const summary = summarizeEventAssignees(e, people);
+      const isOpen = expanded === absIdx;
       return (
-        <tr key={`${e.start}-${e.end}-${i}`} className="border-b">
-          <td className="p-2">
-            <input className="border rounded px-2 py-1 w-full" value={e.label||''}
-                   onChange={ev=>setFieldAt(absIdx,'label',ev.target.value)} />
-          </td>
-          <td className="p-2">
-            <input type="date" className="border rounded px-2 py-1 w-full" value={e.start}
-                   onChange={ev=>setFieldAt(absIdx,'start',ev.target.value)} />
-          </td>
-          <td className="p-2">
-            <input type="date" className="border rounded px-2 py-1 w-full" value={e.end}
-                   onChange={ev=>setFieldAt(absIdx,'end',ev.target.value)} />
-          </td>
-          <td className="p-2 text-right">
-            <input type="number" min={0} max={9} className="border rounded px-2 py-1 w-20 text-right"
-                   value={e.weekdaysExtraSlots||0}
-                   onChange={ev=>setFieldAt(absIdx,'weekdaysExtraSlots',Number(ev.target.value)||0)} />
-          </td>
-          <td className="p-2 text-right">
-            <input type="number" min={0} max={9} className="border rounded px-2 py-1 w-20 text-right"
-                   value={e.weekendExtraSlots||0}
-                   onChange={ev=>setFieldAt(absIdx,'weekendExtraSlots',Number(ev.target.value)||0)} />
-          </td>
-          <td className="p-2 text-right">
-            <button onClick={()=>delAtIndex(absIdx)} className="text-red-600 hover:underline">Eliminar</button>
-          </td>
-        </tr>
+        <React.Fragment key={`${e.start}-${e.end}-${i}`}>
+          <tr className="border-b">
+            <td className="p-2">
+              <input className="border rounded px-2 py-1 w-full" value={e.label||''}
+                     onChange={ev=>setFieldAt(absIdx,'label',ev.target.value)} />
+            </td>
+            <td className="p-2">
+              <input type="date" className="border rounded px-2 py-1 w-full" value={e.start}
+                     onChange={ev=>setFieldAt(absIdx,'start',ev.target.value)} />
+            </td>
+            <td className="p-2">
+              <input type="date" className="border rounded px-2 py-1 w-full" value={e.end}
+                     onChange={ev=>setFieldAt(absIdx,'end',ev.target.value)} />
+            </td>
+            <td className="p-2 text-right">
+              <input type="number" min={0} max={9} className="border rounded px-2 py-1 w-20 text-right"
+                     value={e.weekdaysExtraSlots||0}
+                     onChange={ev=>setFieldAt(absIdx,'weekdaysExtraSlots',Number(ev.target.value)||0)} />
+            </td>
+            <td className="p-2 text-right">
+              <input type="number" min={0} max={9} className="border rounded px-2 py-1 w-20 text-right"
+                     value={e.weekendExtraSlots||0}
+                     onChange={ev=>setFieldAt(absIdx,'weekendExtraSlots',Number(ev.target.value)||0)} />
+            </td>
+            <td className="p-2 text-xs text-slate-600">{summary}</td>
+            <td className="p-2 text-right">
+              <div className="flex items-center justify-end gap-3 text-xs">
+                <button onClick={()=>setExpanded(isOpen?null:absIdx)} className="text-blue-600 hover:underline">{isOpen?'Cerrar':'Editar'}</button>
+                <button onClick={()=>delAtIndex(absIdx)} className="text-red-600 hover:underline">Eliminar</button>
+              </div>
+            </td>
+          </tr>
+          {isOpen && (
+            <tr className="bg-slate-50">
+              <td colSpan={7} className="p-3">
+                <EventAssignmentsEditor
+                  event={e}
+                  people={people}
+                  onChange={(dateStr, slotIdx, personId)=>setAssigneeAt(absIdx,dateStr,slotIdx,personId)}
+                />
+              </td>
+            </tr>
+          )}
+        </React.Fragment>
       );
     })}
   </tbody>
