@@ -338,7 +338,10 @@ const nextOff=computeOffPersonId(people,w+1);
       }
       if(isWE && extraWE>0){ for(let i=0;i<extraWE;i++) required.push({...weekendShift,label:`Refuerzo ${i+1}`}); }
       if(!isWE && extraW>0){ for(let i=0;i<extraW;i++) required.push({...refuerzoWeekdayShift,label:refuerzoWeekdayShift.label||`Refuerzo ${i+1}`}); }
-      if(forcedExtras.length){ required = [...required, ...forcedExtras]; }
+      if (forcedExtras.length) {
+        // Procesa primero los refuerzos con asignación forzada para reservar a la persona objetivo
+        required = [...forcedExtras, ...required];
+      }
 
       const dayAssignments=[]; const assigned=new Set();
       assignments[dateStr] = assignments[dateStr] || [];
@@ -2790,7 +2793,10 @@ function AuthenticatedApp(props){
             people={state.people}
             assignments={ASS}
             onApply={(evs, mode='append', batchId=null) => {
-              const tag = (e)=> ({...e, meta:{ ...(e.meta||{}), source:'conciliacion', batchId }});
+              const tag = (e)=> normalizeEventAssignees({
+                ...e,
+                meta:{ ...(e.meta||{}), source:'conciliacion', batchId }
+              });
               const tagged = (evs||[]).map(tag);
               const base = mode==='replace'
                 ? (state.events||[]).filter(e=> !(e?.meta?.source==='conciliacion'))
