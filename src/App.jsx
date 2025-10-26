@@ -937,7 +937,7 @@ if (!auth.user || !auth.token) {
       <div className="min-h-screen grid place-items-center bg-slate-50 text-slate-900">
         <div className="bg-white rounded-2xl shadow p-6 w-full max-w-sm border border-slate-200">
           <h1 className="text-lg font-semibold mb-4">Acceso · Gestor de Turnos</h1>
-          <form className="space-y-3" onSubmit={doLogin}>
+          <form className="space-y-3 max-h-72 overflow-auto" onSubmit={doLogin}>
             <div>
               <label className="text-xs">Email</label>
               <input type="email" required value={loginForm.email}
@@ -1227,7 +1227,7 @@ function ReglasPanel({ state, up }){
 function PersonasPanel({ state, upPerson }){
   return (
     <Card title="Personas (offset = semana OFF)">
-      <div className="space-y-3">
+      <div className="space-y-3 max-h-72 overflow-auto">
         {state.people.map(p=> (
           <div key={p.id} className="grid grid-cols-12 items-center gap-2 p-2 rounded-lg border">
             <div className="col-span-5 flex items-center gap-2"><span className="h-4 w-4 rounded" style={{background:p.color}}/><input value={p.name} onChange={(e)=>upPerson(p.id,{name:e.target.value})} className="px-2 py-1 rounded border w-full"/></div>
@@ -2550,8 +2550,19 @@ function AuthenticatedApp(props){
             }
             }annualTarget={state.annualTargetHours}
           />
+            )}
+            {(isAdmin && (state?.debug?.weekendAudit===true)) && (
+              <Card title="Weekend audit (Admin)">
+                <WeekendAuditPanel
+                  assignments={ASS}
+                  people={state.people}
+                  startDate={startDate}
+                  weeks={state.weeks}
+                />
+              </Card>
+            )}
 
-            )}{(isAdmin && (state?.debug?.score===true)) && (<ScoreDebugPanel
+            {(isAdmin && (state?.debug?.score===true)) && (<ScoreDebugPanel
             assignments={ASS}
             people={state.people}
             startDate={startDate}

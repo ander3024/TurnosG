@@ -106,8 +106,8 @@ export default function WeekendAuditPanel({ assignments = {}, people = [], start
         <button onClick={exportCSV} className="px-3 py-1.5 rounded-lg border text-sm">Exportar CSV</button>
       </div>
 
-      <div className="grid md:grid-cols-3 gap-3">
-        {data.top3.map(p => {
+      <div className="grid sm:grid-cols-2 md:grid-cols-4 gap-3">
+        {(data.rows || []).slice(0,4).map(p => {
           const z = data.stdev ? (p.weekends - data.avgWE) / data.stdev : 0;
           const tag = z >= 1 ? "🔴" : z >= 0.5 ? "🟡" : "🟢";
           return (
