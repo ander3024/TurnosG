@@ -1,6 +1,32 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useRef, useCallback } from "react";
 
 import WeekendAuditPanel from "./components/WeekendAuditPanel";
+
+function renderEmptyCell(toType, isClosed){
+  if (toType === 'vacaciones') {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[11px] bg-emerald-50 text-emerald-700">
+        🏖 Vacaciones
+      </span>
+    );
+  }
+  if (toType) {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded border text-[11px] bg-amber-50 text-amber-700">
+        {toType}
+      </span>
+    );
+  }
+  if (isClosed) {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded border text-[11px] bg-slate-50">
+        🎌 Festivo
+      </span>
+    );
+  }
+  return (<span className="text-[11px] text-slate-400">—</span>);
+}
+
 // === Defaults para autoload de usuarios no-admin ===
 const PUBLIC_SPACE = { id: "turnos-2025", readToken: "READ-2025" };
 
@@ -1415,13 +1441,54 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
                       <span className="text-slate-700">{span}</span>
                       <span className="text-[11px] ml-1 text-slate-500">({dur}h{c.shift.lunchMinutes ? " · comida "+(c.shift.lunchMinutes)+"m" : ""})</span>
                     </div>
-                    <div className="flex items-center gap-1">{p? (<span className="chip inline-flex items-center gap-1 px-1.5 py-0.5 rounded-lg" style={{background:`${p.color}20`, border:`1px solid ${p.color}55`}}><span className="h-2.5 w-2.5 rounded" style={{background:p.color}}/><span className="text-sm">{p.name}</span></span>): (<span className="text-red-600 text-sm">⚠ Falta asignar</span>)}</div>
+                    <div className="flex items-center gap-1">{p? (<span className="chip inline-flex items-center gap-1 px-1 py-0.5 rounded-lg" style={{background:`${p.color}20`, border:`1px solid ${p.color}55`}}><span className="h-2.5 w-2.5 rounded" style={{background:p.color}}/><span className="text-[10px]">{p.name}</span></span>): (<span className="text-red-600 text-sm">⚠ Falta asignar</span>)}</div>
                   </div>
                 );})}
               </div>
             </div>
           );
         })}
+      </div>
+    </div>
+  );
+}
+function PrettyAssignment({ a, h, p, i }){
+  const span = `${a.shift.start}–${a.shift.end}`;
+  const dur  = (effectiveMinutes(a.shift)/60);
+  const lbl  = a.shift.label || `T${i+1}`;
+  const d    = parseDateValue(h.dateStr);
+  const isWE = (d.getDay()===0 || d.getDay()===6);
+  const emblem =
+    /mañana/i.test(lbl)   ? '☀️' :
+    /tarde/i.test(lbl)    ? '🌙' :
+    /refuerzo/i.test(lbl) ? '➕' :
+    isWE ? '🗓️' : '⌚️';
+
+  const color = (p && p.color) ? p.color : '#475569';
+
+  return (
+    <div
+      className={`rounded-xl px-2 py-0.5 border text-[11px] mb-0.5 ${a.conflict ? 'border-red-300 bg-red-50' : 'border-slate-200 bg-white'}`}
+      style={a.conflict?{}:{ background:`1f`, border:`1px solid 33`}} 
+title={`${lbl} · ${span} (${dur}h)`}
+    >
+      <div className="flex items-center justify-between">
+        <div className="truncate">
+          <span className="text-[11px] mr-1 rounded px-1 py-0.5 border bg-slate-50">
+            {emblem} {lbl}
+          </span>
+          <span className="text-slate-700">{span}</span>
+          <span className="text-[11px] ml-1 text-slate-500">
+            ({dur}h{a.shift.lunchMinutes ? ` · comida ${a.shift.lunchMinutes}m` : ''})
+          </span>
+        </div>
+        <span
+          className="chip inline-flex items-center gap-1 px-1 py-0.5 rounded-lg"
+          style={{background:`${color}20`, border:`1px solid ${color}55`}}
+        >
+          <span className="h-2.5 w-2.5 rounded" style={{background:color}}/>
+          <span className="text-[10px]">{p?.name||''}</span>
+        </span>
       </div>
     </div>
   );
@@ -1449,42 +1516,50 @@ function WeeklyView({ startDate, weeks, assignments, people, timeOffs, province,
 };
   return (
     <div className="overflow-x-auto print-only:block">
-      <table className="w-full text-sm border-collapse">
+      <table className="w-full text-sm border-collapse table-fixed">
         <thead>
           <tr>
-            <th className="text-left p-2 border-b">Persona</th>
-            {header.map(h=> <th key={h.dateStr} className="text-left p-2 border-b">{h.label}</th>)}
+            <th className="text-left p-1 border-b">Persona</th>
+            {(header || []).map(h=> <th key={h.dateStr} className="text-left p-1 border-b">{h.label}</th>)}
           </tr>
         </thead>
-        <tbody>
-          {people.map(p=> (
-            <tr key={p.id}>
-              <td className="p-2 align-top"><div className="inline-flex items-center gap-2"><span className="h-3 w-3 rounded" style={{background:p.color}}/> {p.name}</div></td>
-              {header.map(h=>{ const cell=(assignments[h.dateStr]||[]).filter(c=>c.personId===p.id).sort((a,b)=> minutesFromHHMM(a.shift.start)-minutesFromHHMM(b.shift.start)); return (
-                <td key={h.dateStr} className="p-2 align-top">
-                  {cell.length===0 ? (
-                    (hasApprovedTO(h.dateStr, p.id)
-                      ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[11px] bg-amber-50 border-amber-300 text-amber-800">
-                          {(() => {
-                            const t = getTOType(h.dateStr, p.id);
-                            return t==='vacaciones' ? '🏖️ Vacaciones' : t==='libranza' ? '🛌 Libranza' : t==='viaje' ? '✈️ Viaje' : 'Ausencia';
-                          })()}
-                        </span>
-                      : (isClosedDay(h.dateStr) ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[11px] bg-slate-50">🎌 Festivo</span> : <span className="text-slate-400">—</span>)
-                    )
-                  ) : ( cell.map((c,i)=>{ const span=formatSpan(c.shift.start,c.shift.end); const dur = effectiveMinutes(c.shift)/60; return (
-                    <div key={i} className="rounded-lg border px-2 py-1 mb-1" style={{borderColor:`${p.color}55`,background:`${p.color}10`}}>
-                      <div className="text-[11px] font-medium">{((c.shift.label||"").toLowerCase().includes("refuerzo")?"➕ ":"")}{c.shift.label||"Turno"}</div>
-                      {((c.shift.label||"").toLowerCase().includes("refuerzo")) && <span className="ml-1 px-1 border rounded text-[10px]">Refuerzo</span>}
-                      <div className="text-[12px]">{span} <span className="text-[11px] text-slate-500">({dur}h{c.shift.lunchMinutes ? " · comida "+(c.shift.lunchMinutes)+"m" : ""})</span></div>
-                    </div>
-                  ); })
-                  )}
-                </td>
-              ); })}
-            </tr>
-          ))}
-        </tbody>
+<tbody>
+  {(people || []).map(p => (
+    <tr key={p.id}>
+      {/* Columna Persona (nombre + color) */}
+      <td className="p-1 align-top">
+        <div className="inline-flex items-center gap-2">
+          <span className="h-3 w-3 rounded" style={{ background: p.color }} />
+          <span className="font-medium">{p.name}</span>
+        </div>
+      </td>
+
+      {/* Celdas por día */}
+      {(header || []).map((h, idx) => {
+        // Turnos del día para esta persona
+        const cell = (assignments[h.dateStr] || [])
+          .filter(c => c.personId === p.id)
+          .sort((a, b) => minutesFromHHMM(a.shift.start) - minutesFromHHMM(b.shift.start));
+
+        // Tipo de “Time Off” y festivo para celda vacía
+        const toType = (typeof getTOType === 'function') ? getTOType(h.dateStr, p.id) : null;
+        const isFest = (typeof isClosedDay === 'function') ? isClosedDay(h.dateStr) : false;
+        return (
+        <td key={h.dateStr || idx} className="p-1 align-top">
+          {cell.length===0 ? (
+            <div className="rounded border bg-slate-50 px-1 py-0.5 inline-block">
+              {renderEmptyCell(toType, isFest)}
+            </div>
+          ) : (
+            cell.map((a,i)=>(<PrettyAssignment a={a} h={h} p={p} i={i} />))
+          )}
+        </td>
+        );
+      })}
+    </tr>
+  ))}
+</tbody>
+
       </table>
     </div>
   );
@@ -1775,7 +1850,7 @@ function ScoreDebugPanel({ assignments, people, startDate, weeks, conciliacion, 
       </div>
 
       <div className="overflow-x-auto">
-        <table className="w-full text-sm border-collapse">
+        <table className="w-full text-sm border-collapse table-fixed">
           <thead>
             <tr className="border-b">
               <th className="text-left p-2">Semana</th>
@@ -1937,7 +2012,7 @@ function DayModal({ dateStr, date, assignments, people, onOverride, onClose, isA
                       disabled={!isAdmin}
                     >
                       <option value="">— Sin override —</option>
-                      {people.map(pp=> <option key={pp.id} value={pp.id}>{pp.name}</option>)}
+                      {(people || []).map(pp=> <option key={pp.id} value={pp.id}>{pp.name}</option>)}
                     </select>
                     {p && <span className="inline-flex items-center gap-1 text-sm">
                       <span className="h-3 w-3 rounded" style={{background:p.color}}/> {p.name}
@@ -2644,7 +2719,7 @@ function RefuerzosPanelLite({ state, up }){
   const pages = Math.max(1, Math.ceil(total/(pageSize||25)));
   const pageClamped = Math.min(page, pages-1);
   const startIdx = pageClamped*(pageSize||25);
-  const rows = filtered.slice(startIdx, startIdx+(pageSize||25));
+  const rows = filtered.slice(startIdx, startIdx + (pageSize||25));
   const goto = (p)=> setPage(Math.max(0, Math.min(pages-1,p)));
 
   return (
@@ -2719,40 +2794,40 @@ function RefuerzosPanelLite({ state, up }){
                 <th className="text-right p-2">Acciones</th>
               </tr>
             </thead>
-            <tbody>
-              {rows.map((e,i)=>{
-                const absIdx = events.indexOf(e);
-                return (
-                  <tr key={`${e.start}-${e.end}-${i}`} className="border-b">
-                    <td className="p-2">
-                      <input className="border rounded px-2 py-1 w-full" value={e.label||''}
-                             onChange={ev=>setFieldAt(absIdx,'label',ev.target.value)} />
-                    </td>
-                    <td className="p-2">
-                      <input type="date" className="border rounded px-2 py-1 w-full" value={e.start}
-                             onChange={ev=>setFieldAt(absIdx,'start',ev.target.value)} />
-                    </td>
-                    <td className="p-2">
-                      <input type="date" className="border rounded px-2 py-1 w-full" value={e.end}
-                             onChange={ev=>setFieldAt(absIdx,'end',ev.target.value)} />
-                    </td>
-                    <td className="p-2 text-right">
-                      <input type="number" min={0} max={9} className="border rounded px-2 py-1 w-20 text-right"
-                             value={e.weekdaysExtraSlots||0}
-                             onChange={ev=>setFieldAt(absIdx,'weekdaysExtraSlots',Number(ev.target.value)||0)} />
-                    </td>
-                    <td className="p-2 text-right">
-                      <input type="number" min={0} max={9} className="border rounded px-2 py-1 w-20 text-right"
-                             value={e.weekendExtraSlots||0}
-                             onChange={ev=>setFieldAt(absIdx,'weekendExtraSlots',Number(ev.target.value)||0)} />
-                    </td>
-                    <td className="p-2 text-right">
-                      <button onClick={()=>delAtIndex(absIdx)} className="text-red-600 hover:underline">Eliminar</button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
+  <tbody>
+     {(filtered.slice(startIdx, startIdx + (pageSize||25))).map((e,i)=>{
+      const absIdx = (state.events||[]).indexOf(e);
+      return (
+        <tr key={`${e.start}-${e.end}-${i}`} className="border-b">
+          <td className="p-2">
+            <input className="border rounded px-2 py-1 w-full" value={e.label||''}
+                   onChange={ev=>setFieldAt(absIdx,'label',ev.target.value)} />
+          </td>
+          <td className="p-2">
+            <input type="date" className="border rounded px-2 py-1 w-full" value={e.start}
+                   onChange={ev=>setFieldAt(absIdx,'start',ev.target.value)} />
+          </td>
+          <td className="p-2">
+            <input type="date" className="border rounded px-2 py-1 w-full" value={e.end}
+                   onChange={ev=>setFieldAt(absIdx,'end',ev.target.value)} />
+          </td>
+          <td className="p-2 text-right">
+            <input type="number" min={0} max={9} className="border rounded px-2 py-1 w-20 text-right"
+                   value={e.weekdaysExtraSlots||0}
+                   onChange={ev=>setFieldAt(absIdx,'weekdaysExtraSlots',Number(ev.target.value)||0)} />
+          </td>
+          <td className="p-2 text-right">
+            <input type="number" min={0} max={9} className="border rounded px-2 py-1 w-20 text-right"
+                   value={e.weekendExtraSlots||0}
+                   onChange={ev=>setFieldAt(absIdx,'weekendExtraSlots',Number(ev.target.value)||0)} />
+          </td>
+          <td className="p-2 text-right">
+            <button onClick={()=>delAtIndex(absIdx)} className="text-red-600 hover:underline">Eliminar</button>
+          </td>
+        </tr>
+      );
+    })}
+  </tbody>
           </table>
         )}
       </div>
