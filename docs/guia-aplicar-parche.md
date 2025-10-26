@@ -1,121 +1,157 @@
 # Guía para aplicar `changes.patch` y desplegar a producción
 
-Esta guía asume que ya clonaste el repositorio en el servidor (por ejemplo `/home/ubuntu/turnos/gestor-turnos`) y que tienes acceso a la terminal con el usuario que realiza los despliegues.
+Esta guía está pensada para el servidor donde resides el repositorio (`/home/ubuntu/turnos/gestor-turnos`). Incluye el flujo completo: limpiar el árbol, regenerar el parche cuando aparece el error `corrupt patch`, aplicarlo, compilar el build y desplegarlo.
+
+---
 
 ## 1. Preparar el repositorio
 
-1. Posiciónate en la carpeta del proyecto y comprueba si hay cambios locales:
+1. Posiciónate en la carpeta del proyecto y comprueba el estado:
    ```bash
    cd /home/ubuntu/turnos/gestor-turnos
    git status -sb
    ```
-2. Si ves una salida como la siguiente:
+
+2. Si ves una salida como:
    ```
     M src/App.jsx
    ?? src.App.jsx
    ```
    significa que:
-   - `src/App.jsx` tiene modificaciones sin guardar (probablemente restos de intentos anteriores).
-   - Existe un archivo llamado `src.App.jsx` (con punto en lugar de `/`) que Git considera no rastreado.
+   - `src/App.jsx` tiene restos de intentos anteriores.
+   - Existe un archivo suelto `src.App.jsx` (con punto) que no debería estar ahí.
 
-3. Decide qué hacer con esos archivos:
-   - **Si no necesitas los cambios locales** y quieres volver al estado limpio de la rama:
-     ```bash
-     rm -f src.App.jsx
-     git checkout -- src/App.jsx
-     ```
-   - **Si quieres guardarlos** antes de continuar, crea una copia o un branch temporal:
-     ```bash
-     cp src/App.jsx src.App.jsx.backup
-     git stash push -m "backup antes de aplicar parche"
-     ```
-
-4. Asegúrate de que el árbol quede limpio:
+   Para dejar el árbol limpio ejecuta:
    ```bash
-   git status -sb
+   rm -f src.App.jsx           # elimina el archivo huérfano
+   git checkout -- src/App.jsx # descarta cambios en el archivo real
+   git status -sb              # verifica que quedó limpio
    ```
-   Deberías ver únicamente `## main...origin/main` (o la rama en la que trabajes) sin archivos modificados.
+   El resultado esperado es únicamente `## main...origin/main` sin más líneas.
 
-## 2. Verificar y aplicar `changes.patch`
+3. Si necesitas conservar cambios locales antes de limpiarlos, cópialos aparte:
+   ```bash
+   cp src/App.jsx src.App.jsx.backup
+   ```
+   *(En este punto `git stash` no guardará nada porque el árbol ya está limpio.)*
 
-1. Comprueba que el archivo `changes.patch` esté en la raíz del repositorio (`ls changes.patch`).
-2. Haz una prueba en seco para asegurarte de que el parche aplica sin conflictos:
+---
+
+## 2. Regenerar el parche cuando aparece `corrupt patch`
+
+El mensaje `error: corrupt patch at line 79` indica que `changes.patch` está incompleto (se cortó al transferirlo). Para volver a tener una copia válida:
+
+1. Asegúrate de tener el commit original en tu repositorio local:
+   ```bash
+   git fetch origin 205d536fda4fb1e998fe9303777fc9e3c36d4942
+   ```
+
+2. Genera de nuevo el parche a partir de ese commit:
+   ```bash
+   git format-patch -1 205d536fda4fb1e998fe9303777fc9e3c36d4942 --stdout > changes.patch
+   ```
+   Comprueba que el archivo existe y tiene tamaño:
+   ```bash
+   ls -lh changes.patch
+   head -n 5 changes.patch   # debe empezar por "From 205d53..."
+   ```
+
+3. Opcionalmente, guarda el checksum para validar que no se vuelva a corromper al copiarlo:
+   ```bash
+   sha256sum changes.patch
+   ```
+
+---
+
+## 3. Aplicar el parche
+
+1. Prueba en seco:
    ```bash
    git apply --check changes.patch
    ```
-3. Si el paso anterior no devuelve errores, aplica el parche. Puedes elegir entre:
-   - **Mantener el historial original del commit**:
+   Si aquí vuelve a fallar, revisa que tu árbol esté limpio (paso 1) y que el parche se generó en el paso anterior.
+
+2. Aplica el parche. Tienes dos opciones:
+   - Mantener autor y mensaje original del commit:
      ```bash
      git am --signoff < changes.patch
      ```
-   - **Aplicar sólo los cambios al árbol de trabajo** (harás commit después manualmente):
+   - Aplicar sólo el diff y commitear después manualmente:
      ```bash
      git apply changes.patch
+     git add src/App.jsx
+     git commit -m "UI(admin): aplicar pack2"
      ```
 
-4. Revisa el resultado:
+3. Verifica el resultado:
    ```bash
    git status -sb
-   git diff
-   ```
-   Verifica que `src/App.jsx` (u otros archivos esperados) estén modificados conforme al parche.
-
-5. Si usaste `git apply`, crea el commit correspondiente:
-   ```bash
-   git add src/App.jsx
-   git commit -m "Aplicar parche admin pack"
+   git diff HEAD^ HEAD        # revisa los cambios si usaste git am
    ```
 
-## 3. Compilar y probar localmente
+---
 
-1. Instala las dependencias si aún no lo hiciste en esa máquina:
+## 4. Compilar y revisar el build
+
+1. Instala dependencias (si aún no lo hiciste en esa máquina):
    ```bash
    npm install
    ```
+
 2. Genera el build de producción:
    ```bash
    npm run build
    ```
-   Este comando debe terminar sin errores y creará la carpeta `dist/` con los archivos listos para desplegar.
-3. (Opcional) Levanta una vista previa para revisar el resultado:
+   El comando crea `dist/` si todo salió bien.
+
+3. (Opcional) Revisa el resultado con el servidor de previsualización:
    ```bash
    npm run preview -- --host
    ```
-   Abre el navegador en `http://<IP>:4173` y valida que los cambios aparezcan.
+   Abre `http://<IP-del-servidor>:4173` y valida que los cambios aparezcan.
 
-## 4. Subir a producción
+---
 
-Los pasos dependen de tu flujo de despliegue. Dos escenarios típicos:
+## 5. Subir a producción
 
-### 4.1. Servidor estático manual (Nginx/Apache)
+Dependiendo de tu flujo:
 
-1. Copia el contenido de `dist/` al directorio servido por el servidor web. Por ejemplo:
+### 5.1. Servidor estático (Nginx/Apache)
+
+1. Copia el contenido de `dist/` a la carpeta servida por tu web server:
    ```bash
    rsync -av --delete dist/ /var/www/turnos/
    ```
-2. Reinicia o recarga el servicio si es necesario:
+
+2. Recarga el servicio si hace falta:
    ```bash
    sudo systemctl reload nginx
    ```
-3. Verifica en el navegador que la aplicación en producción muestra los nuevos cambios.
 
-### 4.2. Pipeline CI/CD
+3. Verifica en el navegador público que los cambios estén visibles.
 
-1. Haz push de los commits a la rama correspondiente:
+### 5.2. Pipeline CI/CD
+
+1. Empuja la rama con el commit del parche:
    ```bash
    git push origin main
    ```
-2. Asegúrate de que la pipeline ejecute (al menos) los pasos de instalación y build:
+
+2. Asegúrate de que la pipeline ejecute:
    ```bash
    npm ci
    npm run build
    ```
-3. Confirma en los logs del pipeline que la publicación de `dist/` se haya completado correctamente.
+   y publique `dist/`.
 
-## 5. Solución de problemas comunes
+3. Comprueba los logs del despliegue y prueba la URL final.
 
-- **`error: corrupt patch at line ...`**: suele aparecer cuando el archivo `changes.patch` está incompleto o se editó con un editor que cambió su formato. Re-descarga el archivo o vuelve a generarlo con `git format-patch`.
-- **Conflictos al aplicar**: usa `git apply --reject --whitespace=fix changes.patch` para obtener archivos `.rej` y resolverlos manualmente.
-- **Build fallida**: revisa el mensaje de error y asegúrate de tener la versión correcta de Node.js (consulta `package.json` para la versión recomendada) y dependencias actualizadas.
+---
 
-Siguiendo estos pasos tendrás un flujo reproducible para limpiar el repositorio, aplicar el parche y desplegar la nueva versión en producción.
+## 6. Resumen de errores frecuentes
+
+- **`error: corrupt patch at line ...`**: el archivo `changes.patch` se cortó. Vuelve a generarlo con `git format-patch` como se describe en la sección 2.
+- **`patch does not apply`**: tu árbol tiene cambios locales o estás en un commit distinto. Ejecuta `git status -sb` para confirmar que está limpio y vuelve a intentarlo. Si aún falla, sincroniza con `git pull --ff-only` antes de aplicar el parche.
+- **Fallos de build (`npm run build`)**: revisa el mensaje de error y confirma que utilizas la versión de Node recomendada en `package.json`.
+
+Siguiendo estos pasos deberías poder recuperar el parche, aplicarlo sin errores y desplegar los cambios en producción.
