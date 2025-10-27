@@ -2670,6 +2670,7 @@ function AuthenticatedApp(props){
         <option value={8}>8 semanas</option>
       </select>
     </div>
+    <button onClick={()=>window.print()} className="ml-2 px-3 py-1.5 rounded-lg border">Imprimir / PDF</button>
   </div>
   
   {/* Leyenda (visible para todos) */}
