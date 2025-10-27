@@ -1302,7 +1302,17 @@ function ReglasPanel({ state, up }){
           />
         </div>
 
-        <div className="col-span-3">
+        
+  <div className="col-span-3">
+    <label className="text-xs">Máx días/semana</label>
+    <input
+      type="number" min={0} max={7}
+      value={state.rules.maxDaysPerWeek ?? 0}
+      onChange={(e)=>up([rules,maxDaysPerWeek], Math.max(0, Number(e.target.value)||0))}
+      className="w-full px-2 py-1 rounded border"
+    />
+  </div>
+<div className="col-span-3">
           <label className="text-xs">Descanso mínimo (h)</label>
           <input
             type="number" min={0} max={24}
