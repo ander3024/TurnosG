@@ -1308,7 +1308,7 @@ function ReglasPanel({ state, up }){
     <input
       type="number" min={0} max={7}
       value={state.rules.maxDaysPerWeek ?? 0}
-      onChange={(e)=>up([rules,maxDaysPerWeek], Math.max(0, Number(e.target.value)||0))}
+      onChange={(e)=>up(['rules','maxDaysPerWeek'], Math.max(0, Number(e.target.value)||0))}
       className="w-full px-2 py-1 rounded border"
     />
   </div>
@@ -1503,7 +1503,7 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
           const sorted=[...cell].sort((a,b)=> minutesFromHHMM(a.shift.start)-minutesFromHHMM(b.shift.start));
           const isClosed = isClosedBusinessDay2(dateStr, province, closeOnHolidays, closedExtraDates, customHolidaysByYear);
           return (
-            <div key={dateStr} className={`rounded-2xl border p-2 ${isWE? 'bg-transparent':'bg-transparent'} ${hasConflict? 'border-red-400':'border-slate-200'}`}>
+            <div key={dateStr} className={`rounded-2xl border p-2 ${isWE? 'bg-transparent':'bg-transparent'} ${hasConflict? 'border-red-400':'border-slate-200'} ${dateStr===todayStr ? 'ring-2 ring-amber-400' : ''}`}>
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-baseline gap-2">
                   <span className="text-lg font-bold leading-none">{day}</span>
@@ -1617,7 +1617,7 @@ function WeeklyView({ startDate, weeks, assignments, people, timeOffs, province,
   return hit ? hit.type : null;
 };
   return (
-    <div className="overflow-x-auto print-only:block">
+    <div className="overflow-x-auto print:block">
       <table className="w-full text-sm border-collapse table-fixed">
         <thead>
           <tr>
