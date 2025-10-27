@@ -968,6 +968,12 @@ const assignmentsImproved = useMemo(()=> improveConciliation({
   const [weekIndex,setWeekIndex]=useState(0);
   const [userWeeks, setUserWeeks] = useState(1);
   const [icsPerson, setIcsPerson] = useState(state.people[0]?.id || "");
+const [density, setDensity] = useState("normal");
+const pillClass = density==="compact"
+  ? "px-2 py-1 min-h-[44px] text-[12px]"
+  : density==="spacious"
+  ? "px-4 py-3 min-h-[68px] text-[15px]"
+  : "px-3 py-2 min-h-[60px] text-[14px]";
 function goToday(){
     const t = startOfWeekMonday(new Date());
     const idx = Math.max(0, Math.min(state.weeks-1, Math.floor((t - startDate)/(7*24*3600*1000))));
@@ -1155,6 +1161,9 @@ state={state}
   importJSON={importJSON}
   exportICS={exportICS}
   exportPayroll={exportPayroll}
+  pillClass={pillClass}
+  density={density}
+  setDensity={setDensity}
   up={up}
   upPerson={upPerson}
   forceAssign={forceAssign}
@@ -1553,7 +1562,7 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
     </div>
   );
 }
-function PrettyAssignment({ a, h, p, i }){
+function PrettyAssignment({ a, h, p, i, pillClass }){
   const span = `${a.shift.start}–${a.shift.end}`;
   const dur  = (effectiveMinutes(a.shift)/60);
   const lbl  = a.shift.label || `T${i+1}`;
@@ -1595,7 +1604,7 @@ function PrettyAssignment({ a, h, p, i }){
 
   );
 }
-function WeeklyView({ startDate, weeks, assignments, people, timeOffs, province, closeOnHolidays, closedExtraDates, customHolidaysByYear, consumeVacationOnHoliday }){
+function WeeklyView({ startDate, weeks, assignments, people, timeOffs, province, closeOnHolidays, closedExtraDates, customHolidaysByYear, consumeVacationOnHoliday, pillClass }){
   const header=[]; for(let d=0; d<7*weeks; d++){ const date=addDays(startDate,d); header.push({ dateStr:toDateValue(date), label: date.toLocaleDateString(undefined,{weekday:'short'})+' '+date.getDate() }); }
   // Helpers: TO aprobadas
   const isClosedDay = (dateStr) => isClosedBusinessDay2(dateStr, province, closeOnHolidays, closedExtraDates, customHolidaysByYear);
@@ -1652,7 +1661,7 @@ function WeeklyView({ startDate, weeks, assignments, people, timeOffs, province,
               {renderEmptyCell(toType, isFest)}
             </div>
           ) : (
-            cell.map((a,i)=>(<PrettyAssignment a={a} h={h} p={p} i={i} />))
+            cell.map((a,i)=>(<PrettyAssignment a={a} h={h} p={p} i={i} pillClass={pillClass} />))
           )}
         </td>
         );
@@ -2498,7 +2507,7 @@ function AuthenticatedApp(props){
           payroll, setPayroll,
           ASS, controls,
           exportCSV, exportJSON, importJSON, exportICS, exportPayroll,
-          up, upPerson, forceAssign } = props;
+          up, upPerson, forceAssign, pillClass, density, setDensity } = props;
 
   // --- scope admin (robusto tras refactor) ---
   // Aliases seguros para modal del día (local o via props)
@@ -2695,6 +2704,7 @@ function AuthenticatedApp(props){
   </div>
 <WeeklyView
     startDate={weeklyStart}
+    pillClass={pillClass}
     weeks={userWeeks}
     assignments={ASS}
     people={state.people}
@@ -2716,7 +2726,7 @@ function AuthenticatedApp(props){
                 <button onClick={()=>window.print()} className="px-3 py-1.5 rounded-lg border">Imprimir / PDF</button>
               </div>
             </div>
-            <WeeklyView startDate={weeklyStart} weeks={1} assignments={ASS} people={state.people} timeOffs={state.timeOffs} province={state.province} closeOnHolidays={state.closeOnHolidays} closedExtraDates={state.closedExtraDates} customHolidaysByYear={state.customHolidaysByYear} consumeVacationOnHoliday={state.consumeVacationOnHoliday} />
+            <WeeklyView startDate={weeklyStart} weeks={1} pillClass={pillClass} assignments={ASS} people={state.people} timeOffs={state.timeOffs} province={state.province} closeOnHolidays={state.closeOnHolidays} closedExtraDates={state.closedExtraDates} customHolidaysByYear={state.customHolidaysByYear} consumeVacationOnHoliday={state.consumeVacationOnHoliday} />
           </Card>)}
 
           <TimeOffPanel state={state} setState={setState} controls={controls} isAdmin={isAdmin} currentUser={auth.user} />
