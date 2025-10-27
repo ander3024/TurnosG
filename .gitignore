@@ -13,3 +13,5 @@ src/App.jsx.backup_*
 # build
 /dist
 
+
+changes.patch
