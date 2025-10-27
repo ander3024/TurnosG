@@ -250,9 +250,8 @@ function generateSchedule({ startDate, weeks, people, weekdayShifts, weekendShif
       const bucket = forceByDay.get(ds) || {};
       for (let j=0; j<cnt; j++){
         // IMPORTANTE: etiqueta EXACTA como la que se usa al crear los slots
-        const label = we
-          ? `Refuerzo ${j+1}`
-          : (refuerzoWeekdayShift.label || `Refuerzo ${j+1}`);
+        const baseLabel = we ? 'Refuerzo' : (refuerzoWeekdayShift.label || 'Refuerzo');
+        const label = `${baseLabel} ${j+1}`;
         const key = `${base.start}-${base.end}-${label}`;
         bucket[key] = ev.assigneeId;
       }
@@ -325,9 +324,13 @@ let required = isWE? [{...weekendShift}] : [...weekdayShifts];
         // Para fines de semana, NO contar weekendExtraSlots de eventos de conciliación
         const extraWE = active.reduce((a,ev)=> a + ((ev.meta && ev.meta.source==='conciliacion') ? 0 : (ev.weekendExtraSlots||0)), 0);
         if(isWE && extraWE>0){ for(let i=0;i<extraWE;i++) required.push({...weekendShift,label:`Refuerzo ${i+1}`}); }
-        if(!isWE && extraW>0){ for(let i=0;i<extraW;i++) required.push({...refuerzoWeekdayShift,label:refuerzoWeekdayShift.label||`Refuerzo ${i+1}`}); }
+        if(!isWE && extraW>0){
+          const baseLabel = refuerzoWeekdayShift.label || 'Refuerzo';
+          for(let i=0;i<extraW;i++){
+            required.push({...refuerzoWeekdayShift, label: `${baseLabel} ${i+1}`});
+          }
+        }
       }
-
       const dayAssignments=[]; const assigned=new Set();
       assignments[dateStr] = assignments[dateStr] || [];
 
@@ -372,9 +375,13 @@ let required = isWE? [{...weekendShift}] : [...weekdayShifts];
           const fb = forceByDay.get(dateStr);
           if (fb?.[key]) forced = fb[key];
         }
-
           if (forced) {
-            chosen = forced;   // aceptamos forzado aunque no esté en pool
+            // si ya está asignado hoy, ignora este forced (evita duplicar a la misma persona)
+            if (assigned.has(forced)) {
+              // sigue el flujo normal sin aplicar el forced duplicado
+            } else {
+              chosen = forced;
+            }
           } else {
           if (!chosen && mustWorkOffToday && pool.some(p => p.id === offId)) chosen = offId;
           else if (isWE && s === 0 && weekendFixedId && pool.some(p => p.id === weekendFixedId)) chosen = weekendFixedId;
@@ -523,7 +530,8 @@ function improveConciliation({
       const base = we ? weekendShift : refuerzoWeekdayShift;
       const set = forcedKeysByDay.get(ds) || new Set();
       for (let j=0; j<cnt; j++){
-        const label = we ? `Refuerzo ${j+1}` : (refuerzoWeekdayShift.label || `Refuerzo ${j+1}`);
+        const baseLabel = we ? 'Refuerzo' : (refuerzoWeekdayShift.label || 'Refuerzo');
+        const label = `${baseLabel} ${j+1}`;
         set.add(`${base.start}-${base.end}-${label}`);
       }
       forcedKeysByDay.set(ds, set);
