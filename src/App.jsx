@@ -519,7 +519,8 @@ function scoreConciliacionBreakdown({assignments, people, startDate, weeks, conc
 function improveConciliation({
   assignments, people, startDate, weeks, overrides, conciliacion,
   timeOffs = [], province="Madrid", consumeVacationOnHoliday=false, customHolidaysByYear={},
-  events = [], weekendShift = {start:'10:00',end:'22:00'}, refuerzoWeekdayShift = {start:'12:00',end:'20:00', label:'Refuerzo'}
+  events = [], weekendShift = {start:'10:00',end:'22:00'}, refuerzoWeekdayShift = {start:'12:00',end:'20:00', label:'Refuerzo'},
+  rules = {}
 }){
   conciliacion = safeConciliacion(conciliacion);
 
@@ -566,6 +567,17 @@ function improveConciliation({
           if (p2.id === A.personId) continue;
           if (indexTO.get(p2.id)?.has(dateStr)) continue;
           if (usedToday.has(p2.id)) continue;
+          // Respetar tope semanal duro (maxDaysPerWeek) en swaps
+          if (rules?.maxDaysPerWeek) {
+            const weekStart = addDays(startDate, w*7);
+            let daysCount = 0;
+            for (let dd = 0; dd < 7; dd++) {
+              const ds = toDateValue(addDays(weekStart, dd));
+              if ((best[ds] || []).some(x => x.personId === p2.id)) daysCount++;
+            }
+            // si ya está al tope, no proponerle otro día esta semana
+            if (daysCount >= rules.maxDaysPerWeek) continue;
+          }
           const oldPid = A.personId;
           A.personId = p2.id;
           const newScore = scoreConciliacion({assignments:best, people, startDate, weeks, conciliacion});
@@ -945,7 +957,8 @@ const assignmentsImproved = useMemo(()=> improveConciliation({
   customHolidaysByYear: state.customHolidaysByYear,
   events: state.events,
   weekendShift: state.weekendShift,
-  refuerzoWeekdayShift: state.refuerzoWeekdayShift
+  refuerzoWeekdayShift: state.refuerzoWeekdayShift,
+  rules: state.rules,
 }), [assignments, state.people, startDate, state.weeks, state.overrides, state.conciliacion,
     state.timeOffs, state.province, state.consumeVacationOnHoliday, state.customHolidaysByYear,
     state.events, state.weekendShift, state.refuerzoWeekdayShift]);
@@ -1604,7 +1617,7 @@ function PrettyAssignment({ a, h, p, i, pillClass }){
 
   );
 }
-function WeeklyView({ startDate, weeks, assignments, people, timeOffs, province, closeOnHolidays, closedExtraDates, customHolidaysByYear, consumeVacationOnHoliday, pillClass }){
+function WeeklyView({ startDate, weeks, assignments, people, timeOffs, province, closeOnHolidays, closedExtraDates, customHolidaysByYear, consumeVacationOnHoliday, pillClass }){ const todayStr = toDateValue(new Date());
   const header=[]; for(let d=0; d<7*weeks; d++){ const date=addDays(startDate,d); header.push({ dateStr:toDateValue(date), label: date.toLocaleDateString(undefined,{weekday:'short'})+' '+date.getDate() }); }
   // Helpers: TO aprobadas
   const isClosedDay = (dateStr) => isClosedBusinessDay2(dateStr, province, closeOnHolidays, closedExtraDates, customHolidaysByYear);
@@ -1628,17 +1641,17 @@ function WeeklyView({ startDate, weeks, assignments, people, timeOffs, province,
   return (
     <div className="overflow-x-auto print:block">
       <table className="w-full text-sm border-collapse table-fixed">
-        <thead>
+        <thead className="sticky top-0 bg-white z-10">
           <tr>
-            <th className="text-left p-1 border-b">Persona</th>
-            {(header || []).map(h=> <th key={h.dateStr} className="text-left p-1 border-b">{h.label}</th>)}
+            <th className="text-left p-1 border-b sticky left-0 z-10 bg-white">Persona</th>
+            {(header || []).map(h=> <th key={h.dateStr} className={`text-left p-1 border-b ${h.dateStr===todayStr ? "bg-amber-50 ring-1 ring-amber-300" : ""}`}>{h.label}</th>)}
           </tr>
         </thead>
 <tbody>
   {(people || []).map(p => (
     <tr key={p.id}>
       {/* Columna Persona (nombre + color) */}
-      <td className="p-1 align-top min-w-[120px]">
+      <td className="p-1 align-top min-w-[160px] sticky left-0 bg-white z-10">
         <div className="inline-flex items-center gap-2">
           <span className="h-3 w-3 rounded" style={{ background: p.color }} />
           <span className="font-medium">{p.name}</span>
@@ -1655,7 +1668,10 @@ function WeeklyView({ startDate, weeks, assignments, people, timeOffs, province,
         const toType = (typeof getTOType === 'function') ? getTOType(h.dateStr, p.id) : null;
         const isFest = (typeof isClosedDay === 'function') ? isClosedDay(h.dateStr) : false;
         return (
-        <td key={h.dateStr || idx} className="p-1 align-top min-w-[120px]">
+                <td
+          key={h.dateStr || idx}
+          className={`p-1 align-top min-w-[120px] ${h.dateStr===todayStr ? "bg-amber-50/30" : ""}`}
+        >
           {cell.length===0 ? (
             <div className="rounded border bg-transparent px-1 py-0.5 inline-block">
               {renderEmptyCell(toType, isFest)}
