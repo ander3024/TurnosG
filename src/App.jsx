@@ -222,6 +222,8 @@ function respectsRules({personId, date, shift, assignmentsSoFar, weeklyMinutes, 
 }
 
 // ===================== Planificador base =====================
+function idealText(color){ const c=(color||"#888888").replace("#",""); const r=parseInt(c.slice(0,2),16), g=parseInt(c.slice(2,4),16), b=parseInt(c.slice(4,6),16); const L=(0.2126*r+0.7152*g+0.0722*b)/255; return L>0.62?"#111":"#fff"; }
+
 function computeOffPersonId(people, w){ for(const p of people){ if(((w+(p.offset||0))%4)===3) return p.id; } return people[w%people.length].id; }
 function pickBestCandidate(pool,{isWeekend,weekdaysLoad,weekendLoad,priorityMap}){
   if(pool.length===0) return null;
@@ -392,6 +394,9 @@ let required = isWE? [{...weekendShift}] : [...weekdayShifts];
             chosen = pickBestCandidate(pool, { isWeekend: isWE, weekdaysLoad, weekendLoad, priorityMap });
           }
         }
+
+        // Límite: máximo 1 turno/día por persona
+        if (chosen && assigned.has(chosen)) { chosen = null; }
 
         // Salvaguarda
         if (chosen && timeOffIndex.get(chosen)?.has(dateStr)) {
@@ -962,6 +967,7 @@ const assignmentsImproved = useMemo(()=> improveConciliation({
   const [payroll,setPayroll]=useState({ from: state.startDate, to: toDateValue(addDays(startDate, state.weeks*7-1)) });
   const [weekIndex,setWeekIndex]=useState(0);
   const [userWeeks, setUserWeeks] = useState(1);
+  const [icsPerson, setIcsPerson] = useState(state.people[0]?.id || "");
 function goToday(){
     const t = startOfWeekMonday(new Date());
     const idx = Math.max(0, Math.min(state.weeks-1, Math.floor((t - startDate)/(7*24*3600*1000))));
@@ -1510,17 +1516,17 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
                 {(isClosed? [] : sorted).map((c,i)=>{ const p=c.personId?personMap.get(c.personId):null; const span=formatSpan(c.shift.start,c.shift.end); const dur = effectiveMinutes(c.shift)/60; const lbl=(c.shift.label|| (isWE?'Finde':`T${i+1}`)); const emblem = /mañana/i.test(lbl)? '☀️' : /tarde/i.test(lbl)? '🌙' : isWE? '🗓️' : '➕'; return (
                   <div
                     key={i}
-                    className={`rounded-xl px-3 py-2 min-h-[52px] border text-[13px] leading-tight flex flex-col gap-1 ${c.conflict? 'border-red-300 bg-red-50':'border-slate-200'}`}
+                    className={`rounded-xl px-3 py-2 min-h-[60px] border text-[14px] leading-tight flex flex-col gap-1 ${c.conflict? 'border-red-300 bg-red-50':'border-slate-200'}`}
                     title={`${lbl} · ${span} (${dur}h)`}
                   >
                     <div className="whitespace-normal break-words">
-                      <span className="text-[12px] mr-1 rounded px-1 py-0.5 border bg-transparent">{emblem} {lbl}</span>
+                      <span className="text-sm mr-1 rounded px-1 py-0.5 border bg-transparent">{emblem} {lbl}</span>
                       <span className="text-slate-700">{span}</span>
-                      <span className="text-[12px] ml-1 text-slate-600">({dur}h{c.shift.lunchMinutes ? " · comida "+(c.shift.lunchMinutes)+"m" : ""})</span>
+                      <span className="text-sm ml-1 text-slate-600">({dur}h{c.shift.lunchMinutes ? " · comida "+(c.shift.lunchMinutes)+"m" : ""})</span>
                     </div>
                     <div className="flex items-center gap-1">
                       {p
-                        ? (<span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-lg" style={{background:`${p.color}20`, border:`1px solid ${p.color}55`}}>
+                        ? (<span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-lg" style={{background:`${p.color}10`, border:`1px solid ${p.color}55`, color: idealText(p.color)}}>
                             <span className="h-2.5 w-2.5 rounded" style={{background:p.color}}/>
                             <span className="text-xs">{p.name}</span>
                           </span>)
@@ -1553,23 +1559,23 @@ function PrettyAssignment({ a, h, p, i }){
 
   return (
 <div
-  className={`rounded-xl px-3 py-2 min-h-[52px] border text-[13px] leading-tight mb-1 ${a.conflict ? 'border-red-300 bg-red-50' : 'border-slate-200 bg-transparent'}`}
-  style={a.conflict ? {} : { background:`${color}20`, border:`1px solid ${color}55` }}
+  className={`rounded-xl px-3 py-2 min-h-[60px] border text-[14px] leading-tight mb-1 ${a.conflict ? 'border-red-300 bg-red-50' : 'border-slate-200 bg-transparent'}`}
+  style={a.conflict ? {} : { background:`${color}08`, border:`1px solid ${color}55` }}
   title={`${lbl} · ${span} (${dur}h)`}
 >
   <div className="flex flex-col gap-1">
     <div className="whitespace-normal break-words">
-      <span className="text-[12px] mr-1 rounded px-1 py-0.5 border bg-transparent">
+      <span className="text-sm mr-1 rounded px-1 py-0.5 border bg-transparent">
         {emblem} {lbl}
       </span>
       <span className="">{span}</span>
-      <span className="text-[12px] ml-1 text-slate-600">
+      <span className="text-sm ml-1 text-slate-600">
         ({dur}h{a.shift.lunchMinutes ? ` · comida ${a.shift.lunchMinutes}m` : ''})
       </span>
     </div>
     <span
       className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-lg self-start"
-      style={{background:`${color}20`, border:`1px solid ${color}55`}}
+      style={{background:`${color}08`, border:`1px solid ${color}55`, color: idealText(color)}}
     >
       <span className="h-2.5 w-2.5 rounded" style={{background:color}}/>
       <span className="text-xs">{p?.name||''}</span>
@@ -1613,7 +1619,7 @@ function WeeklyView({ startDate, weeks, assignments, people, timeOffs, province,
   {(people || []).map(p => (
     <tr key={p.id}>
       {/* Columna Persona (nombre + color) */}
-      <td className="p-1 align-top">
+      <td className="p-1 align-top min-w-[120px]">
         <div className="inline-flex items-center gap-2">
           <span className="h-3 w-3 rounded" style={{ background: p.color }} />
           <span className="font-medium">{p.name}</span>
@@ -1630,7 +1636,7 @@ function WeeklyView({ startDate, weeks, assignments, people, timeOffs, province,
         const toType = (typeof getTOType === 'function') ? getTOType(h.dateStr, p.id) : null;
         const isFest = (typeof isClosedDay === 'function') ? isClosedDay(h.dateStr) : false;
         return (
-        <td key={h.dateStr || idx} className="p-1 align-top">
+        <td key={h.dateStr || idx} className="p-1 align-top min-w-[120px]">
           {cell.length===0 ? (
             <div className="rounded border bg-transparent px-1 py-0.5 inline-block">
               {renderEmptyCell(toType, isFest)}
@@ -2617,7 +2623,21 @@ function AuthenticatedApp(props){
               )}
             </div>
           </Card>
-          <PersonasPanel state={state} upPerson={upPerson} />
+          <Card title="Auditoría (últimos 100)">
+  <div className="max-h-40 overflow-auto text-xs">
+    {((state.audit||[]).slice(-100).reverse()).map((e,i)=>(
+      <div key={i} className="py-0.5 border-b last:border-0">
+        <span className="text-slate-500">{(e.ts||"").replace("T"," ").replace("Z","")} · </span>
+        <span>{e.actor||"sys"}</span>
+        <span> — {e.action||"evento"}</span>
+        {e.dateStr? <span> · {e.dateStr}</span>: null}
+      </div>
+    ))}
+    {!(state.audit&&state.audit.length) && <div className="text-slate-500">Sin eventos aún.</div>}
+  </div>
+</Card>
+
+<PersonasPanel state={state} upPerson={upPerson} />
           <TurnosPanel state={state} up={up} />
           <FestivosPanel state={state} up={up} />
           <CustomHolidaysPanel state={state} up={up} /></>)}
@@ -2836,7 +2856,19 @@ function RefuerzosPanelLite({ state, up, assignments }){
   };
   return (
     <Card title="Eventos de Refuerzo (Admin)">
-      {/* Alta rápida */}
+      <div className="flex flex-wrap gap-2 mb-3">{[
+    {name:"Black Friday",w:2,we:1,label:"Refuerzo (Ofi)"},
+    {name:"Inventario",w:1,we:0,label:"Refuerzo Inventario"},
+    {name:"Rebajas",w:1,we:1,label:"Refuerzo Tienda"}
+  ].map(p => (
+    <button key={p.name} className="px-2 py-1 rounded border"
+      onClick={()=> up(["events"], [...(state.events||[]), {
+        label:p.name, start: state.startDate, end: state.startDate,
+        weekdaysExtraSlots:p.w, weekendExtraSlots:p.we
+      }])}
+    >+ {p.name}</button>
+  ))}</div>
+{/* Alta rápida */}
       <div className="grid grid-cols-12 gap-2 mb-3">
         <div className="col-span-4">
           <label className="text-xs">Etiqueta</label>
