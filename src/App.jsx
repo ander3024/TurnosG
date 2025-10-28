@@ -240,6 +240,7 @@ function generateSchedule({ startDate, weeks, people, weekdayShifts, weekendShif
   const timeOffIndex = indexTimeOff(timeOffs, { province, consumeVacationOnHoliday, customHolidaysByYear });
   // --- Forzados procedentes de eventos con assigneeForced=true ---
   const forceByDay = new Map(); // ds -> { key -> personId }
+  const weekdayCounter = new Map(); // ds -> contador AM/PM por día
   for (const ev of (events||[])) {
     if (!ev.assigneeForced || !ev.assigneeId) continue;
     const days = expandRange(ev.start, ev.end);
@@ -247,17 +248,36 @@ function generateSchedule({ startDate, weeks, people, weekdayShifts, weekendShif
       const d   = parseDateValue(ds);
       const we  = (d.getDay()===0 || d.getDay()===6);
       const cnt = we ? (ev.weekendExtraSlots||0) : (ev.weekdaysExtraSlots||0);
-      const base = we ? weekendShift : refuerzoWeekdayShift;
-
       const bucket = forceByDay.get(ds) || {};
-      for (let j=0; j<cnt; j++){
-        // IMPORTANTE: etiqueta EXACTA como la que se usa al crear los slots
-        const baseLabel = we ? 'Refuerzo' : (refuerzoWeekdayShift.label || 'Refuerzo');
-        const label = `${baseLabel} ${j+1}`;
-        const key = `${base.start}-${base.end}-${label}`;
-        bucket[key] = ev.assigneeId;
+      if (we) {
+        // Fines de semana: igual que antes
+        for (let j=0; j<cnt; j++){
+          const base = weekendShift;
+          const label = `Refuerzo ${j+1}`;
+          const key = `${base.start}-${base.end}-${label}`;
+          bucket[key] = ev.assigneeId;
+        }
+      } else {
+        // Laborables: respeta weekdayRefuerzo + numeración por día
+        const wType = ev.weekdayRefuerzo || "auto";
+        const base =
+          (wType==="mañana" && (weekdayShifts?.[0])) ? weekdayShifts[0]
+        : (wType==="tarde"  && (weekdayShifts?.[1])) ? weekdayShifts[1]
+        : refuerzoWeekdayShift;
+
+        const baseLabel = (refuerzoWeekdayShift.label || "Refuerzo")
+                        + (wType==="mañana" ? " Mañana" : (wType==="tarde" ? " Tarde" : ""));
+        let wCounter = weekdayCounter.get(ds) || 0;
+        for (let j=0; j<cnt; j++){
+          wCounter++;
+          const label = `${baseLabel} ${wCounter}`;
+          const key = `${base.start}-${base.end}-${label}`;
+          bucket[key] = ev.assigneeId;
+        }
+        weekdayCounter.set(ds, wCounter);
       }
       forceByDay.set(ds, bucket);
+
     }
   }
 
@@ -326,13 +346,29 @@ let required = isWE? [{...weekendShift}] : [...weekdayShifts];
         // Para fines de semana, NO contar weekendExtraSlots de eventos de conciliación
         const extraWE = active.reduce((a,ev)=> a + ((ev.meta && ev.meta.source==='conciliacion') ? 0 : (ev.weekendExtraSlots||0)), 0);
         if(isWE && extraWE>0){ for(let i=0;i<extraWE;i++) required.push({...weekendShift,label:`Refuerzo ${i+1}`}); }
-        if(!isWE && extraW>0){
-          const baseLabel = refuerzoWeekdayShift.label || 'Refuerzo';
-          for(let i=0;i<extraW;i++){
-            required.push({...refuerzoWeekdayShift, label: `${baseLabel} ${i+1}`});
+        if(!isWE){
+          let wCounter = 0;
+          for (const ev of active){
+            const cntW = ev.weekdaysExtraSlots || 0;
+            if (cntW <= 0) continue;
+
+            const baseLabel = refuerzoWeekdayShift.label || "Refuerzo";
+            const choice = ev.weekdayRefuerzo || "auto";
+            const baseShift =
+              (choice==="mañana" && (weekdayShifts?.[0]))
+                ? { ...weekdayShifts[0], label: `${baseLabel} Mañana` }
+              : (choice==="tarde" && (weekdayShifts?.[1]))
+                ? { ...weekdayShifts[1], label: `${baseLabel} Tarde` }
+              : { ...refuerzoWeekdayShift, label: baseLabel };
+
+            for(let i=0;i<cntW;i++){
+              wCounter++;
+              required.push({ ...baseShift, label: `${baseShift.label} ${wCounter}`});
+            }
           }
         }
       }
+
       const dayAssignments=[]; const assigned=new Set();
       assignments[dateStr] = assignments[dateStr] || [];
 
@@ -402,7 +438,11 @@ let required = isWE? [{...weekendShift}] : [...weekdayShifts];
         if (chosen && timeOffIndex.get(chosen)?.has(dateStr)) {
           chosen = null;
         }
-      
+        // Origen de la asignación
+        const origin = (overrides?.[dateStr]?.[key])
+          ? 'override'
+          : (forced ? 'forced' : 'auto');
+
         if(chosen){
           assigned.add(chosen);
           const mins = effectiveMinutes(shift);
@@ -410,9 +450,9 @@ let required = isWE? [{...weekendShift}] : [...weekdayShifts];
           weeklyDays.set(chosen,(weeklyDays.get(chosen)||0)+1);
           hoursPerPersonMin.set(chosen,(hoursPerPersonMin.get(chosen)||0)+mins);
           if(isWE) weekendLoad.set(chosen,(weekendLoad.get(chosen)||0)+1); else weekdaysLoad.set(chosen,(weekdaysLoad.get(chosen)||0)+1);
-          dayAssignments.push({shift, personId:chosen, conflict:false});
+          dayAssignments.push({shift, personId:chosen, conflict:false, origin});
         } else {
-          dayAssignments.push({shift, personId:null, conflict:true});
+          dayAssignments.push({shift, personId:null, conflict:true, origin:'pending'});
         }
       }
 
@@ -525,24 +565,46 @@ function improveConciliation({
   conciliacion = safeConciliacion(conciliacion);
 
   // --- CLAVES FORZADAS DESDE EVENTOS (assigneeForced=true) ---
-  const forcedKeysByDay = new Map(); // ds -> Set(keys)
-  for (const ev of (events||[])) {
-    if (!ev.assigneeForced || !ev.assigneeId) continue;
-    const days = expandRange(ev.start, ev.end);
-    for (const ds of days) {
-      const d = parseDateValue(ds);
-      const we = (d.getDay()===0 || d.getDay()===6);
-      const cnt = we ? (ev.weekendExtraSlots||0) : (ev.weekdaysExtraSlots||0);
-      const base = we ? weekendShift : refuerzoWeekdayShift;
-      const set = forcedKeysByDay.get(ds) || new Set();
-      for (let j=0; j<cnt; j++){
-        const baseLabel = we ? 'Refuerzo' : (refuerzoWeekdayShift.label || 'Refuerzo');
-        const label = `${baseLabel} ${j+1}`;
+const forcedKeysByDay = new Map(); // ds -> Set(keys)
+const weekdayCounterFK = new Map(); // ds -> n (numeración por día)
+
+for (const ev of (events||[])) {
+  if (!ev.assigneeForced || !ev.assigneeId) continue;
+  const days = expandRange(ev.start, ev.end);
+  for (const ds of days) {
+    const d  = parseDateValue(ds);
+    const we = (d.getDay()===0 || d.getDay()===6);
+    const cnt = we ? (ev.weekendExtraSlots||0) : (ev.weekdaysExtraSlots||0);
+
+    const set = forcedKeysByDay.get(ds) || new Set();
+
+    if (we) {
+      const base = weekendShift;
+      for (let j=0; j<cnt; j++) {
+        const label = `Refuerzo ${j+1}`;
         set.add(`${base.start}-${base.end}-${label}`);
       }
-      forcedKeysByDay.set(ds, set);
+    } else {
+      // L–V: respeta weekdayRefuerzo + numeración por día (igual que generateSchedule)
+      const wType = ev.weekdayRefuerzo || 'auto';
+      const base =
+        (wType==='mañana' && (weekdayShifts?.[0])) ? weekdayShifts[0] :
+        (wType==='tarde'  && (weekdayShifts?.[1])) ? weekdayShifts[1] :
+        refuerzoWeekdayShift;
+
+      let wCounter = weekdayCounterFK.get(ds) || 0;
+      const baseLabel = (refuerzoWeekdayShift.label || 'Refuerzo')
+                      + (wType==='mañana' ? ' Mañana' : (wType==='tarde' ? ' Tarde' : ''));
+      for (let j=0; j<cnt; j++) {
+        wCounter++;
+        const label = `${baseLabel} ${wCounter}`;
+        set.add(`${base.start}-${base.end}-${label}`);
+      }
+      weekdayCounterFK.set(ds, wCounter);
     }
+    forcedKeysByDay.set(ds, set);
   }
+}
 
   const best = JSON.parse(JSON.stringify(assignments));
   const indexTO = indexTimeOff(timeOffs, { province, consumeVacationOnHoliday, customHolidaysByYear });
@@ -982,8 +1044,8 @@ const assignmentsImproved = useMemo(()=> improveConciliation({
   const [userWeeks, setUserWeeks] = useState(1);
   const [icsPerson, setIcsPerson] = useState(state.people[0]?.id || "");
   const [personFilter, setPersonFilter] = useState("");
-const [density, setDensity] = useState("normal");
-const pillClass = density==="compact"
+  const [density, setDensity] = useState("normal");
+  const pillClass = density==="compact"
   ? "px-2 py-1 min-h-[44px] text-[12px]"
   : density==="spacious"
   ? "px-4 py-3 min-h-[68px] text-[15px]"
@@ -1140,6 +1202,7 @@ if (!auth.user || !auth.token) {
     a.download=`nomina_${payroll.from}_${payroll.to}.csv`;
     a.click();
   }
+
   function clearVisibleOverrides(){
   const from = weeklyStart;
   const to   = addDays(weeklyStart, userWeeks*7 - 1);
@@ -1153,6 +1216,58 @@ if (!auth.user || !auth.token) {
   showToast("Overrides del rango visible eliminados");
   }
 
+function duplicateVisibleToNextWeek(){
+  const from = weeklyStart;
+  const to   = addDays(weeklyStart, userWeeks*7 - 1);
+  const periodEnd = addDays(startDate, state.weeks*7 - 1);
+
+  const out = structuredClone(state.overrides || {});
+  let copiados = 0, saltados = 0;
+
+  for (let d = new Date(from); d <= to; d = addDays(d, 1)) {
+    const srcDs = toDateValue(d);
+    const tgtDs = toDateValue(addDays(d, 7));
+    if (parseDateValue(tgtDs) > periodEnd) { saltados++; continue; }
+
+    const cell = (ASS[srcDs] || []);
+    if (!cell.length) { continue; }
+
+    for (let i = 0; i < cell.length; i++) {
+      const a = cell[i];
+      if (!a.personId) continue; // no copiar vacíos
+      const key = `${a.shift.start}-${a.shift.end}-${a.shift.label || `T${i+1}`}`;
+      out[tgtDs] = out[tgtDs] || {};
+      if (out[tgtDs][key] != null) { // ya había override → no pisar
+        saltados++;
+        continue;
+      }
+      out[tgtDs][key] = a.personId;
+      copiados++;
+    }
+  }
+
+  setState(prev => ({ ...prev, overrides: out }));
+  showToast(`Duplicado seguro: ${copiados} asignaciones · ${saltados} no copiadas`);
+}
+
+function undoLastOverride(){
+  const audit = state.audit || [];
+  const last = [...audit].reverse().find(e => e?.action === 'override' && e?.dateStr);
+  if (!last) { showToast('No hay overrides recientes'); return; }
+  const { dateStr, assignmentIndex } = last;
+  const a = ASS[dateStr]?.[assignmentIndex];
+  if (!a) { showToast('No encuentro esa asignación'); return; }
+
+  const key = `${a.shift.start}-${a.shift.end}-${a.shift.label || `T${assignmentIndex+1}`}`;
+  const next = structuredClone(state.overrides || {});
+  if (next[dateStr]) {
+    delete next[dateStr][key];
+    if (Object.keys(next[dateStr]).length === 0) delete next[dateStr];
+  }
+  setState(prev => ({ ...prev, overrides: next }));
+  showToast('Override deshecho');
+}
+
 return (
   <AuthenticatedApp
   auth={auth}
@@ -1160,10 +1275,9 @@ return (
   ui={ui}
   setUI={setUI}
   showToast={showToast}
-  
   modalDay={modalDay}
   setModalDay={setModalDay}
-state={state}
+  state={state}
   setState={setState}
   cloud={cloud}
   setCloud={setCloud}
@@ -1187,6 +1301,9 @@ state={state}
   importJSON={importJSON}
   exportICS={exportICS}
   exportPayroll={exportPayroll}
+  clearVisibleOverrides={clearVisibleOverrides}
+  duplicateVisibleToNextWeek={duplicateVisibleToNextWeek}
+  undoLastOverride={undoLastOverride}
   pillClass={pillClass}
   density={density}
   setDensity={setDensity}
@@ -1529,7 +1646,7 @@ function CustomHolidaysPanel({ state, up }){
 }
 
 
-function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmin, onQuickAssign, province, closeOnHolidays, closedExtraDates, customHolidaysByYear }){ const todayStr = toDateValue(new Date());
+function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmin, onQuickAssign, province, closeOnHolidays, closedExtraDates, customHolidaysByYear, pillClass }){ const todayStr = toDateValue(new Date());
   const days=[]; for(let w=0;w<weeks;w++) for(let d=0;d<7;d++) days.push(addDays(startDate, w*7+d));
   const personMap=new Map(people.map(p=>[p.id,p]));
   return (
@@ -1561,11 +1678,20 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
                   </div>
                 )}
                 {(isClosed? [] : sorted).map((c,i)=>{ const p=c.personId?personMap.get(c.personId):null; const span=formatSpan(c.shift.start,c.shift.end); const dur = effectiveMinutes(c.shift)/60; const lbl=(c.shift.label|| (isWE?'Finde':`T${i+1}`)); const emblem = /mañana/i.test(lbl)? '☀️' : /tarde/i.test(lbl)? '🌙' : isWE? '🗓️' : '➕'; return (
-                  <div
-                    key={i}
-                    className={`rounded-xl px-3 py-2 min-h-[60px] border text-[14px] leading-tight flex flex-col gap-1 ${c.conflict? 'border-red-300 bg-red-50':'border-slate-200'}`}
-                    title={`${lbl} · ${span} (${dur}h)`}
-                  >
+                    <div
+                      key={i}
+                      className={`rounded-xl ${pillClass} border leading-tight flex flex-col gap-1 ${c.conflict? 'border-red-300 bg-red-50':'border-slate-200'}`}
+                      title={`${lbl} · ${span} (${dur}h)`}
+                    >
+                {c.personId && c.origin && (
+                    <span className={`text-[10px] px-1 py-0.5 rounded border self-start ${
+                      c.origin==='override' ? 'bg-amber-50 border-amber-300 text-amber-700' :
+                      c.origin==='forced'   ? 'bg-emerald-50 border-emerald-300 text-emerald-700' :
+                                              'bg-slate-50 border-slate-200 text-slate-600'
+                    }`}>
+                      {c.origin==='override' ? 'Override' : c.origin==='forced' ? 'Forzado' : 'Auto'}
+                    </span>
+                  )}
                     <div className="whitespace-normal break-words">
                       <span className="text-sm mr-1 rounded px-1 py-0.5 border bg-transparent">{emblem} {lbl}</span>
                       <span className="text-slate-700">{span}</span>
@@ -1573,10 +1699,11 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
                     </div>
                     <div className="flex items-center gap-1">
                       {p
-                        ? (<span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-lg" style={{background:`${p.color}10`, border:`1px solid ${p.color}55`, color: idealText(p.color)}}>
-                            <span className="h-2.5 w-2.5 rounded" style={{background:p.color}}/>
-                            <span className="text-xs">{p.name}</span>
-                          </span>)
+                        ? (<span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-lg text-slate-900"
+                      style={{background:`${p.color}10`, border:`1px solid ${p.color}55`}}>
+                      <span className="h-2.5 w-2.5 rounded" style={{background:p.color}}/>
+                      <span className="text-xs">{p.name}</span>
+                    </span>)
                         : (<span className="text-red-600 text-sm">⚠ Falta asignar</span>)
                       }
                     </div>
@@ -1606,7 +1733,7 @@ function PrettyAssignment({ a, h, p, i, pillClass }){
 
   return (
 <div
-  className={`rounded-xl px-3 py-2 min-h-[60px] border text-[14px] leading-tight mb-1 ${a.conflict ? 'border-red-300 bg-red-50' : 'border-slate-200 bg-transparent'}`}
+  className={`rounded-xl ${pillClass} border leading-tight mb-1 ${a.conflict ? 'border-red-300 bg-red-50' : 'border-slate-200 bg-transparent'}`}
   style={a.conflict ? {} : { background:`${color}08`, border:`1px solid ${color}55` }}
   title={`${lbl} · ${span} (${dur}h)`}
 >
@@ -1620,12 +1747,20 @@ function PrettyAssignment({ a, h, p, i, pillClass }){
         ({dur}h{a.shift.lunchMinutes ? ` · comida ${a.shift.lunchMinutes}m` : ''})
       </span>
     </div>
-    <span
-      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-lg self-start"
-      style={{background:`${color}08`, border:`1px solid ${color}55`, color: idealText(color)}}
-    >
+      <span
+        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-lg self-start text-slate-900"
+        style={{background:`${color}08`, border:`1px solid ${color}55`}}
+      >
       <span className="h-2.5 w-2.5 rounded" style={{background:color}}/>
-      <span className="text-xs">{p?.name||''}</span>
+      <span className="text-xs">{p?.name||''}</span>{a.origin && (
+      <span className={`text-[10px] px-1 py-0.5 rounded border self-start mt-1 ${
+        a.origin==='override' ? 'bg-amber-50 border-amber-300 text-amber-700' :
+        a.origin==='forced'   ? 'bg-emerald-50 border-emerald-300 text-emerald-700' :
+                                'bg-slate-50 border-slate-200 text-slate-600'
+      }`}>
+        {a.origin==='override' ? 'Override' : a.origin==='forced' ? 'Forzado' : 'Auto'}
+      </span>
+    )}
     </span>
   </div>
 </div>
@@ -1676,7 +1811,26 @@ for(let d=0; d<7*weeks; d++){
         <thead className="sticky top-0 bg-white z-10">
           <tr>
             <th className="text-left p-1 border-b sticky left-0 z-10 bg-white">Persona</th>
-            {(header || []).map(h=> <th key={h.dateStr} className={`text-left p-1 border-b ${h.dateStr===todayStr ? "bg-amber-50 ring-1 ring-amber-300" : (h.isWE ? "bg-slate-50" : "")}`}>{h.label}</th>)}
+            {(header || []).map(h => {
+                const cell = (assignments[h.dateStr] || []);
+                const total = cell.length;
+                const assigned = cell.filter(c => !!c.personId).length;
+                const hasC = cell.some(c => c.conflict);
+                const badgeClass = hasC
+                  ? "text-rose-700 border-rose-300 bg-rose-50"
+                  : (assigned < total ? "text-amber-700 border-amber-300 bg-amber-50" : "text-slate-600 border-slate-200 bg-transparent");
+                return (
+                  <th
+                    key={h.dateStr}
+                    className={`text-left p-1 border-b border-l border-slate-100 ${h.dateStr===todayStr ? "bg-amber-50 ring-1 ring-amber-300" : (h.isWE ? "bg-slate-50" : "")}`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span>{h.label}</span>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded border ${badgeClass}`}>{assigned}/{total}</span>
+                    </div>
+                  </th>
+                );
+              })}
           </tr>
         </thead>
 <tbody>
@@ -1702,7 +1856,7 @@ for(let d=0; d<7*weeks; d++){
         return (
                 <td
           key={h.dateStr || idx}
-          className={`p-1 align-top min-w-[120px] ${h.dateStr===todayStr ? "bg-amber-50/30" : ""} ${h.isWE ? "bg-slate-50/50" : ""}`}
+          className={`p-1 align-top min-w-[120px] border-l border-slate-100 ${h.dateStr===todayStr ? "bg-amber-50/30" : ""} ${h.isWE ? "bg-slate-50/50" : ""}`}
         >
           {cell.length===0 ? (
             <div className="rounded border bg-transparent px-1 py-0.5 inline-block">
@@ -2160,7 +2314,17 @@ function DayModal({ dateStr, date, assignments, people, onOverride, onClose, isA
                 <div className="flex items-center justify-between gap-3">
                   <div className="text-sm">
                     <div className="font-medium">{c.shift.label||`Turno ${i+1}`} · {span} <span className="text-slate-500 font-normal">({dur}h{c.shift.lunchMinutes ? " · comida " + (c.shift.lunchMinutes) + "m" : ""})</span></div>
-                    <div className="text-xs text-slate-500">{c.conflict? '⚠ Falta asignar':'Asignado'}</div>
+                    <div className="text-xs">
+                      {c.conflict
+                        ? <span className="text-rose-700">⚠ Falta asignar</span>
+                        : <>
+                            <span className="text-slate-500">Asignado</span>
+                            {c.origin==='override' && <span className="ml-2 text-amber-700">· Override</span>}
+                            {c.origin==='forced'   && <span className="ml-2 text-emerald-700">· Forzado</span>}
+                            {(!c.origin || c.origin==='auto') && <span className="ml-2 text-slate-600">· Auto</span>}
+                          </>
+                      }
+                    </div>
                   </div>
                   <div className="flex items-center gap-2">
                     <select
@@ -2555,7 +2719,8 @@ function AuthenticatedApp(props){
           payroll, setPayroll,
           ASS, controls,
           exportCSV, exportJSON, importJSON, exportICS, exportPayroll,
-          up, upPerson, forceAssign, pillClass, density, setDensity, personFilter, setPersonFilter } = props;
+          up, upPerson, forceAssign, pillClass, density, setDensity,
+          personFilter, setPersonFilter, clearVisibleOverrides, duplicateVisibleToNextWeek, undoLastOverride } = props;
 
   // --- scope admin (robusto tras refactor) ---
   // Aliases seguros para modal del día (local o via props)
@@ -2742,12 +2907,12 @@ function AuthenticatedApp(props){
         value={personFilter}
         onChange={e=>setPersonFilter(e.target.value)}
       />
-       <button onClick={clearVisibleOverrides} className="ml-2 px-2 py-1 rounded border text-sm">
-        Limpiar overrides (rango)
-      </button>
+      <button onClick={clearVisibleOverrides} className="ml-2 px-2 py-1 rounded border text-sm">Limpiar overrides (rango)</button>
+      <button onClick={duplicateVisibleToNextWeek} className="ml-2 px-2 py-1 rounded border text-sm">Duplicar → semana siguiente</button>
+      <button onClick={undoLastOverride} className="ml-2 px-2 py-1 rounded border text-sm">Deshacer último override</button>
     </div>
-    <button onClick={()=>window.print()} className="ml-2 px-3 py-1.5 rounded-lg border">Imprimir / PDF</button>
-  </div>
+      <button onClick={()=>window.print()} className="ml-2 px-2 py-1 rounded-lg border text-sm">Imprimir / PDF</button>
+    </div>
   
   {/* Leyenda (visible para todos) */}
   <div className="flex flex-wrap items-center gap-2 mb-3 text-[11px]">
@@ -2886,7 +3051,8 @@ function RefuerzosPanelLite({ state, up, assignments }){
   const [sort,setSort] = useState({ key:'start', dir:'asc' });
   const [page,setPage] = useState(0);
   const [pageSize,setPageSize] = useState(25);
-
+  const [assignee, setAssignee] = useState('');
+  const [onlyForced, setOnlyForced] = useState(false);
   const inRange = (e)=> (!from || e.start>=from) && (!to || e.end<=to);
   const matches = (e)=> !q || (e.label||'').toLowerCase().includes(q.toLowerCase());
   const toggleSort = (k)=> setSort(prev=> prev.key===k ? {key:k,dir:(prev.dir==='asc'?'desc':'asc')} : {key:k,dir:'asc'});
@@ -2897,7 +3063,16 @@ function RefuerzosPanelLite({ state, up, assignments }){
     return 0;
   };
 
-  const filtered = useMemo(()=> events.filter(inRange).filter(matches).sort(compare), [events,q,from,to,sort]);
+  const matchesPerson = (e) => !assignee || e.assigneeId === assignee;
+  const matchesForced = (e) => !onlyForced || !!e.assigneeForced;
+
+  const filtered = useMemo(() => events
+    .filter(inRange)
+    .filter(matches)
+    .filter(matchesPerson)
+    .filter(matchesForced)
+    .sort(compare)
+  , [events, q, from, to, sort, assignee, onlyForced]);
   const total = filtered.length;
   const pages = Math.max(1, Math.ceil(total/(pageSize||25)));
   const pageClamped = Math.min(page, pages-1);
@@ -2923,7 +3098,17 @@ function RefuerzosPanelLite({ state, up, assignments }){
     }
     return {free,total:days.length};
   };
-  const setAssignee = (absIdx, personId) => {
+  const appliedFor = (e) => {
+    if (!e.assigneeId) return {applied:0,total:0};
+    const days = dateRange(e.start, e.end);
+    let applied = 0;
+    for (const ds of days) {
+      const day = (assignments?.[ds] || []);
+      if (day.some(a => a?.personId === e.assigneeId)) applied++;
+    }
+    return { applied, total: days.length };
+  };
+  const setEventAssignee = (absIdx, personId) => {
     const next = (state.events||[]).map((ev,i)=> i===absIdx ? {...ev, assigneeId: personId} : ev);
     up(['events'], next);                // ← Asegúrate de que va ENTRE COMILLAS
   };
@@ -2940,10 +3125,11 @@ function RefuerzosPanelLite({ state, up, assignments }){
     {name:"Rebajas",w:1,we:1,label:"Refuerzo Tienda"}
   ].map(p => (
     <button key={p.name} className="px-2 py-1 rounded border"
-      onClick={()=> up(["events"], [...(state.events||[]), {
-        label:p.name, start: state.startDate, end: state.startDate,
-        weekdaysExtraSlots:p.w, weekendExtraSlots:p.we
-      }])}
+    onClick={()=> up(["events"], [...(state.events||[]), {
+      label:p.name, start: state.startDate, end: state.startDate,
+      weekdaysExtraSlots:p.w, weekendExtraSlots:p.we,
+      weekdayRefuerzo:"mañana"
+    }])}
     >+ {p.name}</button>
   ))}</div>
 {/* Alta rápida */}
@@ -3001,6 +3187,33 @@ function RefuerzosPanelLite({ state, up, assignments }){
         </div>
       </div>
 
+      {/* Filtro: persona asignada */}
+      <div className="col-span-3">
+        <label className="text-xs">Asignado a</label>
+        <select
+          className="w-full border rounded px-2 py-1"
+          value={assignee}
+          onChange={(e) => { setAssignee(e.target.value); setPage(0); }}
+        >
+          <option value="">— cualquiera —</option>
+          {(state.people || []).map(p => (
+            <option key={p.id} value={p.id}>{p.name}</option>
+          ))}
+        </select>
+      </div>
+
+      {/* Filtro: solo forzados */}
+      <div className="col-span-3 flex items-end">
+        <label className="text-xs inline-flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={onlyForced}
+            onChange={(e) => { setOnlyForced(e.target.checked); setPage(0); }}
+          />
+          Solo forzados
+        </label>
+      </div>
+
       {/* Tabla paginada */}
       <div className="border rounded-lg overflow-x-auto">
         {total===0 && <div className="p-3 text-sm text-slate-500">Sin eventos.</div>}
@@ -3013,6 +3226,7 @@ function RefuerzosPanelLite({ state, up, assignments }){
                 <th className="text-left p-2 cursor-pointer" onClick={()=>toggleSort('end')}>Hasta</th>
                 <th className="text-right p-2">L–V +</th>
                 <th className="text-right p-2">S–D +</th>
+                <th className="text-right p-2">Tipo L–V</th>
                 <th className="text-right p-2">Asignación</th>
                 <th className="text-right p-2">Acciones</th>
               </tr>
@@ -3048,6 +3262,17 @@ function RefuerzosPanelLite({ state, up, assignments }){
                    onChange={ev=>setFieldAt(absIdx,'weekendExtraSlots',Number(ev.target.value)||0)} />
           </td>
           <td className="p-2 text-right">
+            <select
+              className="border rounded px-2 py-1 w-32"
+              value={e.weekdayRefuerzo || "auto"}
+              onChange={ev=> setFieldAt(absIdx, "weekdayRefuerzo", ev.target.value)}
+            >
+              <option value="auto">Auto</option>
+              <option value="mañana">Mañana</option>
+              <option value="tarde">Tarde</option>
+            </select>
+          </td>
+          <td className="p-2 text-right">
             {(() => {
               const absIdx = (state.events || []).findIndex(ev => ev === e); // índice absoluto
               const pid    = e.assigneeId || "";
@@ -3059,7 +3284,7 @@ function RefuerzosPanelLite({ state, up, assignments }){
                   <select
                     className="border rounded px-2 py-1"
                     value={pid}
-                    onChange={ev => setAssignee(absIdx, ev.target.value)}
+                    onChange={ev => setEventAssignee(absIdx, ev.target.value)}
                   >
                     <option value="">—</option>
                     {ppl.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
@@ -3080,6 +3305,11 @@ function RefuerzosPanelLite({ state, up, assignments }){
                       title="días libres/total"
                     >
                       libre {avail.free}/{avail.total}
+                    </span>
+                  )}
+                  {pid && (
+                    <span className="text-xs text-slate-600">
+                      · asignado {appliedFor(e).applied}/{appliedFor(e).total}
                     </span>
                   )}
                 </div>
