@@ -981,6 +981,7 @@ const assignmentsImproved = useMemo(()=> improveConciliation({
   const [weekIndex,setWeekIndex]=useState(0);
   const [userWeeks, setUserWeeks] = useState(1);
   const [icsPerson, setIcsPerson] = useState(state.people[0]?.id || "");
+  const [personFilter, setPersonFilter] = useState("");
 const [density, setDensity] = useState("normal");
 const pillClass = density==="compact"
   ? "px-2 py-1 min-h-[44px] text-[12px]"
@@ -1139,6 +1140,18 @@ if (!auth.user || !auth.token) {
     a.download=`nomina_${payroll.from}_${payroll.to}.csv`;
     a.click();
   }
+  function clearVisibleOverrides(){
+  const from = weeklyStart;
+  const to   = addDays(weeklyStart, userWeeks*7 - 1);
+  const next = structuredClone(state.overrides || {});
+  const keys = Object.keys(next);
+  for (const ds of keys){
+    const d = parseDateValue(ds);
+    if (d >= from && d <= to) delete next[ds];
+  }
+  setState(prev => ({ ...prev, overrides: next }));
+  showToast("Overrides del rango visible eliminados");
+  }
 
 return (
   <AuthenticatedApp
@@ -1177,6 +1190,8 @@ state={state}
   pillClass={pillClass}
   density={density}
   setDensity={setDensity}
+  personFilter={personFilter}
+  setPersonFilter={setPersonFilter}
   up={up}
   upPerson={upPerson}
   forceAssign={forceAssign}
@@ -1617,8 +1632,25 @@ function PrettyAssignment({ a, h, p, i, pillClass }){
 
   );
 }
+function dayCounts(assignments, ds){
+  const cell = assignments[ds] || [];
+  return {
+    total: cell.length,
+    assigned: cell.filter(c=>!!c.personId).length,
+    conflict: cell.some(c=>c.conflict)
+  };
+}
 function WeeklyView({ startDate, weeks, assignments, people, timeOffs, province, closeOnHolidays, closedExtraDates, customHolidaysByYear, consumeVacationOnHoliday, pillClass }){ const todayStr = toDateValue(new Date());
-  const header=[]; for(let d=0; d<7*weeks; d++){ const date=addDays(startDate,d); header.push({ dateStr:toDateValue(date), label: date.toLocaleDateString(undefined,{weekday:'short'})+' '+date.getDate() }); }
+  const header=[];
+for(let d=0; d<7*weeks; d++){
+  const date = addDays(startDate,d);
+  const dateStr = toDateValue(date);
+  header.push({
+    dateStr,
+    label: date.toLocaleDateString(undefined,{weekday:'short'})+' '+date.getDate(),
+    isWE: isWeekend(date)
+  });
+}
   // Helpers: TO aprobadas
   const isClosedDay = (dateStr) => isClosedBusinessDay2(dateStr, province, closeOnHolidays, closedExtraDates, customHolidaysByYear);
   const hasApprovedTO = (dateStr, personId) => {
@@ -1644,12 +1676,12 @@ function WeeklyView({ startDate, weeks, assignments, people, timeOffs, province,
         <thead className="sticky top-0 bg-white z-10">
           <tr>
             <th className="text-left p-1 border-b sticky left-0 z-10 bg-white">Persona</th>
-            {(header || []).map(h=> <th key={h.dateStr} className={`text-left p-1 border-b ${h.dateStr===todayStr ? "bg-amber-50 ring-1 ring-amber-300" : ""}`}>{h.label}</th>)}
+            {(header || []).map(h=> <th key={h.dateStr} className={`text-left p-1 border-b ${h.dateStr===todayStr ? "bg-amber-50 ring-1 ring-amber-300" : (h.isWE ? "bg-slate-50" : "")}`}>{h.label}</th>)}
           </tr>
         </thead>
 <tbody>
   {(people || []).map(p => (
-    <tr key={p.id}>
+    <tr key={p.id} className="odd:bg-slate-50/30 hover:bg-slate-100/30">
       {/* Columna Persona (nombre + color) */}
       <td className="p-1 align-top min-w-[160px] sticky left-0 bg-white z-10">
         <div className="inline-flex items-center gap-2">
@@ -1670,7 +1702,7 @@ function WeeklyView({ startDate, weeks, assignments, people, timeOffs, province,
         return (
                 <td
           key={h.dateStr || idx}
-          className={`p-1 align-top min-w-[120px] ${h.dateStr===todayStr ? "bg-amber-50/30" : ""}`}
+          className={`p-1 align-top min-w-[120px] ${h.dateStr===todayStr ? "bg-amber-50/30" : ""} ${h.isWE ? "bg-slate-50/50" : ""}`}
         >
           {cell.length===0 ? (
             <div className="rounded border bg-transparent px-1 py-0.5 inline-block">
@@ -2523,7 +2555,7 @@ function AuthenticatedApp(props){
           payroll, setPayroll,
           ASS, controls,
           exportCSV, exportJSON, importJSON, exportICS, exportPayroll,
-          up, upPerson, forceAssign, pillClass, density, setDensity } = props;
+          up, upPerson, forceAssign, pillClass, density, setDensity, personFilter, setPersonFilter } = props;
 
   // --- scope admin (robusto tras refactor) ---
   // Aliases seguros para modal del día (local o via props)
@@ -2704,6 +2736,15 @@ function AuthenticatedApp(props){
         <option value={4}>4 semanas</option>
         <option value={8}>8 semanas</option>
       </select>
+            <input
+        className="ml-2 border rounded px-2 py-1 text-sm"
+        placeholder="Filtrar persona…"
+        value={personFilter}
+        onChange={e=>setPersonFilter(e.target.value)}
+      />
+       <button onClick={clearVisibleOverrides} className="ml-2 px-2 py-1 rounded border text-sm">
+        Limpiar overrides (rango)
+      </button>
     </div>
     <button onClick={()=>window.print()} className="ml-2 px-3 py-1.5 rounded-lg border">Imprimir / PDF</button>
   </div>
@@ -2723,7 +2764,7 @@ function AuthenticatedApp(props){
     pillClass={pillClass}
     weeks={userWeeks}
     assignments={ASS}
-    people={state.people}
+    people={state.people.filter(p => !personFilter || p.name.toLowerCase().includes(personFilter.toLowerCase()))}
     timeOffs={state.timeOffs}
     province={state.province}
     closeOnHolidays={state.closeOnHolidays}
