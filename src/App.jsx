@@ -10,6 +10,20 @@ function renderEmptyCell(toType, isClosed){
       </span>
     );
   }
+  if (toType === 'libranza') {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[11px] bg-slate-50 text-slate-700">
+        🛌 Libranza
+      </span>
+    );
+  }
+  if (toType === 'viaje') {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[11px] bg-sky-50 text-sky-700">
+        ✈️ Viaje
+      </span>
+    );
+  }
   if (toType) {
     return (
       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded border text-[11px] bg-amber-50 text-amber-700">
@@ -222,6 +236,8 @@ function respectsRules({personId, date, shift, assignmentsSoFar, weeklyMinutes, 
 }
 
 // ===================== Planificador base =====================
+function idealText(color){ const c=(color||"#888888").replace("#",""); const r=parseInt(c.slice(0,2),16), g=parseInt(c.slice(2,4),16), b=parseInt(c.slice(4,6),16); const L=(0.2126*r+0.7152*g+0.0722*b)/255; return L>0.62?"#111":"#fff"; }
+
 function computeOffPersonId(people, w){ for(const p of people){ if(((w+(p.offset||0))%4)===3) return p.id; } return people[w%people.length].id; }
 function pickBestCandidate(pool,{isWeekend,weekdaysLoad,weekendLoad,priorityMap}){
   if(pool.length===0) return null;
@@ -238,6 +254,7 @@ function generateSchedule({ startDate, weeks, people, weekdayShifts, weekendShif
   const timeOffIndex = indexTimeOff(timeOffs, { province, consumeVacationOnHoliday, customHolidaysByYear });
   // --- Forzados procedentes de eventos con assigneeForced=true ---
   const forceByDay = new Map(); // ds -> { key -> personId }
+  const weekdayCounter = new Map(); // ds -> contador AM/PM por día
   for (const ev of (events||[])) {
     if (!ev.assigneeForced || !ev.assigneeId) continue;
     const days = expandRange(ev.start, ev.end);
@@ -245,17 +262,36 @@ function generateSchedule({ startDate, weeks, people, weekdayShifts, weekendShif
       const d   = parseDateValue(ds);
       const we  = (d.getDay()===0 || d.getDay()===6);
       const cnt = we ? (ev.weekendExtraSlots||0) : (ev.weekdaysExtraSlots||0);
-      const base = we ? weekendShift : refuerzoWeekdayShift;
-
       const bucket = forceByDay.get(ds) || {};
-      for (let j=0; j<cnt; j++){
-        // IMPORTANTE: etiqueta EXACTA como la que se usa al crear los slots
-        const baseLabel = we ? 'Refuerzo' : (refuerzoWeekdayShift.label || 'Refuerzo');
-        const label = `${baseLabel} ${j+1}`;
-        const key = `${base.start}-${base.end}-${label}`;
-        bucket[key] = ev.assigneeId;
+      if (we) {
+        // Fines de semana: igual que antes
+        for (let j=0; j<cnt; j++){
+          const base = weekendShift;
+          const label = `Refuerzo ${j+1}`;
+          const key = `${base.start}-${base.end}-${label}`;
+          bucket[key] = ev.assigneeId;
+        }
+      } else {
+        // Laborables: respeta weekdayRefuerzo + numeración por día
+        const wType = ev.weekdayRefuerzo || "auto";
+        const base =
+          (wType==="mañana" && (weekdayShifts?.[0])) ? weekdayShifts[0]
+        : (wType==="tarde"  && (weekdayShifts?.[1])) ? weekdayShifts[1]
+        : refuerzoWeekdayShift;
+
+        const baseLabel = (refuerzoWeekdayShift.label || "Refuerzo")
+                        + (wType==="mañana" ? " Mañana" : (wType==="tarde" ? " Tarde" : ""));
+        let wCounter = weekdayCounter.get(ds) || 0;
+        for (let j=0; j<cnt; j++){
+          wCounter++;
+          const label = `${baseLabel} ${wCounter}`;
+          const key = `${base.start}-${base.end}-${label}`;
+          bucket[key] = ev.assigneeId;
+        }
+        weekdayCounter.set(ds, wCounter);
       }
       forceByDay.set(ds, bucket);
+
     }
   }
 
@@ -324,13 +360,29 @@ let required = isWE? [{...weekendShift}] : [...weekdayShifts];
         // Para fines de semana, NO contar weekendExtraSlots de eventos de conciliación
         const extraWE = active.reduce((a,ev)=> a + ((ev.meta && ev.meta.source==='conciliacion') ? 0 : (ev.weekendExtraSlots||0)), 0);
         if(isWE && extraWE>0){ for(let i=0;i<extraWE;i++) required.push({...weekendShift,label:`Refuerzo ${i+1}`}); }
-        if(!isWE && extraW>0){
-          const baseLabel = refuerzoWeekdayShift.label || 'Refuerzo';
-          for(let i=0;i<extraW;i++){
-            required.push({...refuerzoWeekdayShift, label: `${baseLabel} ${i+1}`});
+        if(!isWE){
+          let wCounter = 0;
+          for (const ev of active){
+            const cntW = ev.weekdaysExtraSlots || 0;
+            if (cntW <= 0) continue;
+
+            const baseLabel = refuerzoWeekdayShift.label || "Refuerzo";
+            const choice = ev.weekdayRefuerzo || "auto";
+            const baseShift =
+              (choice==="mañana" && (weekdayShifts?.[0]))
+                ? { ...weekdayShifts[0], label: `${baseLabel} Mañana` }
+              : (choice==="tarde" && (weekdayShifts?.[1]))
+                ? { ...weekdayShifts[1], label: `${baseLabel} Tarde` }
+              : { ...refuerzoWeekdayShift, label: baseLabel };
+
+            for(let i=0;i<cntW;i++){
+              wCounter++;
+              required.push({ ...baseShift, label: `${baseShift.label} ${wCounter}`});
+            }
           }
         }
       }
+
       const dayAssignments=[]; const assigned=new Set();
       assignments[dateStr] = assignments[dateStr] || [];
 
@@ -393,11 +445,18 @@ let required = isWE? [{...weekendShift}] : [...weekdayShifts];
           }
         }
 
+        // Límite: máximo 1 turno/día por persona
+        if (chosen && assigned.has(chosen)) { chosen = null; }
+
         // Salvaguarda
         if (chosen && timeOffIndex.get(chosen)?.has(dateStr)) {
           chosen = null;
         }
-      
+        // Origen de la asignación
+        const origin = (overrides?.[dateStr]?.[key])
+          ? 'override'
+          : (forced ? 'forced' : 'auto');
+
         if(chosen){
           assigned.add(chosen);
           const mins = effectiveMinutes(shift);
@@ -405,9 +464,9 @@ let required = isWE? [{...weekendShift}] : [...weekdayShifts];
           weeklyDays.set(chosen,(weeklyDays.get(chosen)||0)+1);
           hoursPerPersonMin.set(chosen,(hoursPerPersonMin.get(chosen)||0)+mins);
           if(isWE) weekendLoad.set(chosen,(weekendLoad.get(chosen)||0)+1); else weekdaysLoad.set(chosen,(weekdaysLoad.get(chosen)||0)+1);
-          dayAssignments.push({shift, personId:chosen, conflict:false});
+          dayAssignments.push({shift, personId:chosen, conflict:false, origin});
         } else {
-          dayAssignments.push({shift, personId:null, conflict:true});
+          dayAssignments.push({shift, personId:null, conflict:true, origin:'pending'});
         }
       }
 
@@ -514,29 +573,53 @@ function scoreConciliacionBreakdown({assignments, people, startDate, weeks, conc
 function improveConciliation({
   assignments, people, startDate, weeks, overrides, conciliacion,
   timeOffs = [], province="Madrid", consumeVacationOnHoliday=false, customHolidaysByYear={},
-  events = [], weekendShift = {start:'10:00',end:'22:00'}, refuerzoWeekdayShift = {start:'12:00',end:'20:00', label:'Refuerzo'}
+  events = [], weekendShift = {start:'10:00',end:'22:00'}, refuerzoWeekdayShift = {start:'12:00',end:'20:00', label:'Refuerzo'},
+  weekdayShifts = [],
+  rules = {}
 }){
   conciliacion = safeConciliacion(conciliacion);
 
   // --- CLAVES FORZADAS DESDE EVENTOS (assigneeForced=true) ---
-  const forcedKeysByDay = new Map(); // ds -> Set(keys)
-  for (const ev of (events||[])) {
-    if (!ev.assigneeForced || !ev.assigneeId) continue;
-    const days = expandRange(ev.start, ev.end);
-    for (const ds of days) {
-      const d = parseDateValue(ds);
-      const we = (d.getDay()===0 || d.getDay()===6);
-      const cnt = we ? (ev.weekendExtraSlots||0) : (ev.weekdaysExtraSlots||0);
-      const base = we ? weekendShift : refuerzoWeekdayShift;
-      const set = forcedKeysByDay.get(ds) || new Set();
-      for (let j=0; j<cnt; j++){
-        const baseLabel = we ? 'Refuerzo' : (refuerzoWeekdayShift.label || 'Refuerzo');
-        const label = `${baseLabel} ${j+1}`;
+const forcedKeysByDay = new Map(); // ds -> Set(keys)
+const weekdayCounterFK = new Map(); // ds -> n (numeración por día)
+
+for (const ev of (events||[])) {
+  if (!ev.assigneeForced || !ev.assigneeId) continue;
+  const days = expandRange(ev.start, ev.end);
+  for (const ds of days) {
+    const d  = parseDateValue(ds);
+    const we = (d.getDay()===0 || d.getDay()===6);
+    const cnt = we ? (ev.weekendExtraSlots||0) : (ev.weekdaysExtraSlots||0);
+
+    const set = forcedKeysByDay.get(ds) || new Set();
+
+    if (we) {
+      const base = weekendShift;
+      for (let j=0; j<cnt; j++) {
+        const label = `Refuerzo ${j+1}`;
         set.add(`${base.start}-${base.end}-${label}`);
       }
-      forcedKeysByDay.set(ds, set);
+    } else {
+      // L–V: respeta weekdayRefuerzo + numeración por día (igual que generateSchedule)
+      const wType = ev.weekdayRefuerzo || 'auto';
+      const base =
+        (wType==='mañana' && (weekdayShifts?.[0])) ? weekdayShifts[0] :
+        (wType==='tarde'  && (weekdayShifts?.[1])) ? weekdayShifts[1] :
+        refuerzoWeekdayShift;
+
+      let wCounter = weekdayCounterFK.get(ds) || 0;
+      const baseLabel = (refuerzoWeekdayShift.label || 'Refuerzo')
+                      + (wType==='mañana' ? ' Mañana' : (wType==='tarde' ? ' Tarde' : ''));
+      for (let j=0; j<cnt; j++) {
+        wCounter++;
+        const label = `${baseLabel} ${wCounter}`;
+        set.add(`${base.start}-${base.end}-${label}`);
+      }
+      weekdayCounterFK.set(ds, wCounter);
     }
+    forcedKeysByDay.set(ds, set);
   }
+}
 
   const best = JSON.parse(JSON.stringify(assignments));
   const indexTO = indexTimeOff(timeOffs, { province, consumeVacationOnHoliday, customHolidaysByYear });
@@ -561,6 +644,17 @@ function improveConciliation({
           if (p2.id === A.personId) continue;
           if (indexTO.get(p2.id)?.has(dateStr)) continue;
           if (usedToday.has(p2.id)) continue;
+          // Respetar tope semanal duro (maxDaysPerWeek) en swaps
+          if (rules?.maxDaysPerWeek) {
+            const weekStart = addDays(startDate, w*7);
+            let daysCount = 0;
+            for (let dd = 0; dd < 7; dd++) {
+              const ds = toDateValue(addDays(weekStart, dd));
+              if ((best[ds] || []).some(x => x.personId === p2.id)) daysCount++;
+            }
+            // si ya está al tope, no proponerle otro día esta semana
+            if (daysCount >= rules.maxDaysPerWeek) continue;
+          }
           const oldPid = A.personId;
           A.personId = p2.id;
           const newScore = scoreConciliacion({assignments:best, people, startDate, weeks, conciliacion});
@@ -772,7 +866,6 @@ export default function App(){
     catch { return { token:"", user:null }; }
   });
   useEffect(()=>{ try{ localStorage.setItem("turnos_auth", JSON.stringify(auth)); }catch{} },[auth]);
-
   const [loginForm, setLoginForm] = useState({ email:"", password:"" });
   async function doLogin(e){ e?.preventDefault();
     const data = await api("/auth/login",{ method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(loginForm) });
@@ -940,10 +1033,12 @@ const assignmentsImproved = useMemo(()=> improveConciliation({
   customHolidaysByYear: state.customHolidaysByYear,
   events: state.events,
   weekendShift: state.weekendShift,
-  refuerzoWeekdayShift: state.refuerzoWeekdayShift
+  refuerzoWeekdayShift: state.refuerzoWeekdayShift,
+  weekdayShifts: state.weekdayShifts,
+  rules: state.rules,
 }), [assignments, state.people, startDate, state.weeks, state.overrides, state.conciliacion,
     state.timeOffs, state.province, state.consumeVacationOnHoliday, state.customHolidaysByYear,
-    state.events, state.weekendShift, state.refuerzoWeekdayShift]);
+    state.events, state.weekendShift, state.refuerzoWeekdayShift, state.weekdayShifts]);
 
   // Usar ASS para pintar/expotar
   const ASS = state.applyConciliation ? assignmentsImproved : assignments;
@@ -962,6 +1057,19 @@ const assignmentsImproved = useMemo(()=> improveConciliation({
   const [payroll,setPayroll]=useState({ from: state.startDate, to: toDateValue(addDays(startDate, state.weeks*7-1)) });
   const [weekIndex,setWeekIndex]=useState(0);
   const [userWeeks, setUserWeeks] = useState(1);
+  const [icsPerson, setIcsPerson] = useState(state.people[0]?.id || "");
+  const [personFilter, setPersonFilter] = useState("");
+  const [density, setDensity] = useState("normal");
+  useEffect(() => {
+  if (userWeeks >= 4) setDensity('compact');
+  else if (userWeeks === 1) setDensity('spacious');
+  else setDensity('normal');
+  }, [userWeeks]);
+  const pillClass = density==="compact"
+    ? "px-2 py-1 min-h-[40px] text-[11px]"
+    : density==="spacious"
+    ? "px-3 py-2 min-h-[56px] text-[13px]"
+    : "px-2.5 py-1.5 min-h-[52px] text-[12px]";
 function goToday(){
     const t = startOfWeekMonday(new Date());
     const idx = Math.max(0, Math.min(state.weeks-1, Math.floor((t - startDate)/(7*24*3600*1000))));
@@ -1115,6 +1223,169 @@ if (!auth.user || !auth.token) {
     a.click();
   }
 
+  function clearVisibleOverrides(){
+  const from = weeklyStart;
+  const to   = addDays(weeklyStart, userWeeks*7 - 1);
+  const next = structuredClone(state.overrides || {});
+  const keys = Object.keys(next);
+  for (const ds of keys){
+    const d = parseDateValue(ds);
+    if (d >= from && d <= to) delete next[ds];
+  }
+  setState(prev => ({ ...prev, overrides: next }));
+  showToast("Overrides del rango visible eliminados");
+  }
+
+function duplicateVisibleToNextWeek(){
+  const from = weeklyStart;
+  const to   = addDays(weeklyStart, userWeeks*7 - 1);
+  const periodEnd = addDays(startDate, state.weeks*7 - 1);
+
+  const out = structuredClone(state.overrides || {});
+  let copiados = 0, saltados = 0;
+
+  for (let d = new Date(from); d <= to; d = addDays(d, 1)) {
+    const srcDs = toDateValue(d);
+    const tgtDs = toDateValue(addDays(d, 7));
+    if (parseDateValue(tgtDs) > periodEnd) { saltados++; continue; }
+
+    const cell = (ASS[srcDs] || []);
+    if (!cell.length) { continue; }
+
+    for (let i = 0; i < cell.length; i++) {
+      const a = cell[i];
+      if (!a.personId) continue; // no copiar vacíos
+      const key = `${a.shift.start}-${a.shift.end}-${a.shift.label || `T${i+1}`}`;
+      out[tgtDs] = out[tgtDs] || {};
+      if (out[tgtDs][key] != null) { // ya había override → no pisar
+        saltados++;
+        continue;
+      }
+      out[tgtDs][key] = a.personId;
+      copiados++;
+    }
+  }
+
+  setState(prev => ({ ...prev, overrides: out }));
+  showToast(`Duplicado seguro: ${copiados} asignaciones · ${saltados} no copiadas`);
+}
+
+function undoLastOverride(){
+  const audit = state.audit || [];
+  const last = [...audit].reverse().find(e => e?.action === 'override' && e?.dateStr);
+  if (!last) { showToast('No hay overrides recientes'); return; }
+  const { dateStr, assignmentIndex } = last;
+  const a = ASS[dateStr]?.[assignmentIndex];
+  if (!a) { showToast('No encuentro esa asignación'); return; }
+
+  const key = `${a.shift.start}-${a.shift.end}-${a.shift.label || `T${assignmentIndex+1}`}`;
+  const next = structuredClone(state.overrides || {});
+  if (next[dateStr]) {
+    delete next[dateStr][key];
+    if (Object.keys(next[dateStr]).length === 0) delete next[dateStr];
+  }
+  setState(prev => ({ ...prev, overrides: next }));
+  showToast('Override deshecho');
+}
+
+// Asignación rápida desde calendario.
+// - Si shiftIndex !== null => override en ese slot.
+// - Si shiftIndex === null  => crea un refuerzo ese día y lo asigna.
+function quickAssign(dateStr, shiftIndex, personId){
+  if (!personId) return;
+
+  
+ // Barreras: no asignar si la persona no está disponible o ya trabaja ese día
+    const indexTO = indexTimeOff(state.timeOffs, {
+      province: state.province,
+      consumeVacationOnHoliday: state.consumeVacationOnHoliday,
+      customHolidaysByYear: state.customHolidaysByYear
+    });
+    if (indexTO.get(personId)?.has(dateStr)) {
+      showToast('No disponible: vacaciones/libranza/viaje');
+      return;
+    }
+    if ((ASS[dateStr]||[]).some(a => a.personId === personId)) {
+      showToast('Ya tiene turno ese día');
+      return;
+    }
+
+  // 1) Si hay slot → override directo
+  if (shiftIndex !== null) {
+    forceAssign(dateStr, shiftIndex, personId);
+    // Avisos de horas:
+    const date = parseDateValue(dateStr);
+    const cell = ASS[dateStr] || [];
+    const a = cell[shiftIndex];
+    if (a?.shift) checkHoursAndNotify({ date, personId, shift: a.shift });
+    return;
+  }
+
+  // 2) Si no hay slot → crear refuerzo + forzar asignación
+  const d = parseDateValue(dateStr);
+  const isWE = (d.getDay()===0 || d.getDay()===6);
+  const ev = {
+    label: 'Refuerzo manual',
+    start: dateStr,
+    end: dateStr,
+    weekdaysExtraSlots: isWE ? 0 : 1,
+    weekendExtraSlots:  isWE ? 1 : 0,
+    assigneeId: personId,
+    assigneeForced: true,
+    weekdayRefuerzo: 'mañana'
+  };
+  setState(prev => ({ ...prev, events: [ ...(prev.events||[]), ev ] }));
+  showToast(`Refuerzo creado en ${dateStr} y asignado`);
+
+  // Intento de aviso de horas con el turno de refuerzo por defecto
+  const shift = isWE ? state.weekendShift : state.refuerzoWeekdayShift;
+  checkHoursAndNotify({ date: d, personId, shift });
+}
+
+// Cálculo y avisos de horas diarias/semanales y balance "rápido".
+function checkHoursAndNotify({ date, personId, shift }){
+  try{
+    const dateStr = toDateValue(date);
+    const mins = effectiveMinutes(shift);
+    const rules = state.rules || {};
+    let dayMins = 0, weekMins = 0, weekDays = 0;
+
+    // Día
+    for(const a of (ASS[dateStr]||[])){
+      if (a.personId === personId) dayMins += effectiveMinutes(a.shift);
+    }
+    // Semana
+    const ws = startOfWeekMonday(date);
+    for(let i=0;i<7;i++){
+      const ds = toDateValue(addDays(ws,i));
+      for(const a of (ASS[ds]||[])){
+        if (a.personId === personId){
+          weekMins += effectiveMinutes(a.shift);
+          weekDays++;
+        }
+      }
+    }
+
+    const afterDay  = dayMins + mins;
+    const afterWeek = weekMins + mins;
+    const hitsDay   = rules.maxDailyHours && (afterDay > rules.maxDailyHours*60);
+    const hitsWeek  = rules.maxWeeklyHours && (afterWeek > rules.maxWeeklyHours*60);
+    const hitsDaysW = rules.maxDaysPerWeek && (weekDays >= rules.maxDaysPerWeek);
+
+    // Balance simple vs media de "remaining" (controles)
+    const meRow = controls.rows.find(r=>r.id===personId);
+    const avgRemaining = controls.rows.reduce((a,r)=>a+(r.remaining||0),0) / Math.max(1,controls.rows.length);
+    const skew = meRow ? (meRow.remaining - avgRemaining) : 0;
+
+    let msg = `Asignado OK · ${Math.round(mins/60)}h`;
+    if (hitsDay)  msg += ` · ⚠ supera horas/día`;
+    if (hitsWeek) msg += ` · ⚠ supera horas/semana`;
+    if (hitsDaysW) msg += ` · ⚠ supera días/semana`;
+    if (meRow) msg += ` · balance ${skew>=0?'+':''}${skew.toFixed(0)}h vs media`;
+    showToast(msg);
+  }catch{}
+}
+
 return (
   <AuthenticatedApp
   auth={auth}
@@ -1122,10 +1393,9 @@ return (
   ui={ui}
   setUI={setUI}
   showToast={showToast}
-  
   modalDay={modalDay}
   setModalDay={setModalDay}
-state={state}
+  state={state}
   setState={setState}
   cloud={cloud}
   setCloud={setCloud}
@@ -1149,6 +1419,15 @@ state={state}
   importJSON={importJSON}
   exportICS={exportICS}
   exportPayroll={exportPayroll}
+  clearVisibleOverrides={clearVisibleOverrides}
+  duplicateVisibleToNextWeek={duplicateVisibleToNextWeek}
+  undoLastOverride={undoLastOverride}
+  onQuickAssign={quickAssign}
+  pillClass={pillClass}
+  density={density}
+  setDensity={setDensity}
+  personFilter={personFilter}
+  setPersonFilter={setPersonFilter}
   up={up}
   upPerson={upPerson}
   forceAssign={forceAssign}
@@ -1296,7 +1575,17 @@ function ReglasPanel({ state, up }){
           />
         </div>
 
-        <div className="col-span-3">
+        
+  <div className="col-span-3">
+    <label className="text-xs">Máx días/semana</label>
+    <input
+      type="number" min={0} max={7}
+      value={state.rules.maxDaysPerWeek ?? 0}
+      onChange={(e)=>up(['rules','maxDaysPerWeek'], Math.max(0, Number(e.target.value)||0))}
+      className="w-full px-2 py-1 rounded border"
+    />
+  </div>
+<div className="col-span-3">
           <label className="text-xs">Descanso mínimo (h)</label>
           <input
             type="number" min={0} max={24}
@@ -1476,7 +1765,7 @@ function CustomHolidaysPanel({ state, up }){
 }
 
 
-function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmin, onQuickAssign, province, closeOnHolidays, closedExtraDates, customHolidaysByYear }){ const todayStr = toDateValue(new Date());
+function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmin, onQuickAssign, province, closeOnHolidays, closedExtraDates, customHolidaysByYear, pillClass }){ const todayStr = toDateValue(new Date());
   const days=[]; for(let w=0;w<weeks;w++) for(let d=0;d<7;d++) days.push(addDays(startDate, w*7+d));
   const personMap=new Map(people.map(p=>[p.id,p]));
   return (
@@ -1487,7 +1776,7 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
           const sorted=[...cell].sort((a,b)=> minutesFromHHMM(a.shift.start)-minutesFromHHMM(b.shift.start));
           const isClosed = isClosedBusinessDay2(dateStr, province, closeOnHolidays, closedExtraDates, customHolidaysByYear);
           return (
-            <div key={dateStr} className={`rounded-2xl border p-2 ${isWE? 'bg-transparent':'bg-transparent'} ${hasConflict? 'border-red-400':'border-slate-200'}`}>
+            <div key={dateStr} className={`rounded-2xl border p-2 ${isWE? 'bg-transparent':'bg-transparent'} ${hasConflict? 'border-red-400':'border-slate-200'} ${dateStr===todayStr ? 'ring-2 ring-amber-400' : ''}`}>
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-baseline gap-2">
                   <span className="text-lg font-bold leading-none">{day}</span>
@@ -1508,24 +1797,43 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
                   </div>
                 )}
                 {(isClosed? [] : sorted).map((c,i)=>{ const p=c.personId?personMap.get(c.personId):null; const span=formatSpan(c.shift.start,c.shift.end); const dur = effectiveMinutes(c.shift)/60; const lbl=(c.shift.label|| (isWE?'Finde':`T${i+1}`)); const emblem = /mañana/i.test(lbl)? '☀️' : /tarde/i.test(lbl)? '🌙' : isWE? '🗓️' : '➕'; return (
-                  <div
-                    key={i}
-                    className={`rounded-xl px-3 py-2 min-h-[52px] border text-[13px] leading-tight flex flex-col gap-1 ${c.conflict? 'border-red-300 bg-red-50':'border-slate-200'}`}
-                    title={`${lbl} · ${span} (${dur}h)`}
-                  >
+                    <div
+                      key={i}
+                      className={`rounded-xl ${pillClass} border leading-tight flex flex-col items-start gap-1 w-full ${c.conflict? 'border-red-300 bg-red-50':'border-slate-200'}`}
+                      title={`${lbl} · ${span} (${dur}h)`}
+                    >
+                {c.personId && c.origin && (
+                    <span className={`text-[10px] px-1 py-0.5 rounded border self-start ${
+                      c.origin==='override' ? 'bg-amber-50 border-amber-300 text-amber-700' :
+                      c.origin==='forced'   ? 'bg-emerald-50 border-emerald-300 text-emerald-700' :
+                                              'bg-slate-50 border-slate-200 text-slate-600'
+                    }`}>
+                      {c.origin==='override' ? 'Override' : c.origin==='forced' ? 'Forzado' : 'Auto'}
+                    </span>
+                  )}
                     <div className="whitespace-normal break-words">
                       <span className="text-[12px] mr-1 rounded px-1 py-0.5 border bg-transparent">{emblem} {lbl}</span>
                       <span className="text-slate-700">{span}</span>
                       <span className="text-[12px] ml-1 text-slate-600">({dur}h{c.shift.lunchMinutes ? " · comida "+(c.shift.lunchMinutes)+"m" : ""})</span>
                     </div>
                     <div className="flex items-center gap-1">
-                      {p
-                        ? (<span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-lg" style={{background:`${p.color}20`, border:`1px solid ${p.color}55`}}>
-                            <span className="h-2.5 w-2.5 rounded" style={{background:p.color}}/>
-                            <span className="text-xs">{p.name}</span>
-                          </span>)
-                        : (<span className="text-red-600 text-sm">⚠ Falta asignar</span>)
-                      }
+                        {isAdmin && (
+                          <details className="relative inline-block ml-1">
+                            <summary className="cursor-pointer select-none text-[12px]" title="Cambiar persona (override)">👤</summary>
+                            <div className="absolute z-20 mt-1 bg-white border rounded shadow p-1">
+                              <select
+                                className="border rounded px-1 py-0.5 text-[11px]"
+                                value={c.personId || ''}
+                                onChange={e => onQuickAssign(dateStr, i, e.target.value || null)}
+                              >
+                                <option value="">—</option>
+                                {(people || []).map(pp => (
+                                  <option key={pp.id} value={pp.id}>{pp.name}</option>
+                                ))}
+                              </select>
+                            </div>
+                          </details>
+                        )}
                     </div>
                   </div>
                 );})}
@@ -1537,7 +1845,7 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
     </div>
   );
 }
-function PrettyAssignment({ a, h, p, i }){
+function PrettyAssignment({ a, h, p, i, pillClass }){
   const span = `${a.shift.start}–${a.shift.end}`;
   const dur  = (effectiveMinutes(a.shift)/60);
   const lbl  = a.shift.label || `T${i+1}`;
@@ -1553,8 +1861,8 @@ function PrettyAssignment({ a, h, p, i }){
 
   return (
 <div
-  className={`rounded-xl px-3 py-2 min-h-[52px] border text-[13px] leading-tight mb-1 ${a.conflict ? 'border-red-300 bg-red-50' : 'border-slate-200 bg-transparent'}`}
-  style={a.conflict ? {} : { background:`${color}20`, border:`1px solid ${color}55` }}
+  className={`rounded-xl ${pillClass} border leading-tight mb-1 flex flex-col items-start w-full ${a.conflict ? 'border-red-300 bg-red-50' : 'border-slate-200 bg-transparent'}`}
+  style={a.conflict ? {} : { background:`${color}08`, border:`1px solid ${color}55` }}
   title={`${lbl} · ${span} (${dur}h)`}
 >
   <div className="flex flex-col gap-1">
@@ -1567,22 +1875,54 @@ function PrettyAssignment({ a, h, p, i }){
         ({dur}h{a.shift.lunchMinutes ? ` · comida ${a.shift.lunchMinutes}m` : ''})
       </span>
     </div>
-    <span
-      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-lg self-start"
-      style={{background:`${color}20`, border:`1px solid ${color}55`}}
-    >
-      <span className="h-2.5 w-2.5 rounded" style={{background:color}}/>
-      <span className="text-xs">{p?.name||''}</span>
-    </span>
+      <span
+        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-lg self-start text-slate-900"
+        style={{background:`${color}08`, border:`1px solid ${color}55`}}
+      >
+        <span className="h-2.5 w-2.5 rounded" style={{background:color}}/>
+        <span className="text-xs">{p?.name||''}</span>
+      </span>
+
+      {a.origin && (
+        <span className={`text-[10px] px-1 py-0.5 rounded border self-start mt-1 ${
+          a.origin==='override' ? 'bg-amber-50 border-amber-300 text-amber-700' :
+          a.origin==='forced'   ? 'bg-emerald-50 border-emerald-300 text-emerald-700' :
+                                  'bg-slate-50 border-slate-200 text-slate-600'
+        }`}>
+          {a.origin==='override' ? 'Override' : a.origin==='forced' ? 'Forzado' : 'Auto'}
+        </span>
+      )}
   </div>
 </div>
 
   );
 }
-function WeeklyView({ startDate, weeks, assignments, people, timeOffs, province, closeOnHolidays, closedExtraDates, customHolidaysByYear, consumeVacationOnHoliday }){
-  const header=[]; for(let d=0; d<7*weeks; d++){ const date=addDays(startDate,d); header.push({ dateStr:toDateValue(date), label: date.toLocaleDateString(undefined,{weekday:'short'})+' '+date.getDate() }); }
+function dayCounts(assignments, ds){
+  const cell = assignments[ds] || [];
+  return {
+    total: cell.length,
+    assigned: cell.filter(c=>!!c.personId).length,
+    conflict: cell.some(c=>c.conflict)
+  };
+}
+function WeeklyView({ startDate, weeks, assignments, people, timeOffs, province, closeOnHolidays, closedExtraDates, customHolidaysByYear, consumeVacationOnHoliday, pillClass, isAdmin, onQuickAssign }){ const todayStr = toDateValue(new Date());
+  const header=[];
+for(let d=0; d<7*weeks; d++){
+  const date = addDays(startDate,d);
+  const dateStr = toDateValue(date);
+  header.push({
+    dateStr,
+    label: date.toLocaleDateString(undefined,{weekday:'short'})+' '+date.getDate(),
+    isWE: isWeekend(date)
+  });
+}
   // Helpers: TO aprobadas
   const isClosedDay = (dateStr) => isClosedBusinessDay2(dateStr, province, closeOnHolidays, closedExtraDates, customHolidaysByYear);
+  const indexTO = indexTimeOff(timeOffs, {
+  province,
+  consumeVacationOnHoliday,
+  customHolidaysByYear
+});
   const hasApprovedTO = (dateStr, personId) => {
     const d = parseDateValue(dateStr);
     const dow = d.getDay();
@@ -1601,19 +1941,37 @@ function WeeklyView({ startDate, weeks, assignments, people, timeOffs, province,
   return hit ? hit.type : null;
 };
   return (
-    <div className="overflow-x-auto print-only:block">
-      <table className="w-full text-sm border-collapse table-fixed">
-        <thead>
+    <div className={`${weeks>=2 ? 'overflow-x-auto' : ''} print:block`}>
+      <table className="text-sm border-collapse table-auto" style={{ minWidth: (weeks === 1) ? '100%' : `${(weeks*7 + 1) * 120}px` }}>
+        <thead className="sticky top-0 bg-white z-10">
           <tr>
-            <th className="text-left p-1 border-b">Persona</th>
-            {(header || []).map(h=> <th key={h.dateStr} className="text-left p-1 border-b">{h.label}</th>)}
+            <th className={`text-left p-1 border-b sticky left-0 z-10 bg-white ${weeks<=2 ? 'min-w-[96px]' : 'min-w-[140px]'}`}>Persona</th>
+            {(header || []).map(h => {
+                const cell = (assignments[h.dateStr] || []);
+                const total = cell.length;
+                const assigned = cell.filter(c => !!c.personId).length;
+                const hasC = cell.some(c => c.conflict);
+                const badgeClass = hasC
+                  ? "text-rose-700 border-rose-300 bg-rose-50"
+                  : (assigned < total ? "text-amber-700 border-amber-300 bg-amber-50" : "text-slate-600 border-slate-200 bg-transparent");
+                return (
+                  <th
+                    key={h.dateStr}
+                    className={`text-left p-1 ${weeks>=2 ? 'min-w-[120px]' : ''} border-b border-l border-slate-100 ${h.dateStr===todayStr ? "bg-amber-50 ring-1 ring-amber-300" : (h.isWE ? "bg-slate-50" : "")}`}>
+                    <div className={"flex items-center " + (weeks<=2 ? 'gap-1' : 'gap-2')}>
+                      <span>{h.label}</span>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded border ${badgeClass}`}>{assigned}/{total}</span>
+                    </div>
+                  </th>
+                );
+              })}
           </tr>
         </thead>
 <tbody>
   {(people || []).map(p => (
-    <tr key={p.id}>
+    <tr key={p.id} className="odd:bg-slate-50/30 hover:bg-slate-100/30">
       {/* Columna Persona (nombre + color) */}
-      <td className="p-1 align-top">
+      <td className={`p-1 align-top sticky left-0 bg-white z-10 ${weeks<=2 ? 'min-w-[96px]' : 'min-w-[140px]'}`}>
         <div className="inline-flex items-center gap-2">
           <span className="h-3 w-3 rounded" style={{ background: p.color }} />
           <span className="font-medium">{p.name}</span>
@@ -1625,18 +1983,80 @@ function WeeklyView({ startDate, weeks, assignments, people, timeOffs, province,
         const cell = (assignments[h.dateStr] || [])
           .filter(c => c.personId === p.id)
           .sort((a, b) => minutesFromHHMM(a.shift.start) - minutesFromHHMM(b.shift.start));
-
         // Tipo de “Time Off” y festivo para celda vacía
-        const toType = (typeof getTOType === 'function') ? getTOType(h.dateStr, p.id) : null;
+        // Tipo de “Time Off” (aprobado) y festivo
+        let toType = (typeof getTOType === 'function') ? getTOType(h.dateStr, p.id) : null;
         const isFest = (typeof isClosedDay === 'function') ? isClosedDay(h.dateStr) : false;
+
+        // OFF semanal con política (X-J-V y adyacentes) → marcar "Libranza" si hoy procede
+        if (!toType) {
+          const wIdx = weekIndexFromDate(startDate, h.dateStr);
+          const offId = computeOffPersonId(people, wIdx);
+
+          // Lee la política que ya inyectas en window
+          const OFFP = (typeof window !== "undefined" && window.__OFF_POLICY__) ? window.__OFF_POLICY__ : {};
+          const limitDays = (OFFP.limitOffDays && OFFP.limitOffDays.length) ? OFFP.limitOffDays : [3,4,5];
+
+          // ¿La semana (o adyacentes) tienen vacaciones?
+          const dayDate = parseDateValue(h.dateStr);
+          const ws = addDays(startDate, wIdx*7), we = addDays(ws, 6);
+          const overlaps = (to) => !(parseDateValue(to.end) < ws || parseDateValue(to.start) > we);
+          const VAC = (timeOffs||[]).filter(t => t.type==='vacaciones' && t.status!=='denegada');
+          const hasVac = !!(OFFP.enableLimitOffOnVacationWeek && VAC.some(overlaps));
+          let adjVac = false;
+          if (OFFP.enableBlockFullOffAdjacentWeeks) {
+            const win = Math.max(1, OFFP.adjacencyWindow || 1);
+            for (let k=1; k<=win && !adjVac; k++){
+              const prevWs = addDays(startDate, (wIdx-k)*7), prevWe = addDays(prevWs, 6);
+              const nextWs = addDays(startDate, (wIdx+k)*7), nextWe = addDays(nextWs, 6);
+              const ovPrev = VAC.some(to => !(parseDateValue(to.end) < prevWs || parseDateValue(to.start) > prevWe));
+              const ovNext = VAC.some(to => !(parseDateValue(to.end) < nextWs || parseDateValue(to.start) > nextWe));
+              if (ovPrev || ovNext) adjVac = true;
+            }
+          }
+          const offLimitedThisWeek = !!(hasVac || adjVac);
+          const dayIdx = dayDate.getDay(); // 0..6
+          const offAllowedToday = offLimitedThisWeek ? limitDays.includes(dayIdx) : true;
+
+          if (p.id === offId && offAllowedToday) {
+            toType = 'libranza';
+          }
+        }
+
         return (
-        <td key={h.dateStr || idx} className="p-1 align-top">
-          {cell.length===0 ? (
-            <div className="rounded border bg-transparent px-1 py-0.5 inline-block">
-              {renderEmptyCell(toType, isFest)}
-            </div>
-          ) : (
-            cell.map((a,i)=>(<PrettyAssignment a={a} h={h} p={p} i={i} />))
+                <td
+          key={h.dateStr || idx}
+          className={`p-1 align-top ${weeks>=2 ? 'min-w-[120px]' : ''} border-l border-slate-100 ${h.dateStr===todayStr ? "bg-amber-50/30" : ""} ${h.isWE ? "bg-slate-50/50" : ""}`} >
+            {cell.length===0 ? (
+              <div className="rounded border bg-transparent px-1 py-0.5 inline-flex items-center gap-1">
+                {renderEmptyCell(toType, isFest)}
+                {isAdmin && !isFest && (
+                  <details className="relative inline-block">
+                    <summary className="cursor-pointer select-none text-[12px]" title="Crear refuerzo y asignar">👤</summary>
+                    <div className="absolute z-20 mt-1 bg-white border rounded shadow p-1">
+                      <select
+                        className="border rounded px-1 py-0.5 text-[11px]"
+                        value=""
+                        onChange={e => { if (e.target.value) onQuickAssign(h.dateStr, null, e.target.value); }}
+                      >
+                        <option value="">Asignar…</option>
+                        {(people || []).map(pp => (
+                          <option
+                            key={pp.id}
+                            value={pp.id}
+                            disabled={!!indexTO.get(pp.id)?.has(h.dateStr)}
+                            title={indexTO.get(pp.id)?.has(h.dateStr) ? 'No disponible (vacaciones/libranza/viaje)' : ''}
+                          >
+                            {pp.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </details>
+                )}
+              </div>
+            ) : ( 
+            cell.map((a,i)=>(<PrettyAssignment a={a} h={h} p={p} i={i} pillClass={pillClass} />))
           )}
         </td>
         );
@@ -2066,7 +2486,7 @@ function ResumenPanel({ controls, annualTarget, onExportICS }){
   );
 }
 // ===== Modal Día =====
-function DayModal({ dateStr, date, assignments, people, onOverride, onClose, isAdmin }){
+function DayModal({ dateStr, date, assignments, people, onOverride, onClose, isAdmin, onQuickAssign }){
   const pmap=new Map(people.map(p=>[p.id,p]));
   const sorted=assignments.map(x=>x); // ya vienen ordenados por ASS
   return (
@@ -2087,7 +2507,17 @@ function DayModal({ dateStr, date, assignments, people, onOverride, onClose, isA
                 <div className="flex items-center justify-between gap-3">
                   <div className="text-sm">
                     <div className="font-medium">{c.shift.label||`Turno ${i+1}`} · {span} <span className="text-slate-500 font-normal">({dur}h{c.shift.lunchMinutes ? " · comida " + (c.shift.lunchMinutes) + "m" : ""})</span></div>
-                    <div className="text-xs text-slate-500">{c.conflict? '⚠ Falta asignar':'Asignado'}</div>
+                    <div className="text-xs">
+                      {c.conflict
+                        ? <span className="text-rose-700">⚠ Falta asignar</span>
+                        : <>
+                            <span className="text-slate-500">Asignado</span>
+                            {c.origin==='override' && <span className="ml-2 text-amber-700">· Override</span>}
+                            {c.origin==='forced'   && <span className="ml-2 text-emerald-700">· Forzado</span>}
+                            {(!c.origin || c.origin==='auto') && <span className="ml-2 text-slate-600">· Auto</span>}
+                          </>
+                      }
+                    </div>
                   </div>
                   <div className="flex items-center gap-2">
                     <select
@@ -2099,6 +2529,16 @@ function DayModal({ dateStr, date, assignments, people, onOverride, onClose, isA
                       <option value="">— Sin override —</option>
                       {(people || []).map(pp=> <option key={pp.id} value={pp.id}>{pp.name}</option>)}
                     </select>
+                    {isAdmin && (
+                      <select
+                        className="border rounded px-1 py-0.5 text-[11px]"
+                        value={c.personId || ''}
+                        onChange={e => onQuickAssign(dateStr, i, e.target.value || null)}
+                      >
+                        <option value="">—</option>
+                        {(people || []).map(pp => <option key={pp.id} value={pp.id}>{pp.name}</option>)}
+                      </select>
+                    )}
                     {p && <span className="inline-flex items-center gap-1 text-sm">
                       <span className="h-3 w-3 rounded" style={{background:p.color}}/> {p.name}
                     </span>}
@@ -2471,7 +2911,6 @@ function VacationPolicyPanel({ state, up }){
   );
 }
 
-
 function AuthenticatedApp(props){
   const { auth, setAuth, ui, setUI, showToast,
           state, setState,
@@ -2482,7 +2921,67 @@ function AuthenticatedApp(props){
           payroll, setPayroll,
           ASS, controls,
           exportCSV, exportJSON, importJSON, exportICS, exportPayroll,
-          up, upPerson, forceAssign } = props;
+          up, upPerson, forceAssign, pillClass, density, setDensity,
+          personFilter, setPersonFilter, clearVisibleOverrides, duplicateVisibleToNextWeek, undoLastOverride, onQuickAssign } = props;
+
+  // === AUDITORÍA DE PRESENCIA (online) ===
+  const [online, setOnline] = useState({ users: [], at: null });
+
+  // Heartbeat cada 60s
+useEffect(() => {
+  if (!auth?.user || !auth?.token) return;
+
+  let stop = false, t;
+
+  const beat = async () => {
+    try {
+      // intento normal con keepalive
+      await fetch('/auth/heartbeat', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${auth.token}` },
+        keepalive: true,            // ← importante para pestañas en background
+      });
+    } catch {}
+    if (!stop) t = setTimeout(beat, 25_000); // ← cada 25s
+  };
+
+  // 1ª marca rápida
+  beat();
+
+  // Marca al volver a foco
+  const onVis = () => { if (document.visibilityState === 'visible') beat(); };
+  document.addEventListener('visibilitychange', onVis);
+
+  // Marca al cerrar/navegar (no esperes respuesta)
+  const onUnload = () => {
+    try {
+      const blob = new Blob([], { type: 'application/octet-stream' });
+      navigator.sendBeacon('/auth/heartbeat', blob);
+    } catch {}
+  };
+  window.addEventListener('pagehide', onUnload);
+  window.addEventListener('beforeunload', onUnload);
+
+  return () => {
+    stop = true; clearTimeout(t);
+    document.removeEventListener('visibilitychange', onVis);
+    window.removeEventListener('pagehide', onUnload);
+    window.removeEventListener('beforeunload', onUnload);
+  };
+}, [auth?.user, auth?.token]);
+
+  // Pull de usuarios online cada 10s
+  useEffect(() => {
+    if (!auth?.user || !auth?.token) return;
+    const id = setInterval(async () => {
+      try {
+        const d = await api('/auth/online', { method:'GET' }, auth.token);
+        setOnline(d || { users: [], at: null });
+      } catch {}
+    }, 10_000);
+    return () => clearInterval(id);
+  }, [auth?.user, auth?.token]);
+
 
   // --- scope admin (robusto tras refactor) ---
   // Aliases seguros para modal del día (local o via props)
@@ -2525,12 +3024,11 @@ function AuthenticatedApp(props){
     <div className="min-h-screen bg-transparent text-slate-900">
       <style>{`
         :root { color-scheme: light !important; }
-        html, body { background: #f8fafc; color: #0f172a; }
+        html, body { background: #f8fafc; color: #0f172a; font-size: 12.5px; } /* ← AÑADIDO */
         input, select, textarea, button { background:#fff!important; color:#0f172a!important; border-color: rgba(15,23,42,0.15)!important; }
         ::placeholder { color:#94a3b8; }
         .chip { background-color: rgba(15,23,42,0.04); border:1px solid rgba(15,23,42,0.15); }
       `}</style>
-
       <header className="sticky top-0 z-10 bg-white/90 backdrop-blur border-b border-slate-200">
         <div className="w-full max-w-[1800px] mx-auto px-6 py-3 flex items-center justify-between">
           <h1 className="text-lg font-semibold">Gestor de Turnos · Usuarios + SQLite</h1>
@@ -2538,6 +3036,15 @@ function AuthenticatedApp(props){
             <span className="px-2 py-1 rounded bg-slate-100 border">
               {auth.user?.name || auth.user?.email || "Usuario"} · {auth.user?.role || ""}
             </span>
+            {isAdmin && (
+              <span
+                className="px-2 py-1 rounded border bg-emerald-50 border-emerald-300 text-emerald-700"
+                title={(online.users||[]).map(u=>`${(u.name||u.email)} · ${u.ip||''}${u.ua? ` · ${u.ua}`:''}`).join('\n') || 'Sin conexiones'}
+
+              >
+                {online.users?.length || 0} online
+              </span>
+            )}
             {isAdmin && (<button onClick={()=>setState(prev=>({...prev, rebalance:!prev.rebalance}))}
               className={`px-3 py-1.5 rounded-lg border ${state.rebalance?'bg-emerald-50 border-emerald-300':'border-slate-300 hover:bg-slate-100'}`}>
               {state.rebalance? 'Reequilibrio ON':'Reequilibrar'}
@@ -2617,7 +3124,181 @@ function AuthenticatedApp(props){
               )}
             </div>
           </Card>
-          <PersonasPanel state={state} upPerson={upPerson} />
+
+{isAdmin && (
+  <Card title="Auditoría de sesiones (Admin)">
+    {(() => {
+      const [day, setDay] = React.useState(toDateValue(new Date()));
+      const [logs, setLogs] = React.useState([]);
+      const [loading, setLoading] = React.useState(false);
+
+      async function load() {
+        try {
+          setLoading(true);
+          const d = await api(`/admin/sessions?day=${encodeURIComponent(day)}`, { method:'GET' }, auth.token);
+          setLogs(d?.sessions || []);
+        } catch (e) {
+          showToast('Error cargando sesiones');
+        } finally {
+          setLoading(false);
+        }
+      }
+
+      const byUser = React.useMemo(() => {
+        const m = new Map();
+        for (const s of logs) {
+          const email = s?.user?.email || 'desconocido';
+          const name  = s?.user?.name  || '';
+          const ip    = s?.ip || 'n/a';
+          const ts    = s?.ts || '0000-00-00T00:00:00Z';
+          const ua    = s?.ua || '';
+          if (!m.has(email)) m.set(email, { email, name, total:0, ips:new Map(), lastTs:'', lastUa:'' });
+          const u = m.get(email);
+          u.total += 1;
+          u.ips.set(ip, (u.ips.get(ip)||0) + 1);
+          if (ts > u.lastTs) { u.lastTs = ts; u.lastUa = ua; }
+        }
+        const rows = [];
+        for (const u of m.values()) {
+          const ips = Array.from(u.ips.entries()).map(([ip,c]) => `${ip} (${c})`).join(', ');
+          rows.push({ email:u.email, name:u.name, total:u.total, ips, lastUa:u.lastUa });
+        }
+        rows.sort((a,b)=> b.total - a.total || a.email.localeCompare(b.email));
+        return rows;
+      }, [logs]);
+
+      return (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <input type="date" className="border rounded px-2 py-1" value={day} onChange={e=>setDay(e.target.value)} />
+            <button onClick={load} className="px-3 py-1.5 rounded-lg border" disabled={loading}>
+              {loading?'Cargando…':'Cargar'}
+            </button>
+            <span className="text-xs text-slate-500">{logs.length} eventos</span>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm border-separate border-spacing-y-1">
+              <thead>
+                <tr className="text-left text-slate-600">
+                    <th className="py-1 px-2">Usuario</th>
+                    <th className="py-1 px-2">Email</th>
+                    <th className="py-1 px-2">Conexiones (día)</th>
+                    <th className="py-1 px-2">IPs</th>
+                    <th className="py-1 px-2">Navegador</th>
+                </tr>
+              </thead>
+              <tbody>
+                {byUser.length===0 && <tr><td colSpan={4} className="py-2 px-2 text-slate-500">Sin datos para ese día.</td></tr>}
+                {byUser.map(r=>(
+                  <tr key={r.email} className="bg-white">
+                    <td className="py-1 px-2">{r.name||'—'}</td>
+                    <td className="py-1 px-2">{r.email}</td>
+                    <td className="py-1 px-2">{r.total}</td>
+                    <td className="py-1 px-2">{r.ips}</td>
+                    <td className="py-1 px-2 truncate max-w-[24rem]" title={r.lastUa}>{r.lastUa || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+          {/* DETALLE DE SESIONES (crudo) */}
+            <div className="mt-3">
+              <div className="flex items-center justify-between mb-1">
+                <div className="text-sm font-medium">Detalle de sesiones del día</div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    placeholder="Filtrar por email/IP/UA…"
+                    className="border rounded px-2 py-1 text-sm"
+                    onChange={e => {
+                      const q = (e.target.value || '').toLowerCase();
+                      const filtered = logs.filter(s => {
+                        const email = s?.user?.email || '';
+                        const ip = s?.ip || '';
+                        const ua = s?.ua || '';
+                        return email.toLowerCase().includes(q)
+                            || ip.toLowerCase().includes(q)
+                            || ua.toLowerCase().includes(q);
+                      });
+                      setLogs(filtered.length ? filtered : logs); // simple filtro sobre la vista
+                    }}
+                  />
+                  <button
+                    className="px-2 py-1 rounded border text-sm"
+                    onClick={()=>{
+                      const rows = [
+                        ['ts','email','name','ip','ua'].join(',')
+                      ];
+                      (logs||[]).forEach(s=>{
+                        const r = [
+                          s.ts,
+                          s?.user?.email || '',
+                          s?.user?.name || '',
+                          s.ip || '',
+                          (s.ua || '').replace(/"/g,'""')
+                        ].map(x=>`"${x}"`).join(',');
+                        rows.push(r);
+                      });
+                      const blob = new Blob([rows.join('\n')], {type:'text/csv;charset=utf-8;'});
+                      const a = document.createElement('a');
+                      a.href = URL.createObjectURL(blob);
+                      a.download = `sesiones_${day}.csv`;
+                      a.click();
+                    }}
+                  >Export CSV</button>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto max-h-64 border rounded bg-white">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-left text-slate-600 border-b">
+                      <th className="py-1 px-2">Hora (UTC)</th>
+                      <th className="py-1 px-2">Email</th>
+                      <th className="py-1 px-2">IP</th>
+                      <th className="py-1 px-2">Navegador</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(logs||[]).length===0 && (
+                      <tr><td colSpan={4} className="py-2 px-2 text-slate-500">Sin datos.</td></tr>
+                    )}
+                    {(logs||[]).map((s,i)=>(
+                      <tr key={i} className="border-b">
+                        <td className="py-1 px-2 whitespace-nowrap">{(s.ts||'').replace('T',' ').replace('Z','')}</td>
+                        <td className="py-1 px-2">{s?.user?.email || '—'}</td>
+                        <td className="py-1 px-2">{s?.ip || '—'}</td>
+                        <td className="py-1 px-2 truncate max-w-[36rem]" title={s?.ua||''}>{s?.ua || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+  
+          </div>
+        </div>
+      );
+    })()}
+  </Card>
+)}
+
+
+          <Card title="Auditoría (últimos 100)">
+  <div className="max-h-40 overflow-auto text-xs">
+    {((state.audit||[]).slice(-100).reverse()).map((e,i)=>(
+      <div key={i} className="py-0.5 border-b last:border-0">
+        <span className="text-slate-500">{(e.ts||"").replace("T"," ").replace("Z","")} · </span>
+        <span>{e.actor||"sys"}</span>
+        <span> — {e.action||"evento"}</span>
+        {e.dateStr? <span> · {e.dateStr}</span>: null}
+      </div>
+    ))}
+    {!(state.audit&&state.audit.length) && <div className="text-slate-500">Sin eventos aún.</div>}
+  </div>
+</Card>
+
+<PersonasPanel state={state} upPerson={upPerson} />
           <TurnosPanel state={state} up={up} />
           <FestivosPanel state={state} up={up} />
           <CustomHolidaysPanel state={state} up={up} /></>)}
@@ -2635,7 +3316,7 @@ function AuthenticatedApp(props){
          return s ? `${fmt(s)} – ${fmt(e)}` : "";
       })()}
     </div>
-    <div className="flex items-center gap-2">
+    <div className={`flex items-center ${userWeeks<=2 ? 'gap-1' : 'gap-2'}`}>
       <button disabled={!canPrev} onClick={()=>setWeekIndex(w=>Math.max(0,w-1))}
         className={`px-2 py-1 rounded border ${canPrev? "hover:bg-slate-100":"opacity-50 cursor-not-allowed"}`}>◀︎</button>
       <button onClick={()=>{ const t=startOfWeekMonday(new Date()); const idx=Math.max(0, Math.min(state.weeks-1, Math.floor((t - startDate)/(7*24*3600*1000)))); setWeekIndex(idx); }}
@@ -2649,8 +3330,18 @@ function AuthenticatedApp(props){
         <option value={4}>4 semanas</option>
         <option value={8}>8 semanas</option>
       </select>
+            <input
+        className="ml-2 border rounded px-2 py-1 text-sm"
+        placeholder="Filtrar persona…"
+        value={personFilter}
+        onChange={e=>setPersonFilter(e.target.value)}
+      />
+      <button onClick={clearVisibleOverrides} className="ml-2 px-2 py-1 rounded border text-sm">Limpiar overrides (rango)</button>
+      <button onClick={duplicateVisibleToNextWeek} className="ml-2 px-2 py-1 rounded border text-sm">Duplicar → semana siguiente</button>
+      <button onClick={undoLastOverride} className="ml-2 px-2 py-1 rounded border text-sm">Deshacer último override</button>
     </div>
-  </div>
+      <button onClick={()=>window.print()} className="ml-2 px-2 py-1 rounded-lg border text-sm">Imprimir / PDF</button>
+    </div>
   
   {/* Leyenda (visible para todos) */}
   <div className="flex flex-wrap items-center gap-2 mb-3 text-[11px]">
@@ -2664,15 +3355,18 @@ function AuthenticatedApp(props){
   </div>
 <WeeklyView
     startDate={weeklyStart}
+    pillClass={pillClass}
     weeks={userWeeks}
     assignments={ASS}
-    people={state.people}
+    people={state.people.filter(p => !personFilter || p.name.toLowerCase().includes(personFilter.toLowerCase()))}
     timeOffs={state.timeOffs}
     province={state.province}
     closeOnHolidays={state.closeOnHolidays}
     closedExtraDates={state.closedExtraDates}
     customHolidaysByYear={state.customHolidaysByYear}
     consumeVacationOnHoliday={state.consumeVacationOnHoliday}
+    isAdmin={isAdmin}
+    onQuickAssign={onQuickAssign}
   />
 </Card>
 
@@ -2685,7 +3379,7 @@ function AuthenticatedApp(props){
                 <button onClick={()=>window.print()} className="px-3 py-1.5 rounded-lg border">Imprimir / PDF</button>
               </div>
             </div>
-            <WeeklyView startDate={weeklyStart} weeks={1} assignments={ASS} people={state.people} timeOffs={state.timeOffs} province={state.province} closeOnHolidays={state.closeOnHolidays} closedExtraDates={state.closedExtraDates} customHolidaysByYear={state.customHolidaysByYear} consumeVacationOnHoliday={state.consumeVacationOnHoliday} />
+            <WeeklyView startDate={weeklyStart} weeks={1} pillClass={pillClass} assignments={ASS} people={state.people} timeOffs={state.timeOffs} province={state.province} closeOnHolidays={state.closeOnHolidays} closedExtraDates={state.closedExtraDates} customHolidaysByYear={state.customHolidaysByYear} consumeVacationOnHoliday={state.consumeVacationOnHoliday} isAdmin={isAdmin} onQuickAssign={onQuickAssign} />
           </Card>)}
 
           <TimeOffPanel state={state} setState={setState} controls={controls} isAdmin={isAdmin} currentUser={auth.user} />
@@ -2760,6 +3454,7 @@ function AuthenticatedApp(props){
           people={state.people}
           onOverride={forceAssign}
           isAdmin={isAdmin}
+          onQuickAssign={onQuickAssign}
           onClose={()=>setModalDayProp(null)}
         />
       )}
@@ -2788,7 +3483,8 @@ function RefuerzosPanelLite({ state, up, assignments }){
   const [sort,setSort] = useState({ key:'start', dir:'asc' });
   const [page,setPage] = useState(0);
   const [pageSize,setPageSize] = useState(25);
-
+  const [assignee, setAssignee] = useState('');
+  const [onlyForced, setOnlyForced] = useState(false);
   const inRange = (e)=> (!from || e.start>=from) && (!to || e.end<=to);
   const matches = (e)=> !q || (e.label||'').toLowerCase().includes(q.toLowerCase());
   const toggleSort = (k)=> setSort(prev=> prev.key===k ? {key:k,dir:(prev.dir==='asc'?'desc':'asc')} : {key:k,dir:'asc'});
@@ -2799,7 +3495,16 @@ function RefuerzosPanelLite({ state, up, assignments }){
     return 0;
   };
 
-  const filtered = useMemo(()=> events.filter(inRange).filter(matches).sort(compare), [events,q,from,to,sort]);
+  const matchesPerson = (e) => !assignee || e.assigneeId === assignee;
+  const matchesForced = (e) => !onlyForced || !!e.assigneeForced;
+
+  const filtered = useMemo(() => events
+    .filter(inRange)
+    .filter(matches)
+    .filter(matchesPerson)
+    .filter(matchesForced)
+    .sort(compare)
+  , [events, q, from, to, sort, assignee, onlyForced]);
   const total = filtered.length;
   const pages = Math.max(1, Math.ceil(total/(pageSize||25)));
   const pageClamped = Math.min(page, pages-1);
@@ -2825,7 +3530,17 @@ function RefuerzosPanelLite({ state, up, assignments }){
     }
     return {free,total:days.length};
   };
-  const setAssignee = (absIdx, personId) => {
+  const appliedFor = (e) => {
+    if (!e.assigneeId) return {applied:0,total:0};
+    const days = dateRange(e.start, e.end);
+    let applied = 0;
+    for (const ds of days) {
+      const day = (assignments?.[ds] || []);
+      if (day.some(a => a?.personId === e.assigneeId)) applied++;
+    }
+    return { applied, total: days.length };
+  };
+  const setEventAssignee = (absIdx, personId) => {
     const next = (state.events||[]).map((ev,i)=> i===absIdx ? {...ev, assigneeId: personId} : ev);
     up(['events'], next);                // ← Asegúrate de que va ENTRE COMILLAS
   };
@@ -2836,7 +3551,20 @@ function RefuerzosPanelLite({ state, up, assignments }){
   };
   return (
     <Card title="Eventos de Refuerzo (Admin)">
-      {/* Alta rápida */}
+      <div className="flex flex-wrap gap-2 mb-3">{[
+    {name:"Black Friday",w:2,we:1,label:"Refuerzo (Ofi)"},
+    {name:"Inventario",w:1,we:0,label:"Refuerzo Inventario"},
+    {name:"Rebajas",w:1,we:1,label:"Refuerzo Tienda"}
+  ].map(p => (
+    <button key={p.name} className="px-2 py-1 rounded border"
+    onClick={()=> up(["events"], [...(state.events||[]), {
+      label:p.name, start: state.startDate, end: state.startDate,
+      weekdaysExtraSlots:p.w, weekendExtraSlots:p.we,
+      weekdayRefuerzo:"mañana"
+    }])}
+    >+ {p.name}</button>
+  ))}</div>
+{/* Alta rápida */}
       <div className="grid grid-cols-12 gap-2 mb-3">
         <div className="col-span-4">
           <label className="text-xs">Etiqueta</label>
@@ -2891,6 +3619,33 @@ function RefuerzosPanelLite({ state, up, assignments }){
         </div>
       </div>
 
+      {/* Filtro: persona asignada */}
+      <div className="col-span-3">
+        <label className="text-xs">Asignado a</label>
+        <select
+          className="w-full border rounded px-2 py-1"
+          value={assignee}
+          onChange={(e) => { setAssignee(e.target.value); setPage(0); }}
+        >
+          <option value="">— cualquiera —</option>
+          {(state.people || []).map(p => (
+            <option key={p.id} value={p.id}>{p.name}</option>
+          ))}
+        </select>
+      </div>
+
+      {/* Filtro: solo forzados */}
+      <div className="col-span-3 flex items-end">
+        <label className="text-xs inline-flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={onlyForced}
+            onChange={(e) => { setOnlyForced(e.target.checked); setPage(0); }}
+          />
+          Solo forzados
+        </label>
+      </div>
+
       {/* Tabla paginada */}
       <div className="border rounded-lg overflow-x-auto">
         {total===0 && <div className="p-3 text-sm text-slate-500">Sin eventos.</div>}
@@ -2903,6 +3658,7 @@ function RefuerzosPanelLite({ state, up, assignments }){
                 <th className="text-left p-2 cursor-pointer" onClick={()=>toggleSort('end')}>Hasta</th>
                 <th className="text-right p-2">L–V +</th>
                 <th className="text-right p-2">S–D +</th>
+                <th className="text-right p-2">Tipo L–V</th>
                 <th className="text-right p-2">Asignación</th>
                 <th className="text-right p-2">Acciones</th>
               </tr>
@@ -2938,6 +3694,17 @@ function RefuerzosPanelLite({ state, up, assignments }){
                    onChange={ev=>setFieldAt(absIdx,'weekendExtraSlots',Number(ev.target.value)||0)} />
           </td>
           <td className="p-2 text-right">
+            <select
+              className="border rounded px-2 py-1 w-32"
+              value={e.weekdayRefuerzo || "auto"}
+              onChange={ev=> setFieldAt(absIdx, "weekdayRefuerzo", ev.target.value)}
+            >
+              <option value="auto">Auto</option>
+              <option value="mañana">Mañana</option>
+              <option value="tarde">Tarde</option>
+            </select>
+          </td>
+          <td className="p-2 text-right">
             {(() => {
               const absIdx = (state.events || []).findIndex(ev => ev === e); // índice absoluto
               const pid    = e.assigneeId || "";
@@ -2949,7 +3716,7 @@ function RefuerzosPanelLite({ state, up, assignments }){
                   <select
                     className="border rounded px-2 py-1"
                     value={pid}
-                    onChange={ev => setAssignee(absIdx, ev.target.value)}
+                    onChange={ev => setEventAssignee(absIdx, ev.target.value)}
                   >
                     <option value="">—</option>
                     {ppl.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
@@ -2970,6 +3737,11 @@ function RefuerzosPanelLite({ state, up, assignments }){
                       title="días libres/total"
                     >
                       libre {avail.free}/{avail.total}
+                    </span>
+                  )}
+                  {pid && (
+                    <span className="text-xs text-slate-600">
+                      · asignado {appliedFor(e).applied}/{appliedFor(e).total}
                     </span>
                   )}
                 </div>
