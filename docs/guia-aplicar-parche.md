@@ -4,6 +4,33 @@ Esta guía está pensada para el servidor donde resides el repositorio (`/home/u
 
 ---
 
+## 0. Confirmar que estás en la última versión de `main`
+
+Antes de modificar nada, asegúrate de que tu rama principal está alineada con el remoto:
+
+```bash
+git fetch origin main          # trae la referencia más reciente
+git checkout main              # cambia temporalmente a la rama principal
+git pull --ff-only             # avanza sin merges adicionales
+```
+
+Si trabajas desde otra rama (por ejemplo `work`), vuelve a ella cuando termines:
+
+```bash
+git checkout work
+```
+
+Verifica el commit exacto para tener constancia del hash de referencia:
+
+```bash
+git rev-parse --short HEAD
+git log -1 --oneline
+```
+
+Si el entorno no tiene acceso a internet y `git fetch` falla, contrasta el hash con el que comparta el equipo antes de seguir.
+
+---
+
 ## 1. Preparar el repositorio
 
 1. Posiciónate en la carpeta del proyecto y comprueba el estado:
@@ -27,7 +54,7 @@ Esta guía está pensada para el servidor donde resides el repositorio (`/home/u
    git checkout -- src/App.jsx # descarta cambios en el archivo real
    git status -sb              # verifica que quedó limpio
    ```
-   El resultado esperado es únicamente `## main...origin/main` sin más líneas.
+   El resultado esperado es únicamente una línea `## <rama>...origin/<rama>` (por ejemplo `## main...origin/main`).
 
 3. Si necesitas conservar cambios locales antes de limpiarlos, cópialos aparte:
    ```bash
