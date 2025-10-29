@@ -2,18 +2,44 @@ import React, { useEffect, useMemo, useState, useRef, useCallback } from "react"
 
 import WeekendAuditPanel from "./components/WeekendAuditPanel";
 
-function renderEmptyCell(toType, isClosed){
-  if (toType === 'vacaciones') {
+function renderEmptyCell(toInfo, isClosed){
+  if (toInfo) {
+    const normalized = typeof toInfo === "string" ? { type: toInfo } : toInfo;
+    const type = normalized?.type;
+    const status = normalized?.status;
+    const typeMap = {
+      vacaciones: {
+        icon: "🏖",
+        label: "Vacaciones",
+        badgeClass: "bg-emerald-50 border-emerald-200 text-emerald-700",
+      },
+      libranza: {
+        icon: "🛏️",
+        label: "Libranza",
+        badgeClass: "bg-sky-50 border-sky-200 text-sky-700",
+      },
+      viaje: {
+        icon: "✈️",
+        label: "Viaje",
+        badgeClass: "bg-indigo-50 border-indigo-200 text-indigo-700",
+      },
+    };
+    const fallbackLabel = type ? type.charAt(0).toUpperCase() + type.slice(1) : "Permiso";
+    const entry = typeMap[type] || {
+      icon: "🗓️",
+      label: fallbackLabel,
+      badgeClass: "bg-amber-50 border-amber-200 text-amber-700",
+    };
+    const statusLabel = status && status !== "aprobada" ? status : "";
     return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[11px] bg-emerald-50 text-emerald-700">
-        🏖 Vacaciones
-      </span>
-    );
-  }
-  if (toType) {
-    return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded border text-[11px] bg-amber-50 text-amber-700">
-        {toType}
+      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[11px] ${entry.badgeClass}`}>
+        <span>{entry.icon}</span>
+        <span>{entry.label}</span>
+        {statusLabel ? (
+          <span className="ml-1 rounded border border-white/60 bg-white/70 px-1 py-px text-[9px] uppercase tracking-wide text-current">
+            {statusLabel}
+          </span>
+        ) : null}
       </span>
     );
   }
@@ -1505,15 +1531,16 @@ function WeeklyView({ startDate, weeks, assignments, people, timeOffs, province,
     if(hit.type==='vacaciones'){ return true; }
     return true;
   };
-  const getTOType = (dateStr, personId) => {
-  const d_ = parseDateValue(dateStr);
-  const hit = (timeOffs||[]).find(to => (
-    to.personId === personId &&
-    to.status === "aprobada" &&
-    parseDateValue(to.start) <= d_ && d_ <= parseDateValue(to.end)
-  ));
-  return hit ? hit.type : null;
-};
+  const getTOInfo = (dateStr, personId) => {
+    const d_ = parseDateValue(dateStr);
+    const hit = (timeOffs||[]).find(to => (
+      to.personId === personId &&
+      to.status === "aprobada" &&
+      parseDateValue(to.start) <= d_ && d_ <= parseDateValue(to.end)
+    ));
+    if (!hit) return null;
+    return { type: hit.type, status: hit.status };
+  };
   return (
     <div className="overflow-x-auto print-only:block">
       <table className="w-full text-sm border-collapse table-fixed">
@@ -1542,13 +1569,13 @@ function WeeklyView({ startDate, weeks, assignments, people, timeOffs, province,
           .sort((a, b) => minutesFromHHMM(a.shift.start) - minutesFromHHMM(b.shift.start));
 
         // Tipo de “Time Off” y festivo para celda vacía
-        const toType = (typeof getTOType === 'function') ? getTOType(h.dateStr, p.id) : null;
+        const toInfo = (typeof getTOInfo === 'function') ? getTOInfo(h.dateStr, p.id) : null;
         const isFest = (typeof isClosedDay === 'function') ? isClosedDay(h.dateStr) : false;
         return (
         <td key={h.dateStr || idx} className="p-1 align-top">
           {cell.length===0 ? (
             <div className="rounded border bg-slate-50 px-1 py-0.5 inline-block">
-              {renderEmptyCell(toType, isFest)}
+              {renderEmptyCell(toInfo, isFest)}
             </div>
           ) : (
             cell.map((a,i)=>(<PrettyAssignment a={a} h={h} p={p} i={i} />))
