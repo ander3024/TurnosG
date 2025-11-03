@@ -164,8 +164,25 @@ abre `src/App.jsx`, busca los marcadores `<<<<<<<`/`=======`/`>>>>>>>`, elige la
 Cuando termines de editar:
 
 ```bash
+git status -sb          # comprueba que solo queda src/App.jsx en conflicto
+rg "<<<<<<<|=======|>>>>>>>" src/App.jsx   # confirma que ya no hay marcadores
+git diff src/App.jsx    # revisa visualmente la fusión (botones, checkbox, etc.)
+```
+
+Si todo se ve correcto, guarda la resolución y crea el commit:
+
+```bash
 git add src/App.jsx
 git commit -m "Resuelve conflictos al aplicar changes.patch"
+```
+
+> 💡 Antes de commitear puedes hacer una copia rápida (`cp src/App.jsx src/App.jsx.backup`) por si necesitas volver atrás.
+
+Finalmente ejecuta una compilación de verificación:
+
+```bash
+npm install   # omite si ya tienes node_modules
+npm run build
 ```
 
 #### Opción B · `git cherry-pick`
@@ -190,9 +207,17 @@ git commit -m "Resuelve conflictos al aplicar changes.patch"
    ```bash
    git status -sb          # identifica los archivos en conflicto
    # edita src/App.jsx y deja la versión deseada (en especial alrededor de CalendarView)
+   rg "<<<<<<<|=======|>>>>>>>" src/App.jsx   # verifica que no queden marcadores
+   git diff -- src/App.jsx                      # inspecciona el resultado final
    git add src/App.jsx
    git cherry-pick --continue
    ```
+
+   Si tienes dudas sobre el resultado, compara con el commit original:
+   ```bash
+   git show 205d536fda4fb1e998fe9303777fc9e3c36d4942:src/App.jsx | less
+   ```
+   y asegúrate de que las secciones nuevas (`handleCalendarCommand`, controles de turnos de mañana/tarde en `CalendarView`, etc.) estén presentes.
 
 5. Revisa el resultado y continúa con la compilación:
    ```bash
