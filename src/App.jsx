@@ -9,23 +9,6 @@ function normalizeAssignmentsCell(source, dateStr){
   if (raw && typeof raw === "object") {
     return Object.values(raw);
   }
-<<<<<<< HEAD
-  if (toType === 'libranza') {
-    return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[11px] bg-slate-50 text-slate-700">
-        🛌 Libranza
-      </span>
-    );
-  }
-  if (toType === 'viaje') {
-    return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[11px] bg-sky-50 text-sky-700">
-        ✈️ Viaje
-      </span>
-    );
-  }
-  if (toType) {
-=======
   return [];
 }
 
@@ -67,7 +50,6 @@ function renderEmptyCell(toInfo, isClosed){
       badgeClass: "bg-amber-50 border-amber-200 text-amber-700",
     };
     const statusLabel = status && status !== "aprobada" ? status : "";
->>>>>>> origin/codex/explain-codebase-structure-and-recommendations
     return (
       <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[11px] ${entry.badgeClass}`}>
         <span>{entry.icon}</span>
@@ -82,7 +64,7 @@ function renderEmptyCell(toInfo, isClosed){
   }
   if (isClosed) {
     return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded border text-[11px] bg-transparent">
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded border text-[11px] bg-slate-50">
         🎌 Festivo
       </span>
     );
@@ -285,8 +267,6 @@ function respectsRules({personId, date, shift, assignmentsSoFar, weeklyMinutes, 
 }
 
 // ===================== Planificador base =====================
-function idealText(color){ const c=(color||"#888888").replace("#",""); const r=parseInt(c.slice(0,2),16), g=parseInt(c.slice(2,4),16), b=parseInt(c.slice(4,6),16); const L=(0.2126*r+0.7152*g+0.0722*b)/255; return L>0.62?"#111":"#fff"; }
-
 function computeOffPersonId(people, w){ for(const p of people){ if(((w+(p.offset||0))%4)===3) return p.id; } return people[w%people.length].id; }
 function pickBestCandidate(pool,{isWeekend,weekdaysLoad,weekendLoad,priorityMap}){
   if(pool.length===0) return null;
@@ -301,49 +281,8 @@ function generateSchedule({ startDate, weeks, people, weekdayShifts, weekendShif
   const weekdaysLoad=new Map(people.map(p=>[p.id,0]));
   const weekendLoad=new Map(people.map(p=>[p.id,0]));
   const timeOffIndex = indexTimeOff(timeOffs, { province, consumeVacationOnHoliday, customHolidaysByYear });
-  // --- Forzados procedentes de eventos con assigneeForced=true ---
-  const forceByDay = new Map(); // ds -> { key -> personId }
-  const weekdayCounter = new Map(); // ds -> contador AM/PM por día
-  for (const ev of (events||[])) {
-    if (!ev.assigneeForced || !ev.assigneeId) continue;
-    const days = expandRange(ev.start, ev.end);
-    for (const ds of days) {
-      const d   = parseDateValue(ds);
-      const we  = (d.getDay()===0 || d.getDay()===6);
-      const cnt = we ? (ev.weekendExtraSlots||0) : (ev.weekdaysExtraSlots||0);
-      const bucket = forceByDay.get(ds) || {};
-      if (we) {
-        // Fines de semana: igual que antes
-        for (let j=0; j<cnt; j++){
-          const base = weekendShift;
-          const label = `Refuerzo ${j+1}`;
-          const key = `${base.start}-${base.end}-${label}`;
-          bucket[key] = ev.assigneeId;
-        }
-      } else {
-        // Laborables: respeta weekdayRefuerzo + numeración por día
-        const wType = ev.weekdayRefuerzo || "auto";
-        const base =
-          (wType==="mañana" && (weekdayShifts?.[0])) ? weekdayShifts[0]
-        : (wType==="tarde"  && (weekdayShifts?.[1])) ? weekdayShifts[1]
-        : refuerzoWeekdayShift;
 
-        const baseLabel = (refuerzoWeekdayShift.label || "Refuerzo")
-                        + (wType==="mañana" ? " Mañana" : (wType==="tarde" ? " Tarde" : ""));
-        let wCounter = weekdayCounter.get(ds) || 0;
-        for (let j=0; j<cnt; j++){
-          wCounter++;
-          const label = `${baseLabel} ${wCounter}`;
-          const key = `${base.start}-${base.end}-${label}`;
-          bucket[key] = ev.assigneeId;
-        }
-        weekdayCounter.set(ds, wCounter);
-      }
-      forceByDay.set(ds, bucket);
-
-    }
-  }
-
+  
   // --- OFF condicionado por vacaciones (configurable) ---
   const OFFP = (typeof window !== "undefined" && window.__OFF_POLICY__) ? window.__OFF_POLICY__ : {};
   const VAC = (timeOffs||[]).filter(t=> t.type==='vacaciones' && t.status!=='denegada');
@@ -409,27 +348,7 @@ let required = isWE? [{...weekendShift}] : [...weekdayShifts];
         // Para fines de semana, NO contar weekendExtraSlots de eventos de conciliación
         const extraWE = active.reduce((a,ev)=> a + ((ev.meta && ev.meta.source==='conciliacion') ? 0 : (ev.weekendExtraSlots||0)), 0);
         if(isWE && extraWE>0){ for(let i=0;i<extraWE;i++) required.push({...weekendShift,label:`Refuerzo ${i+1}`}); }
-        if(!isWE){
-          let wCounter = 0;
-          for (const ev of active){
-            const cntW = ev.weekdaysExtraSlots || 0;
-            if (cntW <= 0) continue;
-
-            const baseLabel = refuerzoWeekdayShift.label || "Refuerzo";
-            const choice = ev.weekdayRefuerzo || "auto";
-            const baseShift =
-              (choice==="mañana" && (weekdayShifts?.[0]))
-                ? { ...weekdayShifts[0], label: `${baseLabel} Mañana` }
-              : (choice==="tarde" && (weekdayShifts?.[1]))
-                ? { ...weekdayShifts[1], label: `${baseLabel} Tarde` }
-              : { ...refuerzoWeekdayShift, label: baseLabel };
-
-            for(let i=0;i<cntW;i++){
-              wCounter++;
-              required.push({ ...baseShift, label: `${baseShift.label} ${wCounter}`});
-            }
-          }
-        }
+        if(!isWE && extraW>0){ for(let i=0;i<extraW;i++) required.push({...refuerzoWeekdayShift,label:refuerzoWeekdayShift.label||`Refuerzo ${i+1}`}); }
       }
 
       const dayAssignments=[]; const assigned=new Set();
@@ -469,14 +388,6 @@ let required = isWE? [{...weekendShift}] : [...weekdayShifts];
         pool = pool.filter(p => respectsRules({ personId:p.id, date, shift, assignmentsSoFar: assignments, weeklyMinutes, weeklyDays, rules }));
 
         // Overrides y preferencia finde
-<<<<<<< HEAD
-        let chosen = null;
-        let forced = overrides?.[dateStr]?.[key];
-
-        if (!forced) {
-          const fb = forceByDay.get(dateStr);
-          if (fb?.[key]) forced = fb[key];
-=======
         let chosen=null;
         const forced=overrides?.[dateStr]?.[key];
         if (forced === "__EMPTY__") {
@@ -491,37 +402,12 @@ let required = isWE? [{...weekendShift}] : [...weekdayShifts];
           chosen=prefer?.id || pickBestCandidate(pool,{isWeekend:isWE,weekdaysLoad,weekendLoad,priorityMap});
         } else {
           chosen=pickBestCandidate(pool,{isWeekend:isWE,weekdaysLoad,weekendLoad,priorityMap});
->>>>>>> origin/codex/explain-codebase-structure-and-recommendations
         }
-          if (forced) {
-            // si ya está asignado hoy, ignora este forced (evita duplicar a la misma persona)
-            if (assigned.has(forced)) {
-              // sigue el flujo normal sin aplicar el forced duplicado
-            } else {
-              chosen = forced;
-            }
-          } else {
-          if (!chosen && mustWorkOffToday && pool.some(p => p.id === offId)) chosen = offId;
-          else if (isWE && s === 0 && weekendFixedId && pool.some(p => p.id === weekendFixedId)) chosen = weekendFixedId;
-          else if (isWE && s === 0 && !weekendFixedId) {
-            const prefer = pool.find(p => p.id === nextOff);
-            chosen = prefer?.id || pickBestCandidate(pool, { isWeekend: isWE, weekdaysLoad, weekendLoad, priorityMap });
-          } else {
-            chosen = pickBestCandidate(pool, { isWeekend: isWE, weekdaysLoad, weekendLoad, priorityMap });
-          }
-        }
-
-        // Límite: máximo 1 turno/día por persona
-        if (chosen && assigned.has(chosen)) { chosen = null; }
-
-        // Salvaguarda
+        // Salvaguarda: nunca asignar a quien tiene TO efectivo hoy
         if (chosen && timeOffIndex.get(chosen)?.has(dateStr)) {
           chosen = null;
         }
-        // Origen de la asignación
-        const origin = (overrides?.[dateStr]?.[key])
-          ? 'override'
-          : (forced ? 'forced' : 'auto');
+        
 
         if(chosen){
           assigned.add(chosen);
@@ -530,9 +416,9 @@ let required = isWE? [{...weekendShift}] : [...weekdayShifts];
           weeklyDays.set(chosen,(weeklyDays.get(chosen)||0)+1);
           hoursPerPersonMin.set(chosen,(hoursPerPersonMin.get(chosen)||0)+mins);
           if(isWE) weekendLoad.set(chosen,(weekendLoad.get(chosen)||0)+1); else weekdaysLoad.set(chosen,(weekdaysLoad.get(chosen)||0)+1);
-          dayAssignments.push({shift, personId:chosen, conflict:false, origin});
+          dayAssignments.push({shift, personId:chosen, conflict:false});
         } else {
-          dayAssignments.push({shift, personId:null, conflict:true, origin:'pending'});
+          dayAssignments.push({shift, personId:null, conflict:true});
         }
       }
 
@@ -636,57 +522,8 @@ function scoreConciliacionBreakdown({assignments, people, startDate, weeks, conc
 }
 
 // Mejoras locales (micro-swaps en el mismo día)
-function improveConciliation({
-  assignments, people, startDate, weeks, overrides, conciliacion,
-  timeOffs = [], province="Madrid", consumeVacationOnHoliday=false, customHolidaysByYear={},
-  events = [], weekendShift = {start:'10:00',end:'22:00'}, refuerzoWeekdayShift = {start:'12:00',end:'20:00', label:'Refuerzo'},
-  weekdayShifts = [],
-  rules = {}
-}){
+function improveConciliation({assignments, people, startDate, weeks, overrides, conciliacion, timeOffs=[], province="Madrid", consumeVacationOnHoliday=false, customHolidaysByYear={} }){
   conciliacion = safeConciliacion(conciliacion);
-
-  // --- CLAVES FORZADAS DESDE EVENTOS (assigneeForced=true) ---
-const forcedKeysByDay = new Map(); // ds -> Set(keys)
-const weekdayCounterFK = new Map(); // ds -> n (numeración por día)
-
-for (const ev of (events||[])) {
-  if (!ev.assigneeForced || !ev.assigneeId) continue;
-  const days = expandRange(ev.start, ev.end);
-  for (const ds of days) {
-    const d  = parseDateValue(ds);
-    const we = (d.getDay()===0 || d.getDay()===6);
-    const cnt = we ? (ev.weekendExtraSlots||0) : (ev.weekdaysExtraSlots||0);
-
-    const set = forcedKeysByDay.get(ds) || new Set();
-
-    if (we) {
-      const base = weekendShift;
-      for (let j=0; j<cnt; j++) {
-        const label = `Refuerzo ${j+1}`;
-        set.add(`${base.start}-${base.end}-${label}`);
-      }
-    } else {
-      // L–V: respeta weekdayRefuerzo + numeración por día (igual que generateSchedule)
-      const wType = ev.weekdayRefuerzo || 'auto';
-      const base =
-        (wType==='mañana' && (weekdayShifts?.[0])) ? weekdayShifts[0] :
-        (wType==='tarde'  && (weekdayShifts?.[1])) ? weekdayShifts[1] :
-        refuerzoWeekdayShift;
-
-      let wCounter = weekdayCounterFK.get(ds) || 0;
-      const baseLabel = (refuerzoWeekdayShift.label || 'Refuerzo')
-                      + (wType==='mañana' ? ' Mañana' : (wType==='tarde' ? ' Tarde' : ''));
-      for (let j=0; j<cnt; j++) {
-        wCounter++;
-        const label = `${baseLabel} ${wCounter}`;
-        set.add(`${base.start}-${base.end}-${label}`);
-      }
-      weekdayCounterFK.set(ds, wCounter);
-    }
-    forcedKeysByDay.set(ds, set);
-  }
-}
-
   const best = JSON.parse(JSON.stringify(assignments));
   const indexTO = indexTimeOff(timeOffs, { province, consumeVacationOnHoliday, customHolidaysByYear });
   let bestScore = scoreConciliacion({assignments:best, people, startDate, weeks, conciliacion});
@@ -698,29 +535,15 @@ for (const ev of (events||[])) {
       for (let i=0;i<cell.length;i++){
         const A = cell[i];
         if (!A.personId) continue;
-
-        const key = `${A.shift.start}-${A.shift.end}-${A.shift.label||`T${i+1}`}`;
-        // Respeta tanto overrides manuales como forzados por evento
+          const usedToday = new Set((best[dateStr]||[]).filter(x=>!!x.personId).map(x=>x.personId));
+        const key=`${A.shift.start}-${A.shift.end}-${A.shift.label||`T${i+1}`}`;
         if (overrides?.[dateStr]?.[key]) continue;
-        if (forcedKeysByDay.get(dateStr)?.has(key)) continue;
-
-        const usedToday = new Set((best[dateStr]||[]).filter(x=>!!x.personId).map(x=>x.personId));
 
         for (const p2 of people){
           if (p2.id === A.personId) continue;
+          // No proponer swap si p2 tiene ausencia efectiva este día
           if (indexTO.get(p2.id)?.has(dateStr)) continue;
-          if (usedToday.has(p2.id)) continue;
-          // Respetar tope semanal duro (maxDaysPerWeek) en swaps
-          if (rules?.maxDaysPerWeek) {
-            const weekStart = addDays(startDate, w*7);
-            let daysCount = 0;
-            for (let dd = 0; dd < 7; dd++) {
-              const ds = toDateValue(addDays(weekStart, dd));
-              if ((best[ds] || []).some(x => x.personId === p2.id)) daysCount++;
-            }
-            // si ya está al tope, no proponerle otro día esta semana
-            if (daysCount >= rules.maxDaysPerWeek) continue;
-          }
+          if (usedToday.has(p2.id)) continue;  // evitar doble turno mismo día
           const oldPid = A.personId;
           A.personId = p2.id;
           const newScore = scoreConciliacion({assignments:best, people, startDate, weeks, conciliacion});
@@ -932,6 +755,7 @@ export default function App(){
     catch { return { token:"", user:null }; }
   });
   useEffect(()=>{ try{ localStorage.setItem("turnos_auth", JSON.stringify(auth)); }catch{} },[auth]);
+
   const [loginForm, setLoginForm] = useState({ email:"", password:"" });
   async function doLogin(e){ e?.preventDefault();
     const data = await api("/auth/login",{ method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(loginForm) });
@@ -1091,15 +915,14 @@ if (!payload.conciliacion) payload.conciliacion = safeConciliacion();
 
   // ---------- Generación de cuadrante ----------
   const startDate=useMemo(()=>parseDateValue(state.startDate),[state.startDate]);
-  const base=useMemo(()=> generateSchedule({ startDate, weeks:state.weeks, people:state.people, weekdayShifts:state.weekdayShifts, weekendShift:state.weekendShift, timeOffs:state.timeOffs, events:state.events, refuerzoWeekdayShift:state.refuerzoWeekdayShift, overrides: state.overrides, rules: state.rules, province: state.province, closeOnHolidays: state.closeOnHolidays, closedExtraDates: state.closedExtraDates, customHolidaysByYear: state.customHolidaysByYear }), [state, startDate]);
+  const base=useMemo(()=> generateSchedule({ startDate, weeks:state.weeks, people:state.people, weekdayShifts:state.weekdayShifts, weekendShift:state.weekendShift, timeOffs:state.timeOffs, events:state.events, refuerzoWeekdayShift:state.refuerzoWeekdayShift, overrides: state.overrides, rules: state.rules, province: state.province, closeOnHolidays: state.closeOnHolidays, closedExtraDates: state.closedExtraDates, customHolidaysByYear: state.customHolidaysByYear, consumeVacationOnHoliday: state.consumeVacationOnHoliday }), [state, startDate]);
 
   const baseControls=useMemo(()=> buildControls({
       assignments:base.assignments, people:state.people,
       weekdayShifts:state.weekdayShifts, weekendShift:state.weekendShift,
       hoursPerPersonMin:base.hoursPerPersonMin, annualTargetHours:state.annualTargetHours,
       startDate, weeks:state.weeks, vacationDaysNatural:state.vacationDaysNatural,
-      timeOffs:state.timeOffs, province:state.province, consumeVacationOnHoliday:state.consumeVacationOnHoliday,
-      events: state.events, refuerzoWeekdayShift: state.refuerzoWeekdayShift
+      timeOffs:state.timeOffs, province:state.province, consumeVacationOnHoliday:state.consumeVacationOnHoliday
     }), [base, state.people, state.weekdayShifts, state.weekendShift, state.annualTargetHours, startDate, state.weeks, state.vacationDaysNatural, state.timeOffs, state.province, state.consumeVacationOnHoliday]);
 
   const priorityMap=useMemo(()=>{ const m=new Map(); baseControls.rows.forEach(r=> m.set(r.id, Math.max(0,r.remaining))); return m; },[baseControls]);
@@ -1109,25 +932,18 @@ if (!payload.conciliacion) payload.conciliacion = safeConciliacion();
     : base, [state, startDate, base, priorityMap]);
 
   // Aplica mejorador de conciliación (evita días-isla y reduce cortes)
-const assignmentsImproved = useMemo(()=> improveConciliation({
-  assignments: JSON.parse(JSON.stringify(assignments)),
-  people: state.people,
-  startDate,
-  weeks: state.weeks,
-  overrides: state.overrides,
-  conciliacion: safeConciliacion(state.conciliacion),
-  timeOffs: state.timeOffs,
-  province: state.province,
-  consumeVacationOnHoliday: state.consumeVacationOnHoliday,
-  customHolidaysByYear: state.customHolidaysByYear,
-  events: state.events,
-  weekendShift: state.weekendShift,
-  refuerzoWeekdayShift: state.refuerzoWeekdayShift,
-  weekdayShifts: state.weekdayShifts,
-  rules: state.rules,
-}), [assignments, state.people, startDate, state.weeks, state.overrides, state.conciliacion,
-    state.timeOffs, state.province, state.consumeVacationOnHoliday, state.customHolidaysByYear,
-    state.events, state.weekendShift, state.refuerzoWeekdayShift, state.weekdayShifts]);
+  const assignmentsImproved = useMemo(()=> improveConciliation({
+    assignments: JSON.parse(JSON.stringify(assignments)),
+    people: state.people,
+    startDate,
+    weeks: state.weeks,
+    overrides: state.overrides,
+    conciliacion: safeConciliacion(state.conciliacion),
+    timeOffs: state.timeOffs,
+    province: state.province,
+    consumeVacationOnHoliday: state.consumeVacationOnHoliday,
+    customHolidaysByYear: state.customHolidaysByYear
+  }), [assignments, state.people, startDate, state.weeks, state.overrides, state.conciliacion]);
 
   // Usar ASS para pintar/expotar
   const ASS = state.applyConciliation ? assignmentsImproved : assignments;
@@ -1146,19 +962,6 @@ const assignmentsImproved = useMemo(()=> improveConciliation({
   const [payroll,setPayroll]=useState({ from: state.startDate, to: toDateValue(addDays(startDate, state.weeks*7-1)) });
   const [weekIndex,setWeekIndex]=useState(0);
   const [userWeeks, setUserWeeks] = useState(1);
-  const [icsPerson, setIcsPerson] = useState(state.people[0]?.id || "");
-  const [personFilter, setPersonFilter] = useState("");
-  const [density, setDensity] = useState("normal");
-  useEffect(() => {
-  if (userWeeks >= 4) setDensity('compact');
-  else if (userWeeks === 1) setDensity('spacious');
-  else setDensity('normal');
-  }, [userWeeks]);
-  const pillClass = density==="compact"
-    ? "px-2 py-1 min-h-[40px] text-[11px]"
-    : density==="spacious"
-    ? "px-3 py-2 min-h-[56px] text-[13px]"
-    : "px-2.5 py-1.5 min-h-[52px] text-[12px]";
 function goToday(){
     const t = startOfWeekMonday(new Date());
     const idx = Math.max(0, Math.min(state.weeks-1, Math.floor((t - startDate)/(7*24*3600*1000))));
@@ -1170,7 +973,7 @@ function goToday(){
   // ---------- Auth-only: login screen ----------
   if (!auth.user || !auth.token) {
     return (
-      <div className="min-h-screen grid place-items-center bg-transparent text-slate-900">
+      <div className="min-h-screen grid place-items-center bg-slate-50 text-slate-900">
         <div className="bg-white rounded-2xl shadow p-6 w-full max-w-sm border border-slate-200">
           <h1 className="text-lg font-semibold mb-4">Acceso · Gestor de Turnos</h1>
           <form className="space-y-3 max-h-72 overflow-auto" onSubmit={doLogin}>
@@ -1262,218 +1065,6 @@ function goToday(){
     a.click();
   }
 
-<<<<<<< HEAD
-  function clearVisibleOverrides(){
-  const from = weeklyStart;
-  const to   = addDays(weeklyStart, userWeeks*7 - 1);
-  const next = structuredClone(state.overrides || {});
-  const keys = Object.keys(next);
-  for (const ds of keys){
-    const d = parseDateValue(ds);
-    if (d >= from && d <= to) delete next[ds];
-  }
-  setState(prev => ({ ...prev, overrides: next }));
-  showToast("Overrides del rango visible eliminados");
-  }
-
-function duplicateVisibleToNextWeek(){
-  const from = weeklyStart;
-  const to   = addDays(weeklyStart, userWeeks*7 - 1);
-  const periodEnd = addDays(startDate, state.weeks*7 - 1);
-
-  const out = structuredClone(state.overrides || {});
-  let copiados = 0, saltados = 0;
-
-  for (let d = new Date(from); d <= to; d = addDays(d, 1)) {
-    const srcDs = toDateValue(d);
-    const tgtDs = toDateValue(addDays(d, 7));
-    if (parseDateValue(tgtDs) > periodEnd) { saltados++; continue; }
-
-    const cell = (ASS[srcDs] || []);
-    if (!cell.length) { continue; }
-
-    for (let i = 0; i < cell.length; i++) {
-      const a = cell[i];
-      if (!a.personId) continue; // no copiar vacíos
-      const key = `${a.shift.start}-${a.shift.end}-${a.shift.label || `T${i+1}`}`;
-      out[tgtDs] = out[tgtDs] || {};
-      if (out[tgtDs][key] != null) { // ya había override → no pisar
-        saltados++;
-        continue;
-      }
-      out[tgtDs][key] = a.personId;
-      copiados++;
-    }
-  }
-
-  setState(prev => ({ ...prev, overrides: out }));
-  showToast(`Duplicado seguro: ${copiados} asignaciones · ${saltados} no copiadas`);
-}
-
-function undoLastOverride(){
-  const audit = state.audit || [];
-  const last = [...audit].reverse().find(e => e?.action === 'override' && e?.dateStr);
-  if (!last) { showToast('No hay overrides recientes'); return; }
-  const { dateStr, assignmentIndex } = last;
-  const a = ASS[dateStr]?.[assignmentIndex];
-  if (!a) { showToast('No encuentro esa asignación'); return; }
-
-  const key = `${a.shift.start}-${a.shift.end}-${a.shift.label || `T${assignmentIndex+1}`}`;
-  const next = structuredClone(state.overrides || {});
-  if (next[dateStr]) {
-    delete next[dateStr][key];
-    if (Object.keys(next[dateStr]).length === 0) delete next[dateStr];
-  }
-  setState(prev => ({ ...prev, overrides: next }));
-  showToast('Override deshecho');
-}
-
-// Asignación rápida desde calendario.
-// - Si shiftIndex !== null => override en ese slot.
-// - Si shiftIndex === null  => crea un refuerzo ese día y lo asigna.
-function quickAssign(dateStr, shiftIndex, personId){
-  if (!personId) return;
-
-  
- // Barreras: no asignar si la persona no está disponible o ya trabaja ese día
-    const indexTO = indexTimeOff(state.timeOffs, {
-      province: state.province,
-      consumeVacationOnHoliday: state.consumeVacationOnHoliday,
-      customHolidaysByYear: state.customHolidaysByYear
-    });
-    if (indexTO.get(personId)?.has(dateStr)) {
-      showToast('No disponible: vacaciones/libranza/viaje');
-      return;
-    }
-    if ((ASS[dateStr]||[]).some(a => a.personId === personId)) {
-      showToast('Ya tiene turno ese día');
-      return;
-    }
-
-  // 1) Si hay slot → override directo
-  if (shiftIndex !== null) {
-    forceAssign(dateStr, shiftIndex, personId);
-    // Avisos de horas:
-    const date = parseDateValue(dateStr);
-    const cell = ASS[dateStr] || [];
-    const a = cell[shiftIndex];
-    if (a?.shift) checkHoursAndNotify({ date, personId, shift: a.shift });
-    return;
-  }
-
-  // 2) Si no hay slot → crear refuerzo + forzar asignación
-  const d = parseDateValue(dateStr);
-  const isWE = (d.getDay()===0 || d.getDay()===6);
-  const ev = {
-    label: 'Refuerzo manual',
-    start: dateStr,
-    end: dateStr,
-    weekdaysExtraSlots: isWE ? 0 : 1,
-    weekendExtraSlots:  isWE ? 1 : 0,
-    assigneeId: personId,
-    assigneeForced: true,
-    weekdayRefuerzo: 'mañana'
-  };
-  setState(prev => ({ ...prev, events: [ ...(prev.events||[]), ev ] }));
-  showToast(`Refuerzo creado en ${dateStr} y asignado`);
-
-  // Intento de aviso de horas con el turno de refuerzo por defecto
-  const shift = isWE ? state.weekendShift : state.refuerzoWeekdayShift;
-  checkHoursAndNotify({ date: d, personId, shift });
-}
-
-// Cálculo y avisos de horas diarias/semanales y balance "rápido".
-function checkHoursAndNotify({ date, personId, shift }){
-  try{
-    const dateStr = toDateValue(date);
-    const mins = effectiveMinutes(shift);
-    const rules = state.rules || {};
-    let dayMins = 0, weekMins = 0, weekDays = 0;
-
-    // Día
-    for(const a of (ASS[dateStr]||[])){
-      if (a.personId === personId) dayMins += effectiveMinutes(a.shift);
-    }
-    // Semana
-    const ws = startOfWeekMonday(date);
-    for(let i=0;i<7;i++){
-      const ds = toDateValue(addDays(ws,i));
-      for(const a of (ASS[ds]||[])){
-        if (a.personId === personId){
-          weekMins += effectiveMinutes(a.shift);
-          weekDays++;
-        }
-      }
-    }
-
-    const afterDay  = dayMins + mins;
-    const afterWeek = weekMins + mins;
-    const hitsDay   = rules.maxDailyHours && (afterDay > rules.maxDailyHours*60);
-    const hitsWeek  = rules.maxWeeklyHours && (afterWeek > rules.maxWeeklyHours*60);
-    const hitsDaysW = rules.maxDaysPerWeek && (weekDays >= rules.maxDaysPerWeek);
-
-    // Balance simple vs media de "remaining" (controles)
-    const meRow = controls.rows.find(r=>r.id===personId);
-    const avgRemaining = controls.rows.reduce((a,r)=>a+(r.remaining||0),0) / Math.max(1,controls.rows.length);
-    const skew = meRow ? (meRow.remaining - avgRemaining) : 0;
-
-    let msg = `Asignado OK · ${Math.round(mins/60)}h`;
-    if (hitsDay)  msg += ` · ⚠ supera horas/día`;
-    if (hitsWeek) msg += ` · ⚠ supera horas/semana`;
-    if (hitsDaysW) msg += ` · ⚠ supera días/semana`;
-    if (meRow) msg += ` · balance ${skew>=0?'+':''}${skew.toFixed(0)}h vs media`;
-    showToast(msg);
-  }catch{}
-}
-
-return (
-  <AuthenticatedApp
-  auth={auth}
-  setAuth={setAuth}
-  ui={ui}
-  setUI={setUI}
-  showToast={showToast}
-  modalDay={modalDay}
-  setModalDay={setModalDay}
-  state={state}
-  setState={setState}
-  cloud={cloud}
-  setCloud={setCloud}
-  cloudLoad={cloudLoad}
-  cloudSave={cloudSave}
-  startDate={startDate}
-  weeklyStart={weeklyStart}
-  userWeeks={userWeeks}
-  setUserWeeks={setUserWeeks}
-  weekIndex={weekIndex}
-  setWeekIndex={setWeekIndex}
-  canPrev={canPrev}
-  canNext={canNext}
-  canNextRange={canNextRange}
-  payroll={payroll}
-  setPayroll={setPayroll}
-  ASS={ASS}
-  controls={controls}
-  exportCSV={exportCSV}
-  exportJSON={exportJSON}
-  importJSON={importJSON}
-  exportICS={exportICS}
-  exportPayroll={exportPayroll}
-  clearVisibleOverrides={clearVisibleOverrides}
-  duplicateVisibleToNextWeek={duplicateVisibleToNextWeek}
-  undoLastOverride={undoLastOverride}
-  onQuickAssign={quickAssign}
-  pillClass={pillClass}
-  density={density}
-  setDensity={setDensity}
-  personFilter={personFilter}
-  setPersonFilter={setPersonFilter}
-  up={up}
-  upPerson={upPerson}
-  forceAssign={forceAssign}
-/>
-);
-=======
   return (
     <AuthenticatedApp
       auth={auth}
@@ -1512,7 +1103,6 @@ return (
       forceAssign={forceAssign}
     />
   );
->>>>>>> origin/codex/explain-codebase-structure-and-recommendations
 }
 
 // ===================== UI base =====================
@@ -1655,17 +1245,7 @@ function ReglasPanel({ state, up }){
           />
         </div>
 
-        
-  <div className="col-span-3">
-    <label className="text-xs">Máx días/semana</label>
-    <input
-      type="number" min={0} max={7}
-      value={state.rules.maxDaysPerWeek ?? 0}
-      onChange={(e)=>up(['rules','maxDaysPerWeek'], Math.max(0, Number(e.target.value)||0))}
-      className="w-full px-2 py-1 rounded border"
-    />
-  </div>
-<div className="col-span-3">
+        <div className="col-span-3">
           <label className="text-xs">Descanso mínimo (h)</label>
           <input
             type="number" min={0} max={24}
@@ -1761,7 +1341,7 @@ function FestivosPanel({ state, up }){
             Cerrar tienda en festivos oficiales
           </label>
         </div>
-        <div className="col-span-12 text-xs bg-transparent border rounded p-2">{(HOLIDAYS_2025[state.province]||[]).join(', ') || 'Sin datos'}</div>
+        <div className="col-span-12 text-xs bg-slate-50 border rounded p-2">{(HOLIDAYS_2025[state.province]||[]).join(', ') || 'Sin datos'}</div>
       </div>
     </Card>
   );
@@ -1845,11 +1425,7 @@ function CustomHolidaysPanel({ state, up }){
 }
 
 
-<<<<<<< HEAD
-function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmin, onQuickAssign, province, closeOnHolidays, closedExtraDates, customHolidaysByYear, pillClass }){ const todayStr = toDateValue(new Date());
-=======
 function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmin, onQuickAssign, province, closeOnHolidays, closedExtraDates, customHolidaysByYear }){
->>>>>>> origin/codex/explain-codebase-structure-and-recommendations
   const days=[]; for(let w=0;w<weeks;w++) for(let d=0;d<7;d++) days.push(addDays(startDate, w*7+d));
   const personMap=new Map(people.map(p=>[p.id,p]));
   const [editor, setEditor] = useState(null);
@@ -1973,7 +1549,7 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
           });
           const isEditingNew = editor && editor.mode === 'new' && editor.dateStr === dateStr;
           return (
-            <div key={dateStr} className={`rounded-2xl border p-2 ${isWE? 'bg-transparent':'bg-transparent'} ${hasConflict? 'border-red-400':'border-slate-200'} ${dateStr===todayStr ? 'ring-2 ring-amber-400' : ''}`}>
+            <div key={dateStr} className={`rounded-2xl border p-2 ${isWE? 'bg-slate-50':'bg-white'} ${hasConflict? 'border-red-400':'border-slate-200'}`}>
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-baseline gap-2">
                   <span className="text-lg font-bold leading-none">{day}</span>
@@ -1986,54 +1562,13 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
               </div>
               <div className="space-y-1.5">
                 {isClosed && (
-                  <div className="rounded-xl px-2 py-1.5 border text-sm flex items-center justify-between bg-transparent">
+                  <div className="rounded-xl px-2 py-1.5 border text-sm flex items-center justify-between bg-slate-50">
                     <div className="truncate">
                       <span className="text-[11px] mr-1 rounded px-1 py-0.5 border bg-amber-50">🎌 Cerrado (festivo)</span>
                       <span className="text-slate-700">No se programan turnos</span>
                     </div>
                   </div>
                 )}
-<<<<<<< HEAD
-                {(isClosed? [] : sorted).map((c,i)=>{ const p=c.personId?personMap.get(c.personId):null; const span=formatSpan(c.shift.start,c.shift.end); const dur = effectiveMinutes(c.shift)/60; const lbl=(c.shift.label|| (isWE?'Finde':`T${i+1}`)); const emblem = /mañana/i.test(lbl)? '☀️' : /tarde/i.test(lbl)? '🌙' : isWE? '🗓️' : '➕'; return (
-                    <div
-                      key={i}
-                      className={`rounded-xl ${pillClass} border leading-tight flex flex-col items-start gap-1 w-full ${c.conflict? 'border-red-300 bg-red-50':'border-slate-200'}`}
-                      title={`${lbl} · ${span} (${dur}h)`}
-                    >
-                {c.personId && c.origin && (
-                    <span className={`text-[10px] px-1 py-0.5 rounded border self-start ${
-                      c.origin==='override' ? 'bg-amber-50 border-amber-300 text-amber-700' :
-                      c.origin==='forced'   ? 'bg-emerald-50 border-emerald-300 text-emerald-700' :
-                                              'bg-slate-50 border-slate-200 text-slate-600'
-                    }`}>
-                      {c.origin==='override' ? 'Override' : c.origin==='forced' ? 'Forzado' : 'Auto'}
-                    </span>
-                  )}
-                    <div className="whitespace-normal break-words">
-                      <span className="text-[12px] mr-1 rounded px-1 py-0.5 border bg-transparent">{emblem} {lbl}</span>
-                      <span className="text-slate-700">{span}</span>
-                      <span className="text-[12px] ml-1 text-slate-600">({dur}h{c.shift.lunchMinutes ? " · comida "+(c.shift.lunchMinutes)+"m" : ""})</span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                        {isAdmin && (
-                          <details className="relative inline-block ml-1">
-                            <summary className="cursor-pointer select-none text-[12px]" title="Cambiar persona (override)">👤</summary>
-                            <div className="absolute z-20 mt-1 bg-white border rounded shadow p-1">
-                              <select
-                                className="border rounded px-1 py-0.5 text-[11px]"
-                                value={c.personId || ''}
-                                onChange={e => onQuickAssign(dateStr, i, e.target.value || null)}
-                              >
-                                <option value="">—</option>
-                                {(people || []).map(pp => (
-                                  <option key={pp.id} value={pp.id}>{pp.name}</option>
-                                ))}
-                              </select>
-                            </div>
-                          </details>
-                        )}
-                    </div>
-=======
                 {shiftEntries.map((c,i)=>{
                   const p=c.personId?personMap.get(c.personId):null;
                   const span=formatSpan(c.shift.start,c.shift.end);
@@ -2078,7 +1613,6 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
                   <div className="pt-2">
                     <button type="button" className="w-full text-[11px] px-2 py-1 border rounded-lg hover:bg-slate-100" onClick={()=>openNew(dateStr, shiftOptions)}>Asignar turno</button>
                     {isEditingNew && renderForm(dateStr, shiftOptions)}
->>>>>>> origin/codex/explain-codebase-structure-and-recommendations
                   </div>
                 )}
                 {isAdmin && !isClosed && shiftOptions.length===0 && (
@@ -2092,7 +1626,7 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
     </div>
   );
 }
-function PrettyAssignment({ a, h, p, i, pillClass }){
+function PrettyAssignment({ a, h, p, i }){
   const span = `${a.shift.start}–${a.shift.end}`;
   const dur  = (effectiveMinutes(a.shift)/60);
   const lbl  = a.shift.label || `T${i+1}`;
@@ -2128,22 +1662,6 @@ function PrettyAssignment({ a, h, p, i, pillClass }){
       );
 
   return (
-<<<<<<< HEAD
-<div
-  className={`rounded-xl ${pillClass} border leading-tight mb-1 flex flex-col items-start w-full ${a.conflict ? 'border-red-300 bg-red-50' : 'border-slate-200 bg-transparent'}`}
-  style={a.conflict ? {} : { background:`${color}08`, border:`1px solid ${color}55` }}
-  title={`${lbl} · ${span} (${dur}h)`}
->
-  <div className="flex flex-col gap-1">
-    <div className="whitespace-normal break-words">
-      <span className="text-[12px] mr-1 rounded px-1 py-0.5 border bg-transparent">
-        {emblem} {lbl}
-      </span>
-      <span className="">{span}</span>
-      <span className="text-[12px] ml-1 text-slate-600">
-        ({dur}h{a.shift.lunchMinutes ? ` · comida ${a.shift.lunchMinutes}m` : ''})
-      </span>
-=======
     <div
       className={`rounded-xl px-2 py-0.5 border text-[11px] mb-0.5 ${a.conflict ? 'border-red-300 bg-red-50' : 'border-slate-200 bg-white'}`}
       style={a.conflict?{}:{ background:`1f`, border:`1px solid 33`}}
@@ -2161,56 +1679,13 @@ title={`${lbl} · ${span} (${dur}h)`}
         </div>
         {occupant}
       </div>
->>>>>>> origin/codex/explain-codebase-structure-and-recommendations
     </div>
-      <span
-        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-lg self-start text-slate-900"
-        style={{background:`${color}08`, border:`1px solid ${color}55`}}
-      >
-        <span className="h-2.5 w-2.5 rounded" style={{background:color}}/>
-        <span className="text-xs">{p?.name||''}</span>
-      </span>
-
-      {a.origin && (
-        <span className={`text-[10px] px-1 py-0.5 rounded border self-start mt-1 ${
-          a.origin==='override' ? 'bg-amber-50 border-amber-300 text-amber-700' :
-          a.origin==='forced'   ? 'bg-emerald-50 border-emerald-300 text-emerald-700' :
-                                  'bg-slate-50 border-slate-200 text-slate-600'
-        }`}>
-          {a.origin==='override' ? 'Override' : a.origin==='forced' ? 'Forzado' : 'Auto'}
-        </span>
-      )}
-  </div>
-</div>
-
   );
 }
-function dayCounts(assignments, ds){
-  const cell = assignments[ds] || [];
-  return {
-    total: cell.length,
-    assigned: cell.filter(c=>!!c.personId).length,
-    conflict: cell.some(c=>c.conflict)
-  };
-}
-function WeeklyView({ startDate, weeks, assignments, people, timeOffs, province, closeOnHolidays, closedExtraDates, customHolidaysByYear, consumeVacationOnHoliday, pillClass, isAdmin, onQuickAssign }){ const todayStr = toDateValue(new Date());
-  const header=[];
-for(let d=0; d<7*weeks; d++){
-  const date = addDays(startDate,d);
-  const dateStr = toDateValue(date);
-  header.push({
-    dateStr,
-    label: date.toLocaleDateString(undefined,{weekday:'short'})+' '+date.getDate(),
-    isWE: isWeekend(date)
-  });
-}
+function WeeklyView({ startDate, weeks, assignments, people, timeOffs, province, closeOnHolidays, closedExtraDates, customHolidaysByYear, consumeVacationOnHoliday }){
+  const header=[]; for(let d=0; d<7*weeks; d++){ const date=addDays(startDate,d); header.push({ dateStr:toDateValue(date), label: date.toLocaleDateString(undefined,{weekday:'short'})+' '+date.getDate() }); }
   // Helpers: TO aprobadas
   const isClosedDay = (dateStr) => isClosedBusinessDay2(dateStr, province, closeOnHolidays, closedExtraDates, customHolidaysByYear);
-  const indexTO = indexTimeOff(timeOffs, {
-  province,
-  consumeVacationOnHoliday,
-  customHolidaysByYear
-});
   const hasApprovedTO = (dateStr, personId) => {
     const d = parseDateValue(dateStr);
     const dow = d.getDay();
@@ -2230,128 +1705,36 @@ for(let d=0; d<7*weeks; d++){
     return { type: hit.type, status: hit.status };
   };
   return (
-    <div className={`${weeks>=2 ? 'overflow-x-auto' : ''} print:block`}>
-      <table className="text-sm border-collapse table-auto" style={{ minWidth: (weeks === 1) ? '100%' : `${(weeks*7 + 1) * 120}px` }}>
-        <thead className="sticky top-0 bg-white z-10">
+    <div className="overflow-x-auto print-only:block">
+      <table className="w-full text-sm border-collapse table-fixed">
+        <thead>
           <tr>
-            <th className={`text-left p-1 border-b sticky left-0 z-10 bg-white ${weeks<=2 ? 'min-w-[96px]' : 'min-w-[140px]'}`}>Persona</th>
-            {(header || []).map(h => {
-                const cell = (assignments[h.dateStr] || []);
-                const total = cell.length;
-                const assigned = cell.filter(c => !!c.personId).length;
-                const hasC = cell.some(c => c.conflict);
-                const badgeClass = hasC
-                  ? "text-rose-700 border-rose-300 bg-rose-50"
-                  : (assigned < total ? "text-amber-700 border-amber-300 bg-amber-50" : "text-slate-600 border-slate-200 bg-transparent");
-                return (
-                  <th
-                    key={h.dateStr}
-                    className={`text-left p-1 ${weeks>=2 ? 'min-w-[120px]' : ''} border-b border-l border-slate-100 ${h.dateStr===todayStr ? "bg-amber-50 ring-1 ring-amber-300" : (h.isWE ? "bg-slate-50" : "")}`}>
-                    <div className={"flex items-center " + (weeks<=2 ? 'gap-1' : 'gap-2')}>
-                      <span>{h.label}</span>
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded border ${badgeClass}`}>{assigned}/{total}</span>
-                    </div>
-                  </th>
-                );
-              })}
+            <th className="text-left p-1 border-b">Persona</th>
+            {(header || []).map(h=> <th key={h.dateStr} className="text-left p-1 border-b">{h.label}</th>)}
           </tr>
         </thead>
 <tbody>
   {(people || []).map(p => (
-    <tr key={p.id} className="odd:bg-slate-50/30 hover:bg-slate-100/30">
+    <tr key={p.id}>
       {/* Columna Persona (nombre + color) */}
-      <td className={`p-1 align-top sticky left-0 bg-white z-10 ${weeks<=2 ? 'min-w-[96px]' : 'min-w-[140px]'}`}>
+      <td className="p-1 align-top">
         <div className="inline-flex items-center gap-2">
           <span className="h-3 w-3 rounded" style={{ background: p.color }} />
           <span className="font-medium">{p.name}</span>
         </div>
       </td>
+
       {/* Celdas por día */}
       {(header || []).map((h, idx) => {
         // Turnos del día para esta persona
         const cell = normalizeAssignmentsCell(assignments, h.dateStr)
           .filter(c => c.personId === p.id)
           .sort((a, b) => minutesFromHHMM(a.shift.start) - minutesFromHHMM(b.shift.start));
+
         // Tipo de “Time Off” y festivo para celda vacía
-<<<<<<< HEAD
-        // Tipo de “Time Off” (aprobado) y festivo
-        let toType = (typeof getTOType === 'function') ? getTOType(h.dateStr, p.id) : null;
-=======
         const toInfo = (typeof getTOInfo === 'function') ? getTOInfo(h.dateStr, p.id) : null;
->>>>>>> origin/codex/explain-codebase-structure-and-recommendations
         const isFest = (typeof isClosedDay === 'function') ? isClosedDay(h.dateStr) : false;
-
-        // OFF semanal con política (X-J-V y adyacentes) → marcar "Libranza" si hoy procede
-        if (!toType) {
-          const wIdx = weekIndexFromDate(startDate, h.dateStr);
-          const offId = computeOffPersonId(people, wIdx);
-
-          // Lee la política que ya inyectas en window
-          const OFFP = (typeof window !== "undefined" && window.__OFF_POLICY__) ? window.__OFF_POLICY__ : {};
-          const limitDays = (OFFP.limitOffDays && OFFP.limitOffDays.length) ? OFFP.limitOffDays : [3,4,5];
-
-          // ¿La semana (o adyacentes) tienen vacaciones?
-          const dayDate = parseDateValue(h.dateStr);
-          const ws = addDays(startDate, wIdx*7), we = addDays(ws, 6);
-          const overlaps = (to) => !(parseDateValue(to.end) < ws || parseDateValue(to.start) > we);
-          const VAC = (timeOffs||[]).filter(t => t.type==='vacaciones' && t.status!=='denegada');
-          const hasVac = !!(OFFP.enableLimitOffOnVacationWeek && VAC.some(overlaps));
-          let adjVac = false;
-          if (OFFP.enableBlockFullOffAdjacentWeeks) {
-            const win = Math.max(1, OFFP.adjacencyWindow || 1);
-            for (let k=1; k<=win && !adjVac; k++){
-              const prevWs = addDays(startDate, (wIdx-k)*7), prevWe = addDays(prevWs, 6);
-              const nextWs = addDays(startDate, (wIdx+k)*7), nextWe = addDays(nextWs, 6);
-              const ovPrev = VAC.some(to => !(parseDateValue(to.end) < prevWs || parseDateValue(to.start) > prevWe));
-              const ovNext = VAC.some(to => !(parseDateValue(to.end) < nextWs || parseDateValue(to.start) > nextWe));
-              if (ovPrev || ovNext) adjVac = true;
-            }
-          }
-          const offLimitedThisWeek = !!(hasVac || adjVac);
-          const dayIdx = dayDate.getDay(); // 0..6
-          const offAllowedToday = offLimitedThisWeek ? limitDays.includes(dayIdx) : true;
-
-          if (p.id === offId && offAllowedToday) {
-            toType = 'libranza';
-          }
-        }
-
         return (
-<<<<<<< HEAD
-                <td
-          key={h.dateStr || idx}
-          className={`p-1 align-top ${weeks>=2 ? 'min-w-[120px]' : ''} border-l border-slate-100 ${h.dateStr===todayStr ? "bg-amber-50/30" : ""} ${h.isWE ? "bg-slate-50/50" : ""}`} >
-            {cell.length===0 ? (
-              <div className="rounded border bg-transparent px-1 py-0.5 inline-flex items-center gap-1">
-                {renderEmptyCell(toType, isFest)}
-                {isAdmin && !isFest && (
-                  <details className="relative inline-block">
-                    <summary className="cursor-pointer select-none text-[12px]" title="Crear refuerzo y asignar">👤</summary>
-                    <div className="absolute z-20 mt-1 bg-white border rounded shadow p-1">
-                      <select
-                        className="border rounded px-1 py-0.5 text-[11px]"
-                        value=""
-                        onChange={e => { if (e.target.value) onQuickAssign(h.dateStr, null, e.target.value); }}
-                      >
-                        <option value="">Asignar…</option>
-                        {(people || []).map(pp => (
-                          <option
-                            key={pp.id}
-                            value={pp.id}
-                            disabled={!!indexTO.get(pp.id)?.has(h.dateStr)}
-                            title={indexTO.get(pp.id)?.has(h.dateStr) ? 'No disponible (vacaciones/libranza/viaje)' : ''}
-                          >
-                            {pp.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </details>
-                )}
-              </div>
-            ) : ( 
-            cell.map((a,i)=>(<PrettyAssignment a={a} h={h} p={p} i={i} pillClass={pillClass} />))
-=======
         <td key={h.dateStr || idx} className="p-1 align-top">
           {cell.length===0 ? (
             <div className="rounded border bg-slate-50 px-1 py-0.5 inline-block">
@@ -2359,7 +1742,6 @@ for(let d=0; d<7*weeks; d++){
             </div>
           ) : (
             cell.map((a,i)=>(<PrettyAssignment a={a} h={h} p={p} i={i} />))
->>>>>>> origin/codex/explain-codebase-structure-and-recommendations
           )}
         </td>
         );
@@ -2804,7 +2186,7 @@ function ResumenPanel({ controls, annualTarget, onExportICS }){
   );
 }
 // ===== Modal Día =====
-function DayModal({ dateStr, date, assignments, people, onOverride, onClose, isAdmin, onQuickAssign }){
+function DayModal({ dateStr, date, assignments, people, onOverride, onClose, isAdmin }){
   const pmap=new Map(people.map(p=>[p.id,p]));
   const sorted=assignments.map(x=>x); // ya vienen ordenados por ASS
   return (
@@ -2825,21 +2207,7 @@ function DayModal({ dateStr, date, assignments, people, onOverride, onClose, isA
                 <div className="flex items-center justify-between gap-3">
                   <div className="text-sm">
                     <div className="font-medium">{c.shift.label||`Turno ${i+1}`} · {span} <span className="text-slate-500 font-normal">({dur}h{c.shift.lunchMinutes ? " · comida " + (c.shift.lunchMinutes) + "m" : ""})</span></div>
-<<<<<<< HEAD
-                    <div className="text-xs">
-                      {c.conflict
-                        ? <span className="text-rose-700">⚠ Falta asignar</span>
-                        : <>
-                            <span className="text-slate-500">Asignado</span>
-                            {c.origin==='override' && <span className="ml-2 text-amber-700">· Override</span>}
-                            {c.origin==='forced'   && <span className="ml-2 text-emerald-700">· Forzado</span>}
-                            {(!c.origin || c.origin==='auto') && <span className="ml-2 text-slate-600">· Auto</span>}
-                          </>
-                      }
-                    </div>
-=======
                     <div className="text-xs text-slate-500">{c.forcedEmpty ? '🔒 Vacío forzado' : (c.conflict? '⚠ Falta asignar':'Asignado')}</div>
->>>>>>> origin/codex/explain-codebase-structure-and-recommendations
                   </div>
                   <div className="flex items-center gap-2">
                     <select
@@ -2852,16 +2220,6 @@ function DayModal({ dateStr, date, assignments, people, onOverride, onClose, isA
                       {isAdmin && <option value="__EMPTY__">Bloquear (vacío)</option>}
                       {(people || []).map(pp=> <option key={pp.id} value={pp.id}>{pp.name}</option>)}
                     </select>
-                    {isAdmin && (
-                      <select
-                        className="border rounded px-1 py-0.5 text-[11px]"
-                        value={c.personId || ''}
-                        onChange={e => onQuickAssign(dateStr, i, e.target.value || null)}
-                      >
-                        <option value="">—</option>
-                        {(people || []).map(pp => <option key={pp.id} value={pp.id}>{pp.name}</option>)}
-                      </select>
-                    )}
                     {p && <span className="inline-flex items-center gap-1 text-sm">
                       <span className="h-3 w-3 rounded" style={{background:p.color}}/> {p.name}
                     </span>}
@@ -3190,7 +2548,7 @@ function RefuerzoPolicyPanel({ state, up }){
           <div className="text-xs mb-1">Meses donde SÍ proponer refuerzos:</div>
           <div className="flex flex-wrap gap-2">
             {months.map(m=>(
-              <label key={m.k} className={`px-2 py-1 rounded border cursor-pointer ${(pol.allowedMonths||[]).includes(m.k)?'bg-slate-100':''}`}>
+              <label key={m.k} className={`px-2 py-1 rounded border cursor-pointer \${(pol.allowedMonths||[]).includes(m.k)?'bg-slate-100':''}`}>
                 <input type="checkbox" className="mr-1"
                   checked={(pol.allowedMonths||[]).includes(m.k)}
                   onChange={()=>toggleMonth(m.k)} />
@@ -3272,79 +2630,8 @@ function VacationPolicyPanel({ state, up }){
   );
 }
 
+
 function AuthenticatedApp(props){
-<<<<<<< HEAD
-  const { auth, setAuth, ui, setUI, showToast,
-          state, setState,
-          cloud, setCloud, cloudLoad, cloudSave,
-          startDate, weeklyStart,
-          userWeeks, setUserWeeks, weekIndex, setWeekIndex,
-          canPrev, canNext, canNextRange,
-          payroll, setPayroll,
-          ASS, controls,
-          exportCSV, exportJSON, importJSON, exportICS, exportPayroll,
-          up, upPerson, forceAssign, pillClass, density, setDensity,
-          personFilter, setPersonFilter, clearVisibleOverrides, duplicateVisibleToNextWeek, undoLastOverride, onQuickAssign } = props;
-
-  // === AUDITORÍA DE PRESENCIA (online) ===
-  const [online, setOnline] = useState({ users: [], at: null });
-
-  // Heartbeat cada 60s
-useEffect(() => {
-  if (!auth?.user || !auth?.token) return;
-
-  let stop = false, t;
-
-  const beat = async () => {
-    try {
-      // intento normal con keepalive
-      await fetch('/auth/heartbeat', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${auth.token}` },
-        keepalive: true,            // ← importante para pestañas en background
-      });
-    } catch {}
-    if (!stop) t = setTimeout(beat, 25_000); // ← cada 25s
-  };
-
-  // 1ª marca rápida
-  beat();
-
-  // Marca al volver a foco
-  const onVis = () => { if (document.visibilityState === 'visible') beat(); };
-  document.addEventListener('visibilitychange', onVis);
-
-  // Marca al cerrar/navegar (no esperes respuesta)
-  const onUnload = () => {
-    try {
-      const blob = new Blob([], { type: 'application/octet-stream' });
-      navigator.sendBeacon('/auth/heartbeat', blob);
-    } catch {}
-  };
-  window.addEventListener('pagehide', onUnload);
-  window.addEventListener('beforeunload', onUnload);
-
-  return () => {
-    stop = true; clearTimeout(t);
-    document.removeEventListener('visibilitychange', onVis);
-    window.removeEventListener('pagehide', onUnload);
-    window.removeEventListener('beforeunload', onUnload);
-  };
-}, [auth?.user, auth?.token]);
-
-  // Pull de usuarios online cada 10s
-  useEffect(() => {
-    if (!auth?.user || !auth?.token) return;
-    const id = setInterval(async () => {
-      try {
-        const d = await api('/auth/online', { method:'GET' }, auth.token);
-        setOnline(d || { users: [], at: null });
-      } catch {}
-    }, 10_000);
-    return () => clearInterval(id);
-  }, [auth?.user, auth?.token]);
-
-=======
   const {
     auth, setAuth, ui, setUI, showToast,
     modalDay, setModalDay,
@@ -3358,7 +2645,6 @@ useEffect(() => {
     exportCSV, exportJSON, importJSON, exportICS, exportPayroll,
     up, upPerson, forceAssign,
   } = props;
->>>>>>> origin/codex/explain-codebase-structure-and-recommendations
 
   const modalDayProp = modalDay ?? null;
   const setModalDayProp = setModalDay ?? (() => {});
@@ -3430,14 +2716,15 @@ useEffect(() => {
 
 // ---------- Render principal ----------
   return (
-    <div className="min-h-screen bg-transparent text-slate-900">
+    <div className="min-h-screen bg-slate-50 text-slate-900">
       <style>{`
         :root { color-scheme: light !important; }
-        html, body { background: #f8fafc; color: #0f172a; font-size: 12.5px; } /* ← AÑADIDO */
+        html, body { background: #f8fafc; color: #0f172a; }
         input, select, textarea, button { background:#fff!important; color:#0f172a!important; border-color: rgba(15,23,42,0.15)!important; }
         ::placeholder { color:#94a3b8; }
         .chip { background-color: rgba(15,23,42,0.04); border:1px solid rgba(15,23,42,0.15); }
       `}</style>
+
       <header className="sticky top-0 z-10 bg-white/90 backdrop-blur border-b border-slate-200">
         <div className="w-full max-w-[1800px] mx-auto px-6 py-3 flex items-center justify-between">
           <h1 className="text-lg font-semibold">Gestor de Turnos · Usuarios + SQLite</h1>
@@ -3446,47 +2733,6 @@ useEffect(() => {
               {auth.user?.name || auth.user?.email || "Usuario"} · {auth.user?.role || ""}
             </span>
             {isAdmin && (
-<<<<<<< HEAD
-              <span
-                className="px-2 py-1 rounded border bg-emerald-50 border-emerald-300 text-emerald-700"
-                title={(online.users||[]).map(u=>`${(u.name||u.email)} · ${u.ip||''}${u.ua? ` · ${u.ua}`:''}`).join('\n') || 'Sin conexiones'}
-
-              >
-                {online.users?.length || 0} online
-              </span>
-            )}
-            {isAdmin && (<button onClick={()=>setState(prev=>({...prev, rebalance:!prev.rebalance}))}
-              className={`px-3 py-1.5 rounded-lg border ${state.rebalance?'bg-emerald-50 border-emerald-300':'border-slate-300 hover:bg-slate-100'}`}>
-              {state.rebalance? 'Reequilibrio ON':'Reequilibrar'}
-            </button>)}
-
-            {/* Export/Import local */}{/* Controles Nube */}{isAdmin && (
-<>
-<>
-            <button onClick={props.exportCSV} className="px-3 py-1.5 rounded-lg border">CSV</button>
-            <button onClick={props.exportJSON} className="px-3 py-1.5 rounded-lg border">Export JSON</button>
-            <label className="px-3 py-1.5 rounded-lg border cursor-pointer">Import JSON
-              <input type="file" accept="application/json" className="hidden" onChange={(e)=> e.target.files && props.importJSON(e.target.files[0])}/>
-            </label>
-
-            
-</>
-<input className="border rounded px-2 py-1 w-32" placeholder="Space ID"
-              value={cloud.spaceId} onChange={e=>setCloud({...cloud,spaceId:e.target.value})}/>
-            <input className="border rounded px-2 py-1 w-28" placeholder="ReadToken"
-              value={cloud.readToken} onChange={e=>setCloud({...cloud,readToken:e.target.value})}/>
-            <input className="border rounded px-2 py-1 w-28" placeholder="WriteToken"
-              value={cloud.writeToken} onChange={e=>setCloud({...cloud,writeToken:e.target.value})}/>
-            <button onClick={props.cloudLoad} className="px-3 py-1.5 rounded-lg border">Cargar nube</button>
-            <button onClick={props.cloudSave} className="px-3 py-1.5 rounded-lg border">Guardar nube</button>
-  </>
-)}
-{ui.sync==="loading" && <span className="px-2 py-1 rounded bg-amber-100 border border-amber-300">Sincronizando…</span>}
-            {ui.sync==="ok" && <span className="px-2 py-1 rounded bg-emerald-100 border border-emerald-300">¡Listo!</span>}
-            {ui.sync==="error" && <span className="px-2 py-1 rounded bg-rose-100 border border-rose-300">Error</span>}
-            {ui.toast && (<div className="fixed right-4 bottom-4 z-50 bg-black text-white px-3 py-2 rounded-lg shadow">{ui.toast}</div>)}
-            <button onClick={()=>props.setAuth({ token:"", user:null })} className="px-2 py-1 rounded border">Salir</button>
-=======
               <button
                 onClick={()=>setState(prev=>({ ...prev, rebalance: !prev.rebalance }))}
                 className={`px-3 py-1.5 rounded-lg border ${state.rebalance ? 'bg-emerald-50 border-emerald-300' : 'border-slate-300 hover:bg-slate-100'}`}
@@ -3534,7 +2780,6 @@ useEffect(() => {
               <span className="px-2 py-1 rounded bg-rose-100 border border-rose-300">Error</span>
             )}
             <button onClick={handleLogout} className="px-2 py-1 rounded border">Salir</button>
->>>>>>> origin/codex/explain-codebase-structure-and-recommendations
           </div>
         </div>
       </header>
@@ -3573,201 +2818,6 @@ useEffect(() => {
                       Mostrar WeekendAuditPanel
                     </label>
 
-<<<<<<< HEAD
-              {state?.debug?.weekendAudit === true && (
-                <div className="mt-3">
-                  <Card title="Weekend audit (Admin)">
-                    <WeekendAuditPanel
-                      assignments={ASS}
-                      people={state.people}
-                      startDate={startDate}
-                      weeks={state.weeks}
-                    />
-                  </Card>
-                </div>
-              )}
-            </div>
-          </Card>
-
-{isAdmin && (
-  <Card title="Auditoría de sesiones (Admin)">
-    {(() => {
-      const [day, setDay] = React.useState(toDateValue(new Date()));
-      const [logs, setLogs] = React.useState([]);
-      const [loading, setLoading] = React.useState(false);
-
-      async function load() {
-        try {
-          setLoading(true);
-          const d = await api(`/admin/sessions?day=${encodeURIComponent(day)}`, { method:'GET' }, auth.token);
-          setLogs(d?.sessions || []);
-        } catch (e) {
-          showToast('Error cargando sesiones');
-        } finally {
-          setLoading(false);
-        }
-      }
-
-      const byUser = React.useMemo(() => {
-        const m = new Map();
-        for (const s of logs) {
-          const email = s?.user?.email || 'desconocido';
-          const name  = s?.user?.name  || '';
-          const ip    = s?.ip || 'n/a';
-          const ts    = s?.ts || '0000-00-00T00:00:00Z';
-          const ua    = s?.ua || '';
-          if (!m.has(email)) m.set(email, { email, name, total:0, ips:new Map(), lastTs:'', lastUa:'' });
-          const u = m.get(email);
-          u.total += 1;
-          u.ips.set(ip, (u.ips.get(ip)||0) + 1);
-          if (ts > u.lastTs) { u.lastTs = ts; u.lastUa = ua; }
-        }
-        const rows = [];
-        for (const u of m.values()) {
-          const ips = Array.from(u.ips.entries()).map(([ip,c]) => `${ip} (${c})`).join(', ');
-          rows.push({ email:u.email, name:u.name, total:u.total, ips, lastUa:u.lastUa });
-        }
-        rows.sort((a,b)=> b.total - a.total || a.email.localeCompare(b.email));
-        return rows;
-      }, [logs]);
-
-      return (
-        <div className="space-y-2">
-          <div className="flex items-center gap-2">
-            <input type="date" className="border rounded px-2 py-1" value={day} onChange={e=>setDay(e.target.value)} />
-            <button onClick={load} className="px-3 py-1.5 rounded-lg border" disabled={loading}>
-              {loading?'Cargando…':'Cargar'}
-            </button>
-            <span className="text-xs text-slate-500">{logs.length} eventos</span>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm border-separate border-spacing-y-1">
-              <thead>
-                <tr className="text-left text-slate-600">
-                    <th className="py-1 px-2">Usuario</th>
-                    <th className="py-1 px-2">Email</th>
-                    <th className="py-1 px-2">Conexiones (día)</th>
-                    <th className="py-1 px-2">IPs</th>
-                    <th className="py-1 px-2">Navegador</th>
-                </tr>
-              </thead>
-              <tbody>
-                {byUser.length===0 && <tr><td colSpan={4} className="py-2 px-2 text-slate-500">Sin datos para ese día.</td></tr>}
-                {byUser.map(r=>(
-                  <tr key={r.email} className="bg-white">
-                    <td className="py-1 px-2">{r.name||'—'}</td>
-                    <td className="py-1 px-2">{r.email}</td>
-                    <td className="py-1 px-2">{r.total}</td>
-                    <td className="py-1 px-2">{r.ips}</td>
-                    <td className="py-1 px-2 truncate max-w-[24rem]" title={r.lastUa}>{r.lastUa || '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-
-          {/* DETALLE DE SESIONES (crudo) */}
-            <div className="mt-3">
-              <div className="flex items-center justify-between mb-1">
-                <div className="text-sm font-medium">Detalle de sesiones del día</div>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    placeholder="Filtrar por email/IP/UA…"
-                    className="border rounded px-2 py-1 text-sm"
-                    onChange={e => {
-                      const q = (e.target.value || '').toLowerCase();
-                      const filtered = logs.filter(s => {
-                        const email = s?.user?.email || '';
-                        const ip = s?.ip || '';
-                        const ua = s?.ua || '';
-                        return email.toLowerCase().includes(q)
-                            || ip.toLowerCase().includes(q)
-                            || ua.toLowerCase().includes(q);
-                      });
-                      setLogs(filtered.length ? filtered : logs); // simple filtro sobre la vista
-                    }}
-                  />
-                  <button
-                    className="px-2 py-1 rounded border text-sm"
-                    onClick={()=>{
-                      const rows = [
-                        ['ts','email','name','ip','ua'].join(',')
-                      ];
-                      (logs||[]).forEach(s=>{
-                        const r = [
-                          s.ts,
-                          s?.user?.email || '',
-                          s?.user?.name || '',
-                          s.ip || '',
-                          (s.ua || '').replace(/"/g,'""')
-                        ].map(x=>`"${x}"`).join(',');
-                        rows.push(r);
-                      });
-                      const blob = new Blob([rows.join('\n')], {type:'text/csv;charset=utf-8;'});
-                      const a = document.createElement('a');
-                      a.href = URL.createObjectURL(blob);
-                      a.download = `sesiones_${day}.csv`;
-                      a.click();
-                    }}
-                  >Export CSV</button>
-                </div>
-              </div>
-
-              <div className="overflow-x-auto max-h-64 border rounded bg-white">
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr className="text-left text-slate-600 border-b">
-                      <th className="py-1 px-2">Hora (UTC)</th>
-                      <th className="py-1 px-2">Email</th>
-                      <th className="py-1 px-2">IP</th>
-                      <th className="py-1 px-2">Navegador</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(logs||[]).length===0 && (
-                      <tr><td colSpan={4} className="py-2 px-2 text-slate-500">Sin datos.</td></tr>
-                    )}
-                    {(logs||[]).map((s,i)=>(
-                      <tr key={i} className="border-b">
-                        <td className="py-1 px-2 whitespace-nowrap">{(s.ts||'').replace('T',' ').replace('Z','')}</td>
-                        <td className="py-1 px-2">{s?.user?.email || '—'}</td>
-                        <td className="py-1 px-2">{s?.ip || '—'}</td>
-                        <td className="py-1 px-2 truncate max-w-[36rem]" title={s?.ua||''}>{s?.ua || '—'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-  
-          </div>
-        </div>
-      );
-    })()}
-  </Card>
-)}
-
-
-          <Card title="Auditoría (últimos 100)">
-  <div className="max-h-40 overflow-auto text-xs">
-    {((state.audit||[]).slice(-100).reverse()).map((e,i)=>(
-      <div key={i} className="py-0.5 border-b last:border-0">
-        <span className="text-slate-500">{(e.ts||"").replace("T"," ").replace("Z","")} · </span>
-        <span>{e.actor||"sys"}</span>
-        <span> — {e.action||"evento"}</span>
-        {e.dateStr? <span> · {e.dateStr}</span>: null}
-      </div>
-    ))}
-    {!(state.audit&&state.audit.length) && <div className="text-slate-500">Sin eventos aún.</div>}
-  </div>
-</Card>
-
-<PersonasPanel state={state} upPerson={upPerson} />
-          <TurnosPanel state={state} up={up} />
-          <FestivosPanel state={state} up={up} />
-          <CustomHolidaysPanel state={state} up={up} /></>)}
-        </section>
-=======
                     {state?.debug?.weekendAudit === true && (
                       <div className="mt-3">
                         <Card title="Weekend audit (Admin)">
@@ -3789,7 +2839,6 @@ useEffect(() => {
               </>
             )}
           </section>
->>>>>>> origin/codex/explain-codebase-structure-and-recommendations
 
           {/* Calendarios y reportes */}
           <section className="lg:col-span-2 space-y-6">
@@ -3803,7 +2852,7 @@ useEffect(() => {
          return s ? `${fmt(s)} – ${fmt(e)}` : "";
       })()}
     </div>
-    <div className={`flex items-center ${userWeeks<=2 ? 'gap-1' : 'gap-2'}`}>
+    <div className="flex items-center gap-2">
       <button disabled={!canPrev} onClick={()=>setWeekIndex(w=>Math.max(0,w-1))}
         className={`px-2 py-1 rounded border ${canPrev? "hover:bg-slate-100":"opacity-50 cursor-not-allowed"}`}>◀︎</button>
       <button onClick={()=>{ const t=startOfWeekMonday(new Date()); const idx=Math.max(0, Math.min(state.weeks-1, Math.floor((t - startDate)/(7*24*3600*1000)))); setWeekIndex(idx); }}
@@ -3817,43 +2866,30 @@ useEffect(() => {
         <option value={4}>4 semanas</option>
         <option value={8}>8 semanas</option>
       </select>
-            <input
-        className="ml-2 border rounded px-2 py-1 text-sm"
-        placeholder="Filtrar persona…"
-        value={personFilter}
-        onChange={e=>setPersonFilter(e.target.value)}
-      />
-      <button onClick={clearVisibleOverrides} className="ml-2 px-2 py-1 rounded border text-sm">Limpiar overrides (rango)</button>
-      <button onClick={duplicateVisibleToNextWeek} className="ml-2 px-2 py-1 rounded border text-sm">Duplicar → semana siguiente</button>
-      <button onClick={undoLastOverride} className="ml-2 px-2 py-1 rounded border text-sm">Deshacer último override</button>
     </div>
-      <button onClick={()=>window.print()} className="ml-2 px-2 py-1 rounded-lg border text-sm">Imprimir / PDF</button>
-    </div>
+  </div>
   
   {/* Leyenda (visible para todos) */}
   <div className="flex flex-wrap items-center gap-2 mb-3 text-[11px]">
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border bg-transparent">➕ Refuerzo</span>
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border bg-transparent">🎌 Festivo</span>
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border bg-transparent">🗓️ Finde</span>
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border bg-transparent">🍽️ Comida restada</span>
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border bg-transparent">🏖️ Vacaciones</span>
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border bg-transparent">🛌 Libranza</span>
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border bg-transparent">✈️ Viaje</span>
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border bg-slate-50">➕ Refuerzo</span>
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border bg-slate-50">🎌 Festivo</span>
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border bg-slate-50">🗓️ Finde</span>
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border bg-slate-50">🍽️ Comida restada</span>
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border bg-slate-50">🏖️ Vacaciones</span>
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border bg-slate-50">🛌 Libranza</span>
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border bg-slate-50">✈️ Viaje</span>
   </div>
 <WeeklyView
     startDate={weeklyStart}
-    pillClass={pillClass}
     weeks={userWeeks}
     assignments={ASS}
-    people={state.people.filter(p => !personFilter || p.name.toLowerCase().includes(personFilter.toLowerCase()))}
+    people={state.people}
     timeOffs={state.timeOffs}
     province={state.province}
     closeOnHolidays={state.closeOnHolidays}
     closedExtraDates={state.closedExtraDates}
     customHolidaysByYear={state.customHolidaysByYear}
     consumeVacationOnHoliday={state.consumeVacationOnHoliday}
-    isAdmin={isAdmin}
-    onQuickAssign={onQuickAssign}
   />
 </Card>
 
@@ -3866,7 +2902,7 @@ useEffect(() => {
                 <button onClick={()=>window.print()} className="px-3 py-1.5 rounded-lg border">Imprimir / PDF</button>
               </div>
             </div>
-            <WeeklyView startDate={weeklyStart} weeks={1} pillClass={pillClass} assignments={ASS} people={state.people} timeOffs={state.timeOffs} province={state.province} closeOnHolidays={state.closeOnHolidays} closedExtraDates={state.closedExtraDates} customHolidaysByYear={state.customHolidaysByYear} consumeVacationOnHoliday={state.consumeVacationOnHoliday} isAdmin={isAdmin} onQuickAssign={onQuickAssign} />
+            <WeeklyView startDate={weeklyStart} weeks={1} assignments={ASS} people={state.people} timeOffs={state.timeOffs} province={state.province} closeOnHolidays={state.closeOnHolidays} closedExtraDates={state.closedExtraDates} customHolidaysByYear={state.customHolidaysByYear} consumeVacationOnHoliday={state.consumeVacationOnHoliday} />
           </Card>)}
 
           {isAdmin && (
@@ -3889,7 +2925,7 @@ useEffect(() => {
 
           <TimeOffPanel state={state} setState={setState} controls={controls} isAdmin={isAdmin} currentUser={auth.user} />
           <SwapsPanel state={state} setState={setState} assignments={ASS}  isAdmin={isAdmin} currentUser={auth.user} />
-          {isAdmin && <RefuerzosPanelLite state={state} up={up} assignments={ASS} />}
+          {isAdmin && <RefuerzosPanelLite state={state} up={up} />}
           {isAdmin && <GeneradorPicos state={state} up={up} />}{isAdmin && (
                     <PropuestaCierre
             state={state}
@@ -3959,14 +2995,13 @@ useEffect(() => {
           people={state.people}
           onOverride={forceAssign}
           isAdmin={isAdmin}
-          onQuickAssign={onQuickAssign}
           onClose={()=>setModalDayProp(null)}
         />
       )}
     </div>
   );
 }
-function RefuerzosPanelLite({ state, up, assignments }){
+function RefuerzosPanelLite({ state, up }){
   const [ev,setEv] = useState({
     label:'Black Friday',
     start: state.startDate,
@@ -3988,8 +3023,7 @@ function RefuerzosPanelLite({ state, up, assignments }){
   const [sort,setSort] = useState({ key:'start', dir:'asc' });
   const [page,setPage] = useState(0);
   const [pageSize,setPageSize] = useState(25);
-  const [assignee, setAssignee] = useState('');
-  const [onlyForced, setOnlyForced] = useState(false);
+
   const inRange = (e)=> (!from || e.start>=from) && (!to || e.end<=to);
   const matches = (e)=> !q || (e.label||'').toLowerCase().includes(q.toLowerCase());
   const toggleSort = (k)=> setSort(prev=> prev.key===k ? {key:k,dir:(prev.dir==='asc'?'desc':'asc')} : {key:k,dir:'asc'});
@@ -4000,16 +3034,7 @@ function RefuerzosPanelLite({ state, up, assignments }){
     return 0;
   };
 
-  const matchesPerson = (e) => !assignee || e.assigneeId === assignee;
-  const matchesForced = (e) => !onlyForced || !!e.assigneeForced;
-
-  const filtered = useMemo(() => events
-    .filter(inRange)
-    .filter(matches)
-    .filter(matchesPerson)
-    .filter(matchesForced)
-    .sort(compare)
-  , [events, q, from, to, sort, assignee, onlyForced]);
+  const filtered = useMemo(()=> events.filter(inRange).filter(matches).sort(compare), [events,q,from,to,sort]);
   const total = filtered.length;
   const pages = Math.max(1, Math.ceil(total/(pageSize||25)));
   const pageClamped = Math.min(page, pages-1);
@@ -4017,59 +3042,9 @@ function RefuerzosPanelLite({ state, up, assignments }){
   const rows = filtered.slice(startIdx, startIdx + (pageSize||25));
   const goto = (p)=> setPage(Math.max(0, Math.min(pages-1,p)));
 
-  // ==== Asignación manual: helpers en scope de componente ====
-  const dateRange = (from,to) => {
-    const out=[]; if(!from||!to) return out;
-    let d = parseDateValue(from), end = parseDateValue(to);
-    while(d<=end){ out.push(toDateValue(d)); d=addDays(d,1); }
-    return out;
-  };
-  const availabilityFor = (e, personId) => {
-    if(!personId) return {free:0,total:0};
-    const days = dateRange(e.start,e.end);
-    let free=0;
-    for(const ds of days){
-      const day = (assignments?.[ds]||[]);
-      const busy = day.some(a=>a?.personId===personId);
-      if(!busy) free++;
-    }
-    return {free,total:days.length};
-  };
-  const appliedFor = (e) => {
-    if (!e.assigneeId) return {applied:0,total:0};
-    const days = dateRange(e.start, e.end);
-    let applied = 0;
-    for (const ds of days) {
-      const day = (assignments?.[ds] || []);
-      if (day.some(a => a?.personId === e.assigneeId)) applied++;
-    }
-    return { applied, total: days.length };
-  };
-  const setEventAssignee = (absIdx, personId) => {
-    const next = (state.events||[]).map((ev,i)=> i===absIdx ? {...ev, assigneeId: personId} : ev);
-    up(['events'], next);                // ← Asegúrate de que va ENTRE COMILLAS
-  };
-
-  const toggleForceAssignee = (absIdx, v) => {
-    const next = (state.events||[]).map((ev,i)=> i===absIdx ? {...ev, assigneeForced: !!v} : ev);
-    up(['events'], next);                // ← También con COMILLAS
-  };
   return (
     <Card title="Eventos de Refuerzo (Admin)">
-      <div className="flex flex-wrap gap-2 mb-3">{[
-    {name:"Black Friday",w:2,we:1,label:"Refuerzo (Ofi)"},
-    {name:"Inventario",w:1,we:0,label:"Refuerzo Inventario"},
-    {name:"Rebajas",w:1,we:1,label:"Refuerzo Tienda"}
-  ].map(p => (
-    <button key={p.name} className="px-2 py-1 rounded border"
-    onClick={()=> up(["events"], [...(state.events||[]), {
-      label:p.name, start: state.startDate, end: state.startDate,
-      weekdaysExtraSlots:p.w, weekendExtraSlots:p.we,
-      weekdayRefuerzo:"mañana"
-    }])}
-    >+ {p.name}</button>
-  ))}</div>
-{/* Alta rápida */}
+      {/* Alta rápida */}
       <div className="grid grid-cols-12 gap-2 mb-3">
         <div className="col-span-4">
           <label className="text-xs">Etiqueta</label>
@@ -4124,33 +3099,6 @@ function RefuerzosPanelLite({ state, up, assignments }){
         </div>
       </div>
 
-      {/* Filtro: persona asignada */}
-      <div className="col-span-3">
-        <label className="text-xs">Asignado a</label>
-        <select
-          className="w-full border rounded px-2 py-1"
-          value={assignee}
-          onChange={(e) => { setAssignee(e.target.value); setPage(0); }}
-        >
-          <option value="">— cualquiera —</option>
-          {(state.people || []).map(p => (
-            <option key={p.id} value={p.id}>{p.name}</option>
-          ))}
-        </select>
-      </div>
-
-      {/* Filtro: solo forzados */}
-      <div className="col-span-3 flex items-end">
-        <label className="text-xs inline-flex items-center gap-2">
-          <input
-            type="checkbox"
-            checked={onlyForced}
-            onChange={(e) => { setOnlyForced(e.target.checked); setPage(0); }}
-          />
-          Solo forzados
-        </label>
-      </div>
-
       {/* Tabla paginada */}
       <div className="border rounded-lg overflow-x-auto">
         {total===0 && <div className="p-3 text-sm text-slate-500">Sin eventos.</div>}
@@ -4163,17 +3111,12 @@ function RefuerzosPanelLite({ state, up, assignments }){
                 <th className="text-left p-2 cursor-pointer" onClick={()=>toggleSort('end')}>Hasta</th>
                 <th className="text-right p-2">L–V +</th>
                 <th className="text-right p-2">S–D +</th>
-                <th className="text-right p-2">Tipo L–V</th>
-                <th className="text-right p-2">Asignación</th>
                 <th className="text-right p-2">Acciones</th>
               </tr>
             </thead>
   <tbody>
      {(filtered.slice(startIdx, startIdx + (pageSize||25))).map((e,i)=>{
-      const absIdx = (state.events||[]).findIndex(ev => ev===e);
-      const pid = e.assigneeId || ""
-      const ppl = (state.people || [])
-      const avail = availabilityFor(e, pid)
+      const absIdx = (state.events||[]).indexOf(e);
       return (
         <tr key={`${e.start}-${e.end}-${i}`} className="border-b">
           <td className="p-2">
@@ -4197,61 +3140,6 @@ function RefuerzosPanelLite({ state, up, assignments }){
             <input type="number" min={0} max={9} className="border rounded px-2 py-1 w-20 text-right"
                    value={e.weekendExtraSlots||0}
                    onChange={ev=>setFieldAt(absIdx,'weekendExtraSlots',Number(ev.target.value)||0)} />
-          </td>
-          <td className="p-2 text-right">
-            <select
-              className="border rounded px-2 py-1 w-32"
-              value={e.weekdayRefuerzo || "auto"}
-              onChange={ev=> setFieldAt(absIdx, "weekdayRefuerzo", ev.target.value)}
-            >
-              <option value="auto">Auto</option>
-              <option value="mañana">Mañana</option>
-              <option value="tarde">Tarde</option>
-            </select>
-          </td>
-          <td className="p-2 text-right">
-            {(() => {
-              const absIdx = (state.events || []).findIndex(ev => ev === e); // índice absoluto
-              const pid    = e.assigneeId || "";
-              const ppl    = state.people || [];
-              const avail  = availabilityFor(e, pid);
-
-              return (
-                <div className="flex items-center gap-2 justify-end">
-                  <select
-                    className="border rounded px-2 py-1"
-                    value={pid}
-                    onChange={ev => setEventAssignee(absIdx, ev.target.value)}
-                  >
-                    <option value="">—</option>
-                    {ppl.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
-                  </select>
-
-                  <label className="text-xs inline-flex items-center gap-1">
-                    <input
-                      type="checkbox"
-                      checked={!!e.assigneeForced}
-                      onChange={ev => toggleForceAssignee(absIdx, ev.target.checked)}
-                    />
-                    Forzar
-                  </label>
-
-                  {pid && (
-                    <span
-                      className={(avail.free===avail.total ? "text-emerald-600" : "text-amber-600") + " text-xs"}
-                      title="días libres/total"
-                    >
-                      libre {avail.free}/{avail.total}
-                    </span>
-                  )}
-                  {pid && (
-                    <span className="text-xs text-slate-600">
-                      · asignado {appliedFor(e).applied}/{appliedFor(e).total}
-                    </span>
-                  )}
-                </div>
-              );
-            })()}
           </td>
           <td className="p-2 text-right">
             <button onClick={()=>delAtIndex(absIdx)} className="text-red-600 hover:underline">Eliminar</button>
@@ -4280,4 +3168,3 @@ function RefuerzosPanelLite({ state, up, assignments }){
     </Card>
   );
 }
-
