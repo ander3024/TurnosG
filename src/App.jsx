@@ -971,67 +971,7 @@ function goToday(){
   const canPrev=weekIndex>0, canNext=weekIndex<state.weeks-1, canNextRange=weekIndex<state.weeks-userWeeks;
 
   // ---------- Auth-only: login screen ----------
-  
-
-if (!auth.user || !auth.token) {
-  // Renderiza el header una vez existen state/isAdmin/ui y handlers
-  // Header como componente (recibe todo lo que necesita vía props)
-  // Header como componente robusto: usa props y mapea state desde props
-  function HeaderBar(props){
-    const state = props?.state;
-    const {
-      setState, isAdmin, ui, cloud, setCloud,
-      showToast, doLogout, exportCSV, exportJSON,
-      importJSON, cloudLoad, cloudSave
-    } = props || {};
-    if (!state) return null;
-    return (
-<header className="sticky top-0 z-10 bg-white/90 backdrop-blur border-b border-slate-200">
-        <div className="w-full max-w-[1800px] mx-auto px-6 py-3 flex items-center justify-between">
-          <h1 className="text-lg font-semibold">Gestor de Turnos · Usuarios + SQLite</h1>
-          <div className="flex items-center gap-2 text-sm">
-            <span className="px-2 py-1 rounded bg-slate-100 border">
-              {auth.user?.name || auth.user?.email || "Usuario"} · {auth.user?.role || ""}
-            </span>
-            {isAdmin && (<button onClick={()=>setState(prev=>({...prev, rebalance:!prev.rebalance}))}
-              className={`px-3 py-1.5 rounded-lg border ${state.rebalance?'bg-emerald-50 border-emerald-300':'border-slate-300 hover:bg-slate-100'}`}>
-              {state.rebalance? 'Reequilibrio ON':'Reequilibrar'}
-            </button>)}
-
-            {/* Export/Import local */}{/* Controles Nube */}{isAdmin && (
-<>
-<>
-            <button onClick={props.exportCSV} className="px-3 py-1.5 rounded-lg border">CSV</button>
-            <button onClick={props.exportJSON} className="px-3 py-1.5 rounded-lg border">Export JSON</button>
-            <label className="px-3 py-1.5 rounded-lg border cursor-pointer">Import JSON
-              <input type="file" accept="application/json" className="hidden" onChange={(e)=> e.target.files && props.importJSON(e.target.files[0])}/>
-            </label>
-
-            
-</>
-<input className="border rounded px-2 py-1 w-32" placeholder="Space ID"
-              value={cloud.spaceId} onChange={e=>setCloud({...cloud,spaceId:e.target.value})}/>
-            <input className="border rounded px-2 py-1 w-28" placeholder="ReadToken"
-              value={cloud.readToken} onChange={e=>setCloud({...cloud,readToken:e.target.value})}/>
-            <input className="border rounded px-2 py-1 w-28" placeholder="WriteToken"
-              value={cloud.writeToken} onChange={e=>setCloud({...cloud,writeToken:e.target.value})}/>
-            <button onClick={props.cloudLoad} className="px-3 py-1.5 rounded-lg border">Cargar nube</button>
-            <button onClick={props.cloudSave} className="px-3 py-1.5 rounded-lg border">Guardar nube</button>
-  </>
-)}
-{ui.sync==="loading" && <span className="px-2 py-1 rounded bg-amber-100 border border-amber-300">Sincronizando…</span>}
-            {ui.sync==="ok" && <span className="px-2 py-1 rounded bg-emerald-100 border border-emerald-300">¡Listo!</span>}
-            {ui.sync==="error" && <span className="px-2 py-1 rounded bg-rose-100 border border-rose-300">Error</span>}
-            {ui.toast && (<div className="fixed right-4 bottom-4 z-50 bg-black text-white px-3 py-2 rounded-lg shadow">{ui.toast}</div>)}
-            <button onClick={()=>props.setAuth({ token:"", user:null })} className="px-2 py-1 rounded border">Salir</button>
-          </div>
-        </div>
-      </header>
-    );
-  }
-
-
-
+  if (!auth.user || !auth.token) {
     return (
       <div className="min-h-screen grid place-items-center bg-slate-50 text-slate-900">
         <div className="bg-white rounded-2xl shadow p-6 w-full max-w-sm border border-slate-200">
@@ -1039,15 +979,25 @@ if (!auth.user || !auth.token) {
           <form className="space-y-3 max-h-72 overflow-auto" onSubmit={doLogin}>
             <div>
               <label className="text-xs">Email</label>
-              <input type="email" required value={loginForm.email}
+              <input
+                type="email"
+                required
+                value={loginForm.email}
                 onChange={e=>setLoginForm({...loginForm,email:e.target.value})}
-                className="w-full px-3 py-2 rounded border" placeholder="tú@empresa.com" />
+                className="w-full px-3 py-2 rounded border"
+                placeholder="tú@empresa.com"
+              />
             </div>
             <div>
               <label className="text-xs">Contraseña</label>
-              <input type="password" required value={loginForm.password}
+              <input
+                type="password"
+                required
+                value={loginForm.password}
                 onChange={e=>setLoginForm({...loginForm,password:e.target.value})}
-                className="w-full px-3 py-2 rounded border" placeholder="••••••••" />
+                className="w-full px-3 py-2 rounded border"
+                placeholder="••••••••"
+              />
             </div>
             <button className="w-full px-3 py-2 rounded-lg border hover:bg-slate-100">Entrar</button>
           </form>
@@ -1115,45 +1065,44 @@ if (!auth.user || !auth.token) {
     a.click();
   }
 
-return (
-  <AuthenticatedApp
-  auth={auth}
-  setAuth={setAuth}
-  ui={ui}
-  setUI={setUI}
-  showToast={showToast}
-  
-  modalDay={modalDay}
-  setModalDay={setModalDay}
-state={state}
-  setState={setState}
-  cloud={cloud}
-  setCloud={setCloud}
-  cloudLoad={cloudLoad}
-  cloudSave={cloudSave}
-  startDate={startDate}
-  weeklyStart={weeklyStart}
-  userWeeks={userWeeks}
-  setUserWeeks={setUserWeeks}
-  weekIndex={weekIndex}
-  setWeekIndex={setWeekIndex}
-  canPrev={canPrev}
-  canNext={canNext}
-  canNextRange={canNextRange}
-  payroll={payroll}
-  setPayroll={setPayroll}
-  ASS={ASS}
-  controls={controls}
-  exportCSV={exportCSV}
-  exportJSON={exportJSON}
-  importJSON={importJSON}
-  exportICS={exportICS}
-  exportPayroll={exportPayroll}
-  up={up}
-  upPerson={upPerson}
-  forceAssign={forceAssign}
-/>
-);
+  return (
+    <AuthenticatedApp
+      auth={auth}
+      setAuth={setAuth}
+      ui={ui}
+      setUI={setUI}
+      showToast={showToast}
+      modalDay={modalDay}
+      setModalDay={setModalDay}
+      state={state}
+      setState={setState}
+      cloud={cloud}
+      setCloud={setCloud}
+      cloudLoad={cloudLoad}
+      cloudSave={cloudSave}
+      startDate={startDate}
+      weeklyStart={weeklyStart}
+      userWeeks={userWeeks}
+      setUserWeeks={setUserWeeks}
+      weekIndex={weekIndex}
+      setWeekIndex={setWeekIndex}
+      canPrev={canPrev}
+      canNext={canNext}
+      canNextRange={canNextRange}
+      payroll={payroll}
+      setPayroll={setPayroll}
+      ASS={ASS}
+      controls={controls}
+      exportCSV={exportCSV}
+      exportJSON={exportJSON}
+      importJSON={importJSON}
+      exportICS={exportICS}
+      exportPayroll={exportPayroll}
+      up={up}
+      upPerson={upPerson}
+      forceAssign={forceAssign}
+    />
+  );
 }
 
 // ===================== UI base =====================
@@ -2683,25 +2632,28 @@ function VacationPolicyPanel({ state, up }){
 
 
 function AuthenticatedApp(props){
-  const { auth, setAuth, ui, setUI, showToast,
-          state, setState,
-          cloud, setCloud, cloudLoad, cloudSave,
-          startDate, weeklyStart,
-          userWeeks, setUserWeeks, weekIndex, setWeekIndex,
-          canPrev, canNext, canNextRange,
-          payroll, setPayroll,
-          ASS, controls,
-          exportCSV, exportJSON, importJSON, exportICS, exportPayroll,
-          up, upPerson, forceAssign } = props;
+  const {
+    auth, setAuth, ui, setUI, showToast,
+    modalDay, setModalDay,
+    state, setState,
+    cloud, setCloud, cloudLoad, cloudSave,
+    startDate, weeklyStart,
+    userWeeks, setUserWeeks, weekIndex, setWeekIndex,
+    canPrev, canNext, canNextRange,
+    payroll, setPayroll,
+    ASS, controls,
+    exportCSV, exportJSON, importJSON, exportICS, exportPayroll,
+    up, upPerson, forceAssign,
+  } = props;
 
-  // --- scope admin (robusto tras refactor) ---
-  // Aliases seguros para modal del día (local o via props)
-  const modalDayProp = (typeof modalDay !== 'undefined') ? modalDay : (props.modalDay ?? null);
-  const setModalDayProp = (typeof setModalDay !== 'undefined') ? setModalDay : props.setModalDay;
-
-  const __ap_props = (typeof arguments !== "undefined" && arguments.length ? arguments[0] : {});
-  const __ap_auth = (typeof auth !== "undefined" && auth) ? auth : (__ap_props && (__ap_props.auth || __ap_props.Auth || null));
-  const isAdmin = !!(__ap_auth && __ap_auth.user && __ap_auth.user.role === "admin");
+  const modalDayProp = modalDay ?? null;
+  const setModalDayProp = setModalDay ?? (() => {});
+  const isAdmin = auth?.user?.role === 'admin';
+  const handleLogout = useCallback(() => {
+    try { localStorage.removeItem('turnos_auth'); } catch {}
+    setAuth({ token: '', user: null });
+    setTimeout(() => { window.location.reload(); }, 0);
+  }, [setAuth]);
 
   function handleCalendarCommand(cmd){
     if (!isAdmin || !cmd) return;
@@ -2776,97 +2728,120 @@ function AuthenticatedApp(props){
       <header className="sticky top-0 z-10 bg-white/90 backdrop-blur border-b border-slate-200">
         <div className="w-full max-w-[1800px] mx-auto px-6 py-3 flex items-center justify-between">
           <h1 className="text-lg font-semibold">Gestor de Turnos · Usuarios + SQLite</h1>
-          <div className="flex items-center gap-2 text-sm">
+          <div className="flex flex-wrap items-center gap-2 text-sm justify-end">
             <span className="px-2 py-1 rounded bg-slate-100 border">
               {auth.user?.name || auth.user?.email || "Usuario"} · {auth.user?.role || ""}
             </span>
-            {isAdmin && (<button onClick={()=>setState(prev=>({...prev, rebalance:!prev.rebalance}))}
-              className={`px-3 py-1.5 rounded-lg border ${state.rebalance?'bg-emerald-50 border-emerald-300':'border-slate-300 hover:bg-slate-100'}`}>
-              {state.rebalance? 'Reequilibrio ON':'Reequilibrar'}
-            </button>)}
-
-            {/* Export/Import local */}{/* Controles Nube */}{isAdmin && (
-<>
-<>
-            <button onClick={props.exportCSV} className="px-3 py-1.5 rounded-lg border">CSV</button>
-            <button onClick={props.exportJSON} className="px-3 py-1.5 rounded-lg border">Export JSON</button>
-            <label className="px-3 py-1.5 rounded-lg border cursor-pointer">Import JSON
-              <input type="file" accept="application/json" className="hidden" onChange={(e)=> e.target.files && props.importJSON(e.target.files[0])}/>
-            </label>
-
-            
-</>
-<input className="border rounded px-2 py-1 w-32" placeholder="Space ID"
-              value={cloud.spaceId} onChange={e=>setCloud({...cloud,spaceId:e.target.value})}/>
-            <input className="border rounded px-2 py-1 w-28" placeholder="ReadToken"
-              value={cloud.readToken} onChange={e=>setCloud({...cloud,readToken:e.target.value})}/>
-            <input className="border rounded px-2 py-1 w-28" placeholder="WriteToken"
-              value={cloud.writeToken} onChange={e=>setCloud({...cloud,writeToken:e.target.value})}/>
-            <button onClick={props.cloudLoad} className="px-3 py-1.5 rounded-lg border">Cargar nube</button>
-            <button onClick={props.cloudSave} className="px-3 py-1.5 rounded-lg border">Guardar nube</button>
-  </>
-)}
-{ui.sync==="loading" && <span className="px-2 py-1 rounded bg-amber-100 border border-amber-300">Sincronizando…</span>}
-            {ui.sync==="ok" && <span className="px-2 py-1 rounded bg-emerald-100 border border-emerald-300">¡Listo!</span>}
-            {ui.sync==="error" && <span className="px-2 py-1 rounded bg-rose-100 border border-rose-300">Error</span>}
-            {ui.toast && (<div className="fixed right-4 bottom-4 z-50 bg-black text-white px-3 py-2 rounded-lg shadow">{ui.toast}</div>)}
-            <button onClick={()=>props.setAuth({ token:"", user:null })} className="px-2 py-1 rounded border">Salir</button>
+            {isAdmin && (
+              <button
+                onClick={()=>setState(prev=>({ ...prev, rebalance: !prev.rebalance }))}
+                className={`px-3 py-1.5 rounded-lg border ${state.rebalance ? 'bg-emerald-50 border-emerald-300' : 'border-slate-300 hover:bg-slate-100'}`}
+              >
+                {state.rebalance ? 'Reequilibrio ON' : 'Reequilibrar'}
+              </button>
+            )}
+            {isAdmin && (
+              <>
+                <button onClick={exportCSV} className="px-3 py-1.5 rounded-lg border">CSV</button>
+                <button onClick={exportJSON} className="px-3 py-1.5 rounded-lg border">Export JSON</button>
+                <label className="px-3 py-1.5 rounded-lg border cursor-pointer">
+                  Import JSON
+                  <input type="file" accept="application/json" className="hidden" onChange={e=> e.target.files && importJSON(e.target.files[0])} />
+                </label>
+                <input
+                  className="border rounded px-2 py-1 w-32"
+                  placeholder="Space ID"
+                  value={cloud.spaceId}
+                  onChange={e=>setCloud({...cloud, spaceId: e.target.value})}
+                />
+                <input
+                  className="border rounded px-2 py-1 w-28"
+                  placeholder="ReadToken"
+                  value={cloud.readToken}
+                  onChange={e=>setCloud({...cloud, readToken: e.target.value})}
+                />
+                <input
+                  className="border rounded px-2 py-1 w-28"
+                  placeholder="WriteToken"
+                  value={cloud.writeToken}
+                  onChange={e=>setCloud({...cloud, writeToken: e.target.value})}
+                />
+                <button onClick={cloudLoad} className="px-3 py-1.5 rounded-lg border">Cargar nube</button>
+                <button onClick={cloudSave} className="px-3 py-1.5 rounded-lg border">Guardar nube</button>
+              </>
+            )}
+            {ui.sync === 'loading' && (
+              <span className="px-2 py-1 rounded bg-amber-100 border border-amber-300">Sincronizando…</span>
+            )}
+            {ui.sync === 'ok' && (
+              <span className="px-2 py-1 rounded bg-emerald-100 border border-emerald-300">¡Listo!</span>
+            )}
+            {ui.sync === 'error' && (
+              <span className="px-2 py-1 rounded bg-rose-100 border border-rose-300">Error</span>
+            )}
+            <button onClick={handleLogout} className="px-2 py-1 rounded border">Salir</button>
           </div>
         </div>
       </header>
+      {ui.toast && (
+        <div className="fixed right-4 bottom-4 z-50 bg-black text-white px-3 py-2 rounded-lg shadow">{ui.toast}</div>
+      )}
 
-      <main className="w-full max-w-[1800px] mx-auto px-6 py-6 grid lg:grid-cols-3 gap-6">
-        {/* Configuración */}
-        <section className="lg:col-span-1 space-y-6">
-          {isAdmin && (<><ConfigBasica state={state} up={up} />
-          <ReglasPanel state={state} up={up} isAdmin={isAdmin} />
-          
-          <OffPolicyPanel state={state} up={up} />
-          <VacationPolicyPanel state={state} up={up} />
-          <RefuerzoPolicyPanel state={state} up={up} />
-<ConciliacionPanel state={state} up={up} />
-          <Card title="Debug">
-            <div className="space-y-2 text-sm">
-              <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={!!(state?.debug?.score)}
-                  onChange={e=>up(['debug','score'], e.target.checked)}
-                />
-                Mostrar ScoreDebugPanel
-              </label>
+        <main className="w-full max-w-[1800px] mx-auto px-6 py-6 grid lg:grid-cols-3 gap-6">
+          {/* Configuración */}
+          <section className="lg:col-span-1 space-y-6">
+            {isAdmin && (
+              <>
+                <ConfigBasica state={state} up={up} />
+                <ReglasPanel state={state} up={up} isAdmin={isAdmin} />
+                <OffPolicyPanel state={state} up={up} />
+                <VacationPolicyPanel state={state} up={up} />
+                <RefuerzoPolicyPanel state={state} up={up} />
+                <ConciliacionPanel state={state} up={up} />
+                <Card title="Debug">
+                  <div className="space-y-2 text-sm">
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={!!(state?.debug?.score)}
+                        onChange={e=>up(['debug','score'], e.target.checked)}
+                      />
+                      Mostrar ScoreDebugPanel
+                    </label>
 
-              <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={!!(state?.debug?.weekendAudit)}
-                  onChange={e=>up(['debug','weekendAudit'], e.target.checked)}
-                />
-                Mostrar WeekendAuditPanel
-              </label>
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={!!(state?.debug?.weekendAudit)}
+                        onChange={e=>up(['debug','weekendAudit'], e.target.checked)}
+                      />
+                      Mostrar WeekendAuditPanel
+                    </label>
 
-              {state?.debug?.weekendAudit === true && (
-                <div className="mt-3">
-                  <Card title="Weekend audit (Admin)">
-                    <WeekendAuditPanel
-                      assignments={ASS}
-                      people={state.people}
-                      startDate={startDate}
-                      weeks={state.weeks}
-                    />
-                  </Card>
-                </div>
-              )}
-            </div>
-          </Card>
-          <PersonasPanel state={state} upPerson={upPerson} />
-          <TurnosPanel state={state} up={up} />
-          <FestivosPanel state={state} up={up} />
-          <CustomHolidaysPanel state={state} up={up} /></>)}
-        </section>
+                    {state?.debug?.weekendAudit === true && (
+                      <div className="mt-3">
+                        <Card title="Weekend audit (Admin)">
+                          <WeekendAuditPanel
+                            assignments={ASS}
+                            people={state.people}
+                            startDate={startDate}
+                            weeks={state.weeks}
+                          />
+                        </Card>
+                      </div>
+                    )}
+                  </div>
+                </Card>
+                <PersonasPanel state={state} upPerson={upPerson} />
+                <TurnosPanel state={state} up={up} />
+                <FestivosPanel state={state} up={up} />
+                <CustomHolidaysPanel state={state} up={up} />
+              </>
+            )}
+          </section>
 
-        {/* Calendarios y reportes */}
-        <section className="lg:col-span-2 space-y-6">
+          {/* Calendarios y reportes */}
+          <section className="lg:col-span-2 space-y-6">
           <Card title="Vista semanal por persona (principal)">
   <div className="flex items-center justify-between mb-2">
     <div className="text-sm">
@@ -2996,7 +2971,7 @@ function AuthenticatedApp(props){
             <div className="grid grid-cols-12 gap-2">
               <div className="col-span-6"><label className="text-xs">Desde</label><input type="date" value={payroll.from} onChange={(e)=>setPayroll({...payroll,from:e.target.value})} className="w-full px-2 py-1 rounded border"/></div>
               <div className="col-span-6"><label className="text-xs">Hasta</label><input type="date" value={payroll.to} onChange={(e)=>setPayroll({...payroll,to:e.target.value})} className="w-full px-2 py-1 rounded border"/></div>
-              <div className="col-span-12"><button onClick={props.exportPayroll} className="px-3 py-1.5 rounded-lg border w-full">Exportar Nómina (CSV)</button></div>
+              <div className="col-span-12"><button onClick={exportPayroll} className="px-3 py-1.5 rounded-lg border w-full">Exportar Nómina (CSV)</button></div>
             </div>
           </Card>
 
