@@ -22,43 +22,22 @@ function ensureAssignmentsArray(source, dateStr){
 }
 
 function renderEmptyCell(toInfo, isClosed){
-  if (toInfo) {
-    const normalized = typeof toInfo === "string" ? { type: toInfo } : toInfo;
-    const type = normalized?.type;
-    const status = normalized?.status;
-    const typeMap = {
-      vacaciones: {
-        icon: "🏖",
-        label: "Vacaciones",
-        badgeClass: "bg-emerald-50 border-emerald-200 text-emerald-700",
-      },
-      libranza: {
-        icon: "🛏️",
-        label: "Libranza",
-        badgeClass: "bg-sky-50 border-sky-200 text-sky-700",
-      },
-      viaje: {
-        icon: "✈️",
-        label: "Viaje",
-        badgeClass: "bg-indigo-50 border-indigo-200 text-indigo-700",
-      },
-    };
-    const fallbackLabel = type ? type.charAt(0).toUpperCase() + type.slice(1) : "Permiso";
-    const entry = typeMap[type] || {
-      icon: "🗓️",
-      label: fallbackLabel,
-      badgeClass: "bg-amber-50 border-amber-200 text-amber-700",
-    };
-    const statusLabel = status && status !== "aprobada" ? status : "";
+  const normalized = typeof toInfo === "string" || !toInfo
+    ? { type: typeof toInfo === "string" ? toInfo : null }
+    : toInfo;
+  const type = normalized?.type;
+  if (type === "vacaciones") {
     return (
-      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[11px] ${entry.badgeClass}`}>
-        <span>{entry.icon}</span>
-        <span>{entry.label}</span>
-        {statusLabel ? (
-          <span className="ml-1 rounded border border-white/60 bg-white/70 px-1 py-px text-[9px] uppercase tracking-wide text-current">
-            {statusLabel}
-          </span>
-        ) : null}
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[11px] bg-emerald-50 text-emerald-700">
+        🏖 Vacaciones
+      </span>
+    );
+  }
+  if (type) {
+    const label = typeof type === "string" ? type : String(type || "").trim();
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded border text-[11px] bg-amber-50 text-amber-700">
+        {label || "Permiso"}
       </span>
     );
   }
@@ -1432,15 +1411,11 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
   const [form, setForm] = useState({ personId: people[0]?.id || "", shiftIndex: 0 });
   const defaultPersonId = people[0]?.id || "";
 
-  const emitCommand = (payload) => {
-    if (typeof onQuickAssign === "function") {
-      onQuickAssign(payload);
-    }
-  };
+  const emitCommand = useCallback((payload) => {
+    if (typeof onQuickAssign === "function") onQuickAssign(payload);
+  }, [onQuickAssign]);
 
-  const closeEditor = () => {
-    setEditor(null);
-  };
+  const closeEditor = () => setEditor(null);
 
   const prepareForm = (shiftIndex, personId) => {
     const fallback = defaultPersonId || "";
@@ -1474,7 +1449,7 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
       dateStr: editor.dateStr,
       shiftIndex: targetShift,
       personId: form.personId,
-      type: 'assign'
+      type: 'assign',
     };
     if (editor.mode === 'edit') {
       payload.fromShiftIndex = editor.fromShiftIndex;
@@ -1487,7 +1462,7 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
     closeEditor();
   };
 
-  const renderForm = (dateStr, shiftOptions) => {
+  const renderForm = (shiftOptions) => {
     if (!editor) return null;
     return (
       <form onSubmit={(e)=>handleSubmit(e, shiftOptions)} className="rounded-lg border bg-white p-2 text-[11px] space-y-2">
@@ -1538,7 +1513,13 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
     <div className="overflow-x-auto">
       <div className="grid grid-cols-7 gap-4 w-full">
         {days.map(date=>{
-          const dateStr=toDateValue(date); const wd=date.toLocaleDateString(undefined,{weekday:'short'}); const day=date.getDate(); const isWE=isWeekend(date); const cell=normalizeAssignmentsCell(assignments, dateStr); const hasConflict=cell.some(c=>c.conflict); const sorted=[...cell].sort((a,b)=> minutesFromHHMM(a.shift.start)-minutesFromHHMM(b.shift.start));
+          const dateStr=toDateValue(date);
+          const wd=date.toLocaleDateString(undefined,{weekday:'short'});
+          const day=date.getDate();
+          const isWE=isWeekend(date);
+          const cell=normalizeAssignmentsCell(assignments, dateStr);
+          const hasConflict=cell.some(c=>c.conflict);
+          const sorted=[...cell].sort((a,b)=> minutesFromHHMM(a.shift.start)-minutesFromHHMM(b.shift.start));
           const isClosed = isClosedBusinessDay2(dateStr, province, closeOnHolidays, closedExtraDates, customHolidaysByYear);
           const shiftEntries = isClosed ? [] : sorted;
           const shiftOptions = shiftEntries.map((entry, idx) => {
@@ -1583,7 +1564,7 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
                       : (<span className="inline-flex items-center gap-1 px-1 py-0.5 rounded-lg text-[10px] text-rose-600">⚠ Falta asignar</span>);
                   const isEditingThis = isAdmin && editor && editor.mode === 'edit' && editor.dateStr === dateStr && editor.fromShiftIndex === i;
                   return (
-                    <div key={`${dateStr}-${i}`} className="space-y-1">
+                    <React.Fragment key={`${dateStr}-${i}`}>
                       <div className={`rounded-xl px-2 py-1.5 border text-sm flex items-center justify-between ${c.conflict || isForcedEmpty? 'border-red-300 bg-red-50':'border-slate-200'}`} title={`${lbl} · ${span} (${dur}h)`}>
                         <div className="truncate">
                           <span className="text-[11px] mr-1 rounded px-1 py-0.5 border bg-slate-50">{emblem} {lbl}</span>
@@ -1595,8 +1576,11 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
                       {isAdmin && (
                         <div className="flex flex-wrap justify-end gap-2 text-[11px]">
                           <button type="button" className="px-2 py-0.5 border rounded-lg" onClick={()=>openEdit(dateStr, i, c.personId || (defaultPersonId||''), isForcedEmpty)}>
-                            {c.personId ? 'Editar' : 'Asignar'}
+                            {c.personId ? 'Editar' : (isForcedEmpty ? 'Reabrir' : 'Asignar')}
                           </button>
+                          {!c.personId && !isForcedEmpty && (
+                            <button type="button" className="px-2 py-0.5 border rounded-lg text-rose-600" onClick={()=>emitCommand({ type:'clear', dateStr, shiftIndex:i, forceEmpty:true })}>Bloquear hueco</button>
+                          )}
                           {c.personId && (
                             <button type="button" className="px-2 py-0.5 border rounded-lg text-rose-600" onClick={()=>emitCommand({ type:'clear', dateStr, shiftIndex:i, forceEmpty:true })}>Vaciar</button>
                           )}
@@ -1605,14 +1589,14 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
                           )}
                         </div>
                       )}
-                      {isEditingThis && renderForm(dateStr, shiftOptions)}
-                    </div>
+                      {isEditingThis && renderForm(shiftOptions)}
+                    </React.Fragment>
                   );
                 })}
                 {isAdmin && !isClosed && shiftOptions.length>0 && (
                   <div className="pt-2">
                     <button type="button" className="w-full text-[11px] px-2 py-1 border rounded-lg hover:bg-slate-100" onClick={()=>openNew(dateStr, shiftOptions)}>Asignar turno</button>
-                    {isEditingNew && renderForm(dateStr, shiftOptions)}
+                    {isEditingNew && renderForm(shiftOptions)}
                   </div>
                 )}
                 {isAdmin && !isClosed && shiftOptions.length===0 && (
@@ -1694,15 +1678,14 @@ function WeeklyView({ startDate, weeks, assignments, people, timeOffs, province,
     if(hit.type==='vacaciones'){ return true; }
     return true;
   };
-  const getTOInfo = (dateStr, personId) => {
+  const getTOType = (dateStr, personId) => {
     const d_ = parseDateValue(dateStr);
     const hit = (timeOffs||[]).find(to => (
       to.personId === personId &&
       to.status === "aprobada" &&
       parseDateValue(to.start) <= d_ && d_ <= parseDateValue(to.end)
     ));
-    if (!hit) return null;
-    return { type: hit.type, status: hit.status };
+    return hit ? hit.type : null;
   };
   return (
     <div className="overflow-x-auto print-only:block">
@@ -1732,13 +1715,13 @@ function WeeklyView({ startDate, weeks, assignments, people, timeOffs, province,
           .sort((a, b) => minutesFromHHMM(a.shift.start) - minutesFromHHMM(b.shift.start));
 
         // Tipo de “Time Off” y festivo para celda vacía
-        const toInfo = (typeof getTOInfo === 'function') ? getTOInfo(h.dateStr, p.id) : null;
+        const toType = (typeof getTOType === 'function') ? getTOType(h.dateStr, p.id) : null;
         const isFest = (typeof isClosedDay === 'function') ? isClosedDay(h.dateStr) : false;
         return (
         <td key={h.dateStr || idx} className="p-1 align-top">
           {cell.length===0 ? (
             <div className="rounded border bg-slate-50 px-1 py-0.5 inline-block">
-              {renderEmptyCell(toInfo, isFest)}
+              {renderEmptyCell(toType, isFest)}
             </div>
           ) : (
             cell.map((a,i)=>(<PrettyAssignment a={a} h={h} p={p} i={i} />))
@@ -2655,6 +2638,43 @@ function AuthenticatedApp(props){
     setTimeout(() => { window.location.reload(); }, 0);
   }, [setAuth]);
 
+  const [ipAudit, setIpAudit] = useState({ rows: [], loading: false, error: null });
+
+  const fetchIpAudit = useCallback(async (opts = {}) => {
+    if (!isAdmin) {
+      setIpAudit({ rows: [], loading: false, error: null });
+      return;
+    }
+    const silent = opts.silent === true;
+    setIpAudit(prev => ({
+      rows: Array.isArray(prev?.rows) ? prev.rows : [],
+      loading: silent ? prev.loading : true,
+      error: silent ? prev.error : null,
+    }));
+    try {
+      const res = await api('/audit/ips', { method: 'GET' }, auth.token);
+      let rows = [];
+      if (Array.isArray(res)) rows = res;
+      else if (Array.isArray(res?.data)) rows = res.data;
+      else if (Array.isArray(res?.ips)) rows = res.ips;
+      else if (Array.isArray(res?.items)) rows = res.items;
+      setIpAudit({ rows, loading: false, error: null });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setIpAudit(prev => ({ rows: Array.isArray(prev?.rows) ? prev.rows : [], loading: false, error: message }));
+    }
+  }, [auth.token, isAdmin]);
+
+  useEffect(() => {
+    if (!isAdmin) {
+      setIpAudit({ rows: [], loading: false, error: null });
+      return;
+    }
+    fetchIpAudit();
+    const id = setInterval(() => { fetchIpAudit({ silent: true }); }, 60000);
+    return () => clearInterval(id);
+  }, [isAdmin, fetchIpAudit]);
+
   function handleCalendarCommand(cmd){
     if (!isAdmin || !cmd) return;
     const { dateStr, shiftIndex } = cmd;
@@ -2828,6 +2848,46 @@ function AuthenticatedApp(props){
                             weeks={state.weeks}
                           />
                         </Card>
+                      </div>
+                    )}
+                  </div>
+                </Card>
+                <Card title="IPs activas (admin)">
+                  <div className="flex items-center justify-between text-xs mb-2">
+                    <div>{ipAudit.loading ? 'Cargando…' : `Total ${ipAudit.rows.length}`}</div>
+                    <button onClick={()=>fetchIpAudit()} className="px-2 py-1 border rounded hover:bg-slate-100">Refrescar</button>
+                  </div>
+                  {ipAudit.error && (
+                    <div className="mb-2 text-xs text-rose-600">{ipAudit.error}</div>
+                  )}
+                  <div className="border rounded-lg overflow-hidden">
+                    {ipAudit.rows.length > 0 ? (
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="border-b bg-slate-50">
+                            <th className="text-left p-2">IP</th>
+                            <th className="text-left p-2">Usuario</th>
+                            <th className="text-left p-2">Último acceso</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {ipAudit.rows.map((row, idx) => {
+                            const ts = row.ts || row.timestamp || row.lastSeen || row.last_seen;
+                            const user = row.user || row.email || row.name || '—';
+                            const formatted = ts ? new Date(ts).toLocaleString() : '—';
+                            return (
+                              <tr key={row.ip ? `${row.ip}-${idx}` : idx} className="border-b last:border-b-0">
+                                <td className="p-2">{row.ip || '—'}</td>
+                                <td className="p-2">{user}</td>
+                                <td className="p-2 text-xs text-slate-600">{formatted}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    ) : (
+                      <div className="p-3 text-xs text-slate-500">
+                        {ipAudit.loading ? 'Cargando…' : 'Sin conexiones recientes.'}
                       </div>
                     )}
                   </div>
