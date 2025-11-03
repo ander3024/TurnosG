@@ -935,16 +935,8 @@ function showToast(msg){ setUI(prev=>({...prev, toast:msg})); setTimeout(()=>set
   next[dateStr] = next[dateStr] || {};
   next[dateStr][key] = personId || null; // si pasas '', quita override
   up(['overrides'], next);
-  up(['audit'], [ ...(state.audit||[]), { ts:new Date().toISOString(), actor:(auth.user?.email||'unknown'), action:'override', dateStr, assignmentIndex, personId } ]);
 }
 
-  // Sincroniza offPolicy con window para que generateSchedule lea la política activa
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      window.__OFF_POLICY__ = state.offPolicy || {};
-      window.__CUSTOM_HOLIDAYS__ = state.customHolidaysByYear || {};
-    }
-  }, [state.offPolicy, state.customHolidaysByYear]);
 
   // ---------- Cloud (SQLite) ----------
   const [cloud, setCloud] = useState({ spaceId:"turnos-2025", readToken:"READ-2025", writeToken:"WRT-1234", apiKey:"" });
@@ -1223,216 +1215,136 @@ if (!auth.user || !auth.token) {
     a.click();
   }
 
-  function clearVisibleOverrides(){
-  const from = weeklyStart;
-  const to   = addDays(weeklyStart, userWeeks*7 - 1);
-  const next = structuredClone(state.overrides || {});
-  const keys = Object.keys(next);
-  for (const ds of keys){
-    const d = parseDateValue(ds);
-    if (d >= from && d <= to) delete next[ds];
-  }
-  setState(prev => ({ ...prev, overrides: next }));
-  showToast("Overrides del rango visible eliminados");
-  }
+  // ---------- Render principal ----------
+  return (
+    <div className="min-h-screen bg-slate-50 text-slate-900">
+      <style>{`
+        :root { color-scheme: light !important; }
+        html, body { background: #f8fafc; color: #0f172a; }
+        input, select, textarea, button { background:#fff!important; color:#0f172a!important; border-color: rgba(15,23,42,0.15)!important; }
+        ::placeholder { color:#94a3b8; }
+        .chip { background-color: rgba(15,23,42,0.04); border:1px solid rgba(15,23,42,0.15); }
+      `}</style>
 
-function duplicateVisibleToNextWeek(){
-  const from = weeklyStart;
-  const to   = addDays(weeklyStart, userWeeks*7 - 1);
-  const periodEnd = addDays(startDate, state.weeks*7 - 1);
+      <header className="sticky top-0 z-10 bg-white/90 backdrop-blur border-b border-slate-200">
+        <div className="w-full max-w-[1800px] mx-auto px-6 py-3 flex items-center justify-between">
+          <h1 className="text-lg font-semibold">Gestor de Turnos · Usuarios + SQLite</h1>
+          <div className="flex items-center gap-2 text-sm">
+            <span className="px-2 py-1 rounded bg-slate-100 border">
+              {auth.user.name} · {auth.user.role}
+            </span>
+            <button onClick={()=>setState(prev=>({...prev, rebalance:!prev.rebalance}))}
+              className={`px-3 py-1.5 rounded-lg border ${state.rebalance?'bg-emerald-50 border-emerald-300':'border-slate-300 hover:bg-slate-100'}`}>
+              {state.rebalance? 'Reequilibrio ON':'Reequilibrar'}
+            </button>
 
-  const out = structuredClone(state.overrides || {});
-  let copiados = 0, saltados = 0;
+            {/* Export/Import local */}
+            <button onClick={exportCSV} className="px-3 py-1.5 rounded-lg border">CSV</button>
+            <button onClick={exportJSON} className="px-3 py-1.5 rounded-lg border">Export JSON</button>
+            <label className="px-3 py-1.5 rounded-lg border cursor-pointer">Import JSON
+              <input type="file" accept="application/json" className="hidden" onChange={(e)=> e.target.files && importJSON(e.target.files[0])}/>
+            </label>
 
-  for (let d = new Date(from); d <= to; d = addDays(d, 1)) {
-    const srcDs = toDateValue(d);
-    const tgtDs = toDateValue(addDays(d, 7));
-    if (parseDateValue(tgtDs) > periodEnd) { saltados++; continue; }
+            {/* Controles Nube */}
+            <input className="border rounded px-2 py-1 w-32" placeholder="Space ID"
+              value={cloud.spaceId} onChange={e=>setCloud({...cloud,spaceId:e.target.value})}/>
+            <input className="border rounded px-2 py-1 w-28" placeholder="ReadToken"
+              value={cloud.readToken} onChange={e=>setCloud({...cloud,readToken:e.target.value})}/>
+            <input className="border rounded px-2 py-1 w-28" placeholder="WriteToken"
+              value={cloud.writeToken} onChange={e=>setCloud({...cloud,writeToken:e.target.value})}/>
+            <button onClick={cloudLoad} className="px-3 py-1.5 rounded-lg border">Cargar nube</button>
+            <button onClick={cloudSave} className="px-3 py-1.5 rounded-lg border">Guardar nube</button>
 
-    const cell = (ASS[srcDs] || []);
-    if (!cell.length) { continue; }
+            <button onClick={doLogout} className="px-2 py-1 rounded border">Salir</button>
+          </div>
+        </div>
+      </header>
 
-    for (let i = 0; i < cell.length; i++) {
-      const a = cell[i];
-      if (!a.personId) continue; // no copiar vacíos
-      const key = `${a.shift.start}-${a.shift.end}-${a.shift.label || `T${i+1}`}`;
-      out[tgtDs] = out[tgtDs] || {};
-      if (out[tgtDs][key] != null) { // ya había override → no pisar
-        saltados++;
-        continue;
-      }
-      out[tgtDs][key] = a.personId;
-      copiados++;
-    }
-  }
+      <main className="w-full max-w-[1800px] mx-auto px-6 py-6 grid lg:grid-cols-3 gap-6">
+        {/* Configuración */}
+        <section className="lg:col-span-1 space-y-6">
+          <ConfigBasica state={state} up={up} />
+          <ReglasPanel state={state} up={up} />
+          <ConciliacionPanel state={state} up={up} />
+          <PersonasPanel state={state} upPerson={upPerson} />
+          <TurnosPanel state={state} up={up} />
+          <FestivosPanel state={state} up={up} />
+        </section>
 
-  setState(prev => ({ ...prev, overrides: out }));
-  showToast(`Duplicado seguro: ${copiados} asignaciones · ${saltados} no copiadas`);
-}
+        {/* Calendarios y reportes */}
+        <section className="lg:col-span-2 space-y-6">
+          <Card title="Cuadrante (click en día para ampliar)">
+            <CalendarView startDate={startDate} weeks={state.weeks} assignments={ASS} people={state.people} onOpenDay={(ds)=>setModalDay(ds)} />
+          </Card>
 
-function undoLastOverride(){
-  const audit = state.audit || [];
-  const last = [...audit].reverse().find(e => e?.action === 'override' && e?.dateStr);
-  if (!last) { showToast('No hay overrides recientes'); return; }
-  const { dateStr, assignmentIndex } = last;
-  const a = ASS[dateStr]?.[assignmentIndex];
-  if (!a) { showToast('No encuentro esa asignación'); return; }
+          <Card title="Vista semanal por persona">
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-sm">Semana {weekIndex+1} / {state.weeks}</div>
+              <div className="flex items-center gap-2">
+                <button disabled={!canPrev} onClick={()=>setWeekIndex(w=>Math.max(0,w-1))} className={`px-2 py-1 rounded border ${canPrev? 'hover:bg-slate-100':'opacity-50 cursor-not-allowed'}`}>◀︎</button>
+                <button disabled={!canNext} onClick={()=>setWeekIndex(w=>Math.min(state.weeks-1,w+1))} className={`px-2 py-1 rounded border ${canNext? 'hover:bg-slate-100':'opacity-50 cursor-not-allowed'}`}>▶︎</button>
+                <button onClick={()=>window.print()} className="px-3 py-1.5 rounded-lg border">Imprimir / PDF</button>
+              </div>
+            </div>
+            <WeeklyView startDate={weeklyStart} weeks={1} assignments={ASS} people={state.people} />
+          </Card>
 
-  const key = `${a.shift.start}-${a.shift.end}-${a.shift.label || `T${assignmentIndex+1}`}`;
-  const next = structuredClone(state.overrides || {});
-  if (next[dateStr]) {
-    delete next[dateStr][key];
-    if (Object.keys(next[dateStr]).length === 0) delete next[dateStr];
-  }
-  setState(prev => ({ ...prev, overrides: next }));
-  showToast('Override deshecho');
-}
+          <TimeOffPanel state={state} setState={setState} controls={controls} isAdmin={isAdmin} currentUser={auth.user} />
+          <SwapsPanel state={state} setState={setState} assignments={ASS} />
+          {isAdmin && <RefuerzosPanel state={state} up={up} />}
+          {isAdmin && <GeneradorPicos state={state} up={up} />}
+          <PropuestaCierre
+            state={state}
+            startDate={startDate}
+            weeks={state.weeks}
+            people={state.people}
+            assignments={ASS}
+            onApply={(evs)=> up(['events'], [...state.events, ...evs])}
+            annualTarget={state.annualTargetHours}
+          />
 
-// Asignación rápida desde calendario.
-// - Si shiftIndex !== null => override en ese slot.
-// - Si shiftIndex === null  => crea un refuerzo ese día y lo asigna.
-function quickAssign(dateStr, shiftIndex, personId){
-  if (!personId) return;
+            <ScoreDebugPanel
+            assignments={ASS}
+            people={state.people}
+            startDate={startDate}
+            weeks={state.weeks}
+            conciliacion={state.conciliacion}
+            applyConciliation={state.applyConciliation}
+            onToggleApply={(v)=>up(['applyConciliation'], v)}
+          />
 
-  
- // Barreras: no asignar si la persona no está disponible o ya trabaja ese día
-    const indexTO = indexTimeOff(state.timeOffs, {
-      province: state.province,
-      consumeVacationOnHoliday: state.consumeVacationOnHoliday,
-      customHolidaysByYear: state.customHolidaysByYear
-    });
-    if (indexTO.get(personId)?.has(dateStr)) {
-      showToast('No disponible: vacaciones/libranza/viaje');
-      return;
-    }
-    if ((ASS[dateStr]||[]).some(a => a.personId === personId)) {
-      showToast('Ya tiene turno ese día');
-      return;
-    }
+          <Card title="Nómina (CSV por rango)">
+            <div className="grid grid-cols-12 gap-2">
+              <div className="col-span-6"><label className="text-xs">Desde</label><input type="date" value={payroll.from} onChange={(e)=>setPayroll({...payroll,from:e.target.value})} className="w-full px-2 py-1 rounded border"/></div>
+              <div className="col-span-6"><label className="text-xs">Hasta</label><input type="date" value={payroll.to} onChange={(e)=>setPayroll({...payroll,to:e.target.value})} className="w-full px-2 py-1 rounded border"/></div>
+              <div className="col-span-12"><button onClick={exportPayroll} className="px-3 py-1.5 rounded-lg border w-full">Exportar Nómina (CSV)</button></div>
+            </div>
+          </Card>
 
-  // 1) Si hay slot → override directo
-  if (shiftIndex !== null) {
-    forceAssign(dateStr, shiftIndex, personId);
-    // Avisos de horas:
-    const date = parseDateValue(dateStr);
-    const cell = ASS[dateStr] || [];
-    const a = cell[shiftIndex];
-    if (a?.shift) checkHoursAndNotify({ date, personId, shift: a.shift });
-    return;
-  }
+          <ResumenPanel controls={controls} annualTarget={state.annualTargetHours} onExportICS={exportICS} />
+        </section>
 
-  // 2) Si no hay slot → crear refuerzo + forzar asignación
-  const d = parseDateValue(dateStr);
-  const isWE = (d.getDay()===0 || d.getDay()===6);
-  const ev = {
-    label: 'Refuerzo manual',
-    start: dateStr,
-    end: dateStr,
-    weekdaysExtraSlots: isWE ? 0 : 1,
-    weekendExtraSlots:  isWE ? 1 : 0,
-    assigneeId: personId,
-    assigneeForced: true,
-    weekdayRefuerzo: 'mañana'
-  };
-  setState(prev => ({ ...prev, events: [ ...(prev.events||[]), ev ] }));
-  showToast(`Refuerzo creado en ${dateStr} y asignado`);
+        {auth.user.role === 'admin' && (
+          <section className="lg:col-span-3 space-y-6">
+            <AdminUsersAndPerms auth={auth} />
+          </section>
+        )}
+      </main>
 
-  // Intento de aviso de horas con el turno de refuerzo por defecto
-  const shift = isWE ? state.weekendShift : state.refuerzoWeekdayShift;
-  checkHoursAndNotify({ date: d, personId, shift });
-}
+      <footer className="w-full max-w-[1800px] mx-auto px-6 pb-10 text-xs text-slate-500">Persistencia local + Nube SQLite. </footer>
 
-// Cálculo y avisos de horas diarias/semanales y balance "rápido".
-function checkHoursAndNotify({ date, personId, shift }){
-  try{
-    const dateStr = toDateValue(date);
-    const mins = effectiveMinutes(shift);
-    const rules = state.rules || {};
-    let dayMins = 0, weekMins = 0, weekDays = 0;
-
-    // Día
-    for(const a of (ASS[dateStr]||[])){
-      if (a.personId === personId) dayMins += effectiveMinutes(a.shift);
-    }
-    // Semana
-    const ws = startOfWeekMonday(date);
-    for(let i=0;i<7;i++){
-      const ds = toDateValue(addDays(ws,i));
-      for(const a of (ASS[ds]||[])){
-        if (a.personId === personId){
-          weekMins += effectiveMinutes(a.shift);
-          weekDays++;
-        }
-      }
-    }
-
-    const afterDay  = dayMins + mins;
-    const afterWeek = weekMins + mins;
-    const hitsDay   = rules.maxDailyHours && (afterDay > rules.maxDailyHours*60);
-    const hitsWeek  = rules.maxWeeklyHours && (afterWeek > rules.maxWeeklyHours*60);
-    const hitsDaysW = rules.maxDaysPerWeek && (weekDays >= rules.maxDaysPerWeek);
-
-    // Balance simple vs media de "remaining" (controles)
-    const meRow = controls.rows.find(r=>r.id===personId);
-    const avgRemaining = controls.rows.reduce((a,r)=>a+(r.remaining||0),0) / Math.max(1,controls.rows.length);
-    const skew = meRow ? (meRow.remaining - avgRemaining) : 0;
-
-    let msg = `Asignado OK · ${Math.round(mins/60)}h`;
-    if (hitsDay)  msg += ` · ⚠ supera horas/día`;
-    if (hitsWeek) msg += ` · ⚠ supera horas/semana`;
-    if (hitsDaysW) msg += ` · ⚠ supera días/semana`;
-    if (meRow) msg += ` · balance ${skew>=0?'+':''}${skew.toFixed(0)}h vs media`;
-    showToast(msg);
-  }catch{}
-}
-
-return (
-  <AuthenticatedApp
-  auth={auth}
-  setAuth={setAuth}
-  ui={ui}
-  setUI={setUI}
-  showToast={showToast}
-  modalDay={modalDay}
-  setModalDay={setModalDay}
-  state={state}
-  setState={setState}
-  cloud={cloud}
-  setCloud={setCloud}
-  cloudLoad={cloudLoad}
-  cloudSave={cloudSave}
-  startDate={startDate}
-  weeklyStart={weeklyStart}
-  userWeeks={userWeeks}
-  setUserWeeks={setUserWeeks}
-  weekIndex={weekIndex}
-  setWeekIndex={setWeekIndex}
-  canPrev={canPrev}
-  canNext={canNext}
-  canNextRange={canNextRange}
-  payroll={payroll}
-  setPayroll={setPayroll}
-  ASS={ASS}
-  controls={controls}
-  exportCSV={exportCSV}
-  exportJSON={exportJSON}
-  importJSON={importJSON}
-  exportICS={exportICS}
-  exportPayroll={exportPayroll}
-  clearVisibleOverrides={clearVisibleOverrides}
-  duplicateVisibleToNextWeek={duplicateVisibleToNextWeek}
-  undoLastOverride={undoLastOverride}
-  onQuickAssign={quickAssign}
-  pillClass={pillClass}
-  density={density}
-  setDensity={setDensity}
-  personFilter={personFilter}
-  setPersonFilter={setPersonFilter}
-  up={up}
-  upPerson={upPerson}
-  forceAssign={forceAssign}
-/>
-);
+       {modalDay && (
+        <DayModal
+          dateStr={modalDay}
+          date={parseDateValue(modalDay)}
+          assignments={ASS[modalDay]||[]}
+          people={state.people}
+          onOverride={forceAssign}
+          onClose={()=>setModalDay(null)}
+        />
+      )}
+    </div>
+  );
 }
 
 // ===================== UI base =====================
@@ -2106,7 +2018,7 @@ function TimeOffPanel({ state, setState, controls, isAdmin, currentUser }){
         <div className="col-span-4"><label className="text-xs">Hasta</label><input type="date" value={newTO.end} onChange={(e)=>setNewTO({...newTO,end:e.target.value})} className="w-full px-2 py-1 rounded border"/></div>
         <div className="col-span-4"><label className="text-xs">Tipo</label>
           <select value={newTO.type} onChange={(e)=>setNewTO({...newTO,type:e.target.value})} className="w-full px-2 py-1 rounded border">
-            <option value="vacaciones">Vacaciones</option>
+            <option value="vacaciones">Vacaciones</option disabled={!isAdmin}>
             <option value="libranza">Libranza</option>
             <option value="viaje">Viaje (día entero)</option>
           </select>
@@ -2163,12 +2075,11 @@ function SwapsPanel({ state, setState, assignments, isAdmin, currentUser }){
     overrides[sw.dateA][keyA]=B.personId; overrides[sw.dateB][keyB]=A.personId;
     const swaps = state.swaps.map((r,idx)=> idx===i ? {...r, status:'aprobada', approvedBy:(currentUser?.name||currentUser?.id||"admin"), approvedAt:new Date().toISOString()} : r);
     setState(prev=>({...prev, overrides, swaps }));
+    setState(prev=> ({...prev, audit:[...(prev.audit||[]), {ts:new Date().toISOString(), actor:(currentUser?.email||'unknown'), action:'swap:aprobada', index:i}] }));
   }
-  function denySwap(i){ if (!isAdmin) return;  setState(prev=>({...prev, swaps: prev.swaps.map((r,idx)=> idx===i? {...r,status:'denegada'}:r)})); }
-    if (!isAdmin) return;
-  function archiveSwap(i){ if (!isAdmin) return;  setState(prev=>({...prev, swaps: prev.swaps.map((r,idx)=> idx===i? {...r,status:'archivada'}:r)})); }
-    if (!isAdmin) return;
-  function deleteSwap(i){ if (!isAdmin) return;  setState(prev=>({...prev, swaps: prev.swaps.filter((_,idx)=> idx!==i)})); }
+  function denySwap(i){ setState(prev=>({...prev, swaps: prev.swaps.map((r,idx)=> idx===i? {...r,status:'denegada'}:r)})); }
+  function archiveSwap(i){ setState(prev=>({...prev, swaps: prev.swaps.map((r,idx)=> idx===i? {...r,status:'archivada'}:r)})); }
+  function deleteSwap(i){ setState(prev=>({...prev, swaps: prev.swaps.filter((_,idx)=> idx!==i)})); }
 
   return (
     <Card title="Swaps (intercambios)">
@@ -2486,7 +2397,7 @@ function ResumenPanel({ controls, annualTarget, onExportICS }){
   );
 }
 // ===== Modal Día =====
-function DayModal({ dateStr, date, assignments, people, onOverride, onClose, isAdmin, onQuickAssign }){
+function DayModal({ dateStr, date, assignments, people, onOverride, onClose }){
   const pmap=new Map(people.map(p=>[p.id,p]));
   const sorted=assignments.map(x=>x); // ya vienen ordenados por ASS
   return (
@@ -2523,8 +2434,7 @@ function DayModal({ dateStr, date, assignments, people, onOverride, onClose, isA
                     <select
                       className="border rounded px-2 py-1 text-sm"
                       value={c.personId || ''}
-                      onChange={e=> (isAdmin && onOverride(dateStr, i, e.target.value || null))}
-                      disabled={!isAdmin}
+                      onChange={e=> onOverride(dateStr, i, e.target.value || null)}
                     >
                       <option value="">— Sin override —</option>
                       {(people || []).map(pp=> <option key={pp.id} value={pp.id}>{pp.name}</option>)}
@@ -2667,7 +2577,7 @@ function AdminUsersAndPerms({ auth }) {
             <div><label className="text-xs">Rol</label>
               <select className="w-full border rounded px-2 py-1"
                       value={creating.role} onChange={e=>setCreating({...creating,role:e.target.value})}>
-                <option value="user">user</option>
+                <option value="user">user</option disabled={!isAdmin}>
                 <option value="admin">admin</option>
               </select>
             </div>
