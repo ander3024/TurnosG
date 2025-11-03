@@ -13,15 +13,18 @@ cd /home/ubuntu/turnos/gestor-turnos
 git status -sb                    # debe mostrar solo "## main...origin/main"
 git fetch origin 205d536fda4fb1e998fe9303777fc9e3c36d4942
 git format-patch -1 205d536fda4fb1e998fe9303777fc9e3c36d4942 --stdout > changes.patch
-git apply --check changes.patch   # verifica que encaje
-git apply changes.patch           # aplica el diff
+# Comprueba el encaje; si falla, pasa al bloque "cuando no encaja"
+git apply --check changes.patch
+
+# Intento directo (solo si el check anterior no dio errores)
+git apply changes.patch
 git add src/App.jsx
 git commit -m "Aplicar parche admin pack2"
 npm install                        # solo si faltan dependencias
 npm run build
 ```
 
-> **Importante:** si `git apply --check changes.patch` falla con `patch does not apply`, salta directamente a la sección ["Cuando el parche no encaja"](#cuando-el-parche-no-encaja). No repitas `git apply` en bucle, porque no funcionará mientras el archivo local sea distinto.
+> **Importante:** si `git apply --check changes.patch` falla con `patch does not apply` (por ejemplo `src/App.jsx:498`), no insistas con el mismo comando. Ve directo a la sección ["Cuando el parche no encaja"](#cuando-el-parche-no-encaja) y usa el flujo de fusión automática (`--3way`) o `cherry-pick`.
 
 Después de compilar, despliega el contenido de `dist/` según tu flujo (ver sección 5). Si cualquiera de los pasos falla, consulta las secciones detalladas más abajo.
 
@@ -119,7 +122,7 @@ El mensaje `error: corrupt patch at line 79` indica que `changes.patch` está in
    ```bash
    git apply --check changes.patch
    ```
-   Si aquí vuelve a fallar con `patch does not apply`, salta al apartado **3.1**. Si el error vuelve a ser `corrupt patch`, regresa a la sección 2 y regenera el archivo.
+   Si aquí vuelve a fallar con `patch does not apply` (el caso más habitual cuando tu `main` ya evolucionó), pasa a **3.1**.
 
 2. Aplica el parche. Tienes dos opciones:
    - Mantener autor y mensaje original del commit:
@@ -149,7 +152,16 @@ El mensaje `error: corrupt patch at line 79` indica que `changes.patch` está in
 git apply --3way changes.patch
 ```
 
-Git intentará adaptar el diff automáticamente a tu versión actual. Si aún así quedan conflictos (`CONFLICT`), edita `src/App.jsx`, elimina los marcadores `<<<<<<<`/`=======`/`>>>>>>>`, deja el contenido correcto y termina con:
+Git intentará adaptar el diff automáticamente a tu versión actual (el comando tarda unos segundos porque reintenta con una fusión de tres vías). Si aparece algo como:
+
+```
+error: could not apply d0c0ffee... UI(admin): pack2...
+hint: after resolving the conflicts, mark the corrected paths...
+```
+
+abre `src/App.jsx`, busca los marcadores `<<<<<<<`/`=======`/`>>>>>>>`, elige la combinación deseada (normalmente conservar la parte nueva del parche respetando los bloques existentes) y deja el archivo sin marcadores. Para este cambio, los conflictos suelen aparecer cerca de la sección `function CalendarView`.
+
+Cuando termines de editar:
 
 ```bash
 git add src/App.jsx
@@ -171,13 +183,13 @@ git commit -m "Resuelve conflictos al aplicar changes.patch"
 
 3. Reaplica el commit completo con fusión de tres vías (añade `-x` si quieres que el mensaje cite el hash original):
    ```bash
-   git cherry-pick --strategy-option theirs --allow-empty-message 205d536fda4fb1e998fe9303777fc9e3c36d4942
+   git cherry-pick -x 205d536fda4fb1e998fe9303777fc9e3c36d4942
    ```
 
 4. Si Git muestra conflictos, resuélvelos:
    ```bash
    git status -sb          # identifica los archivos en conflicto
-   # edita src/App.jsx y deja la versión deseada
+   # edita src/App.jsx y deja la versión deseada (en especial alrededor de CalendarView)
    git add src/App.jsx
    git cherry-pick --continue
    ```
