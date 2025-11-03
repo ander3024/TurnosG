@@ -4,6 +4,27 @@ Esta guía está pensada para el servidor donde resides el repositorio (`/home/u
 
 ---
 
+## Resumen rápido (caso habitual)
+
+Si tu árbol está limpio y sólo quieres aplicar `changes.patch` en el servidor donde resides (`root@ubuntu:/home/ubuntu/turnos/gestor-turnos#`), sigue esta secuencia básica:
+
+```bash
+cd /home/ubuntu/turnos/gestor-turnos
+git status -sb                    # debe mostrar solo "## main...origin/main"
+git fetch origin 205d536fda4fb1e998fe9303777fc9e3c36d4942
+git format-patch -1 205d536fda4fb1e998fe9303777fc9e3c36d4942 --stdout > changes.patch
+git apply --check changes.patch   # verifica que encaje
+git apply changes.patch           # aplica el diff
+git add src/App.jsx
+git commit -m "Aplicar parche admin pack2"
+npm install                        # solo si faltan dependencias
+npm run build
+```
+
+Después de compilar, despliega el contenido de `dist/` según tu flujo (ver sección 5). Si cualquiera de los pasos falla, consulta las secciones detalladas más abajo.
+
+---
+
 ## 0. Confirmar que estás en la última versión de `main`
 
 Antes de modificar nada, asegúrate de que tu rama principal está alineada con el remoto:
