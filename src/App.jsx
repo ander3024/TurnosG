@@ -1790,6 +1790,11 @@ function WeeklyView({ startDate, weeks, assignments, people, timeOffs, province,
 // ===== Vacaciones / Libranzas / Viajes =====
 function TimeOffPanel({ state, setState, controls, isAdmin, currentUser }){
   const [newTO,setNewTO]=useState({ personId: state.people[0]?.id||"P1", start: state.startDate, end: state.startDate, type:'vacaciones', note:'', hoursPerDay: state.travelDefaultHours, status: 'pendiente' });
+  const timeOffTypeOptions = useMemo(() => ([
+    { value: 'vacaciones', label: 'Vacaciones' },
+    { value: 'libranza', label: 'Libranza' },
+    { value: 'viaje', label: 'Viaje (día entero)' }
+  ]), []);
 
   function addTimeOff(){
     const rec={...newTO};
@@ -1823,9 +1828,9 @@ function TimeOffPanel({ state, setState, controls, isAdmin, currentUser }){
         <div className="col-span-4"><label className="text-xs">Hasta</label><input type="date" value={newTO.end} onChange={(e)=>setNewTO({...newTO,end:e.target.value})} className="w-full px-2 py-1 rounded border"/></div>
         <div className="col-span-4"><label className="text-xs">Tipo</label>
           <select value={newTO.type} onChange={(e)=>setNewTO({...newTO,type:e.target.value})} className="w-full px-2 py-1 rounded border">
-            <option value="vacaciones">Vacaciones</option>
-            <option value="libranza">Libranza</option>
-            <option value="viaje">Viaje (día entero)</option>
+            {timeOffTypeOptions.map(opt => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
           </select>
         </div>
         {newTO.type==='viaje' && (
