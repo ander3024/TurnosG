@@ -21,6 +21,8 @@ npm install                        # solo si faltan dependencias
 npm run build
 ```
 
+> **Importante:** si `git apply --check changes.patch` falla con `patch does not apply`, salta directamente a la sección ["Cuando el parche no encaja"](#cuando-el-parche-no-encaja). No repitas `git apply` en bucle, porque no funcionará mientras el archivo local sea distinto.
+
 Después de compilar, despliega el contenido de `dist/` según tu flujo (ver sección 5). Si cualquiera de los pasos falla, consulta las secciones detalladas más abajo.
 
 ---
@@ -137,46 +139,56 @@ El mensaje `error: corrupt patch at line 79` indica que `changes.patch` está in
    git diff HEAD^ HEAD        # revisa los cambios si usaste git am
    ```
 
-### 3.1. Si aparece `patch does not apply`
+### 3.1. Cuando el parche no encaja
 
-Este mensaje indica que tu `src/App.jsx` es distinto al del commit base del parche. Para integrarlo igualmente:
+`patch does not apply` significa que el parche está bien formado pero tu `src/App.jsx` ya no coincide con el contexto del commit `205d536`. En esta situación **debes fusionar el cambio con la versión actual**. Tienes dos rutas seguras:
 
-1. Asegúrate de estar sincronizado con la rama objetivo:
+#### Opción A · `git apply --3way`
+
+```bash
+git apply --3way changes.patch
+```
+
+Git intentará adaptar el diff automáticamente a tu versión actual. Si aún así quedan conflictos (`CONFLICT`), edita `src/App.jsx`, elimina los marcadores `<<<<<<<`/`=======`/`>>>>>>>`, deja el contenido correcto y termina con:
+
+```bash
+git add src/App.jsx
+git commit -m "Resuelve conflictos al aplicar changes.patch"
+```
+
+#### Opción B · `git cherry-pick`
+
+1. Sitúate en la rama donde quieres el cambio (por ejemplo `main`) y asegúrate de tener lo último:
    ```bash
    git checkout main
    git pull --ff-only
    ```
 
-2. Trae el commit original (si no lo hiciste antes):
+2. Descarga el commit original si no lo tenías:
    ```bash
    git fetch origin 205d536fda4fb1e998fe9303777fc9e3c36d4942
    ```
 
-3. Cherry-pick del commit completo usando el merge de tres vías (esto reemplaza al parche):
+3. Reaplica el commit completo con fusión de tres vías (añade `-x` si quieres que el mensaje cite el hash original):
    ```bash
-   git cherry-pick --allow-empty-message --keep-redundant-commits 205d536fda4fb1e998fe9303777fc9e3c36d4942
+   git cherry-pick --strategy-option theirs --allow-empty-message 205d536fda4fb1e998fe9303777fc9e3c36d4942
    ```
-   Si prefieres conservar la autoría exacta, puedes usar `git cherry-pick -x 205d536fda4fb1e998fe9303777fc9e3c36d4942`.
 
-4. Si surgen conflictos (es habitual porque `src/App.jsx` evolucionó), edita el archivo indicado, resuelve las marcas `<<<<<<<`, guarda los cambios y marca el conflicto como resuelto:
+4. Si Git muestra conflictos, resuélvelos:
    ```bash
    git status -sb          # identifica los archivos en conflicto
-   # edita src/App.jsx y deja la versión correcta
+   # edita src/App.jsx y deja la versión deseada
    git add src/App.jsx
    git cherry-pick --continue
    ```
 
-5. Comprueba el resultado final:
+5. Revisa el resultado y continúa con la compilación:
    ```bash
    git status -sb
    git log -1 --stat
    ```
 
-Si prefieres seguir usando `changes.patch`, otra alternativa es:
-```bash
-git apply --3way changes.patch
-```
-Lo que hará Git es intentar la fusión de manera automática utilizando el contexto de la base original. Si quedan conflictos, resuélvelos igual que en el paso 4 y ejecuta `git add src/App.jsx` seguido de `git commit`.
+Ambos métodos dejan el cambio aplicado sobre tu rama actual listo para compilar y desplegar.
 
 ---
 
