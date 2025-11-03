@@ -2,6 +2,25 @@ import React, { useEffect, useMemo, useState, useRef, useCallback } from "react"
 
 import WeekendAuditPanel from "./components/WeekendAuditPanel";
 
+function normalizeAssignmentsCell(source, dateStr){
+  if (!source) return [];
+  const raw = source[dateStr];
+  if (Array.isArray(raw)) return raw;
+  if (raw && typeof raw === "object") {
+    return Object.values(raw);
+  }
+  return [];
+}
+
+function ensureAssignmentsArray(source, dateStr){
+  const arr = normalizeAssignmentsCell(source, dateStr);
+  if (!source) return arr.slice();
+  if (!Array.isArray(source[dateStr])) {
+    source[dateStr] = arr.slice();
+  }
+  return Array.isArray(source[dateStr]) ? source[dateStr] : arr.slice();
+}
+
 function renderEmptyCell(toInfo, isClosed){
   if (toInfo) {
     const normalized = typeof toInfo === "string" ? { type: toInfo } : toInfo;
@@ -185,9 +204,9 @@ function saturdayOfWeekend(d){
 }
 function weekendKeyStr(d){ return toDateValue(saturdayOfWeekend(d)); }
 function workedOnWeekend(assignments, satStr, personId){
-  const sat = assignments[satStr] || [];
+  const sat = normalizeAssignmentsCell(assignments, satStr);
   const sunStr = toDateValue(addDays(parseDateValue(satStr),1));
-  const sun = assignments[sunStr] || [];
+  const sun = normalizeAssignmentsCell(assignments, sunStr);
   return sat.some(a=>a.personId===personId) || sun.some(a=>a.personId===personId);
 }
 function countPrevConsecutiveWeekends(assignmentsSoFar, date, personId){
@@ -211,7 +230,7 @@ function respectsRules({personId, date, shift, assignmentsSoFar, weeklyMinutes, 
 
   // Máx por día
   let alreadyToday = 0;
-  for(const a of (assignmentsSoFar[dateStr]||[])){
+  for(const a of normalizeAssignmentsCell(assignmentsSoFar, dateStr)){
     if(a.personId === personId){
       alreadyToday += effectiveMinutes(a.shift);
     }
@@ -230,7 +249,7 @@ function respectsRules({personId, date, shift, assignmentsSoFar, weeklyMinutes, 
 
   // Descanso mínimo respecto al día previo
   const prevStr = toDateValue(addDays(date,-1));
-  const prevAssigns = assignmentsSoFar[prevStr] || [];
+  const prevAssigns = normalizeAssignmentsCell(assignmentsSoFar, prevStr);
   let prevEnd=null;
   for(const a of prevAssigns){
     if(a.personId===personId){
@@ -301,10 +320,10 @@ const nextOff=computeOffPersonId(people,w+1);
       const prevStart = addDays(startDate,(w-1)*7);
       // Sábado
       const satStr = toDateValue(addDays(prevStart,5));
-      for(const a of (assignments[satStr]||[])){ if(a.personId) prevWeekendWorkers.add(a.personId); }
+      for(const a of normalizeAssignmentsCell(assignments, satStr)){ if(a.personId) prevWeekendWorkers.add(a.personId); }
       // Domingo
       const sunStr = toDateValue(addDays(prevStart,6));
-      for(const a of (assignments[sunStr]||[])){ if(a.personId) prevWeekendWorkers.add(a.personId); }
+      for(const a of normalizeAssignmentsCell(assignments, sunStr)){ if(a.personId) prevWeekendWorkers.add(a.personId); }
     }
 
     for(let d=0; d<7; d++){
@@ -333,7 +352,7 @@ let required = isWE? [{...weekendShift}] : [...weekdayShifts];
       }
 
       const dayAssignments=[]; const assigned=new Set();
-      assignments[dateStr] = assignments[dateStr] || [];
+      assignments[dateStr] = ensureAssignmentsArray(assignments, dateStr);
 
       // Fijar titular finde (S+D) priorizando quien tendrá OFF la semana sig.
       let weekendFixedId=null;
@@ -416,7 +435,7 @@ let required = isWE? [{...weekendShift}] : [...weekdayShifts];
 
 // ¿Trabaja la persona en esa fecha?
 function dayWorks(assignments, dateStr, personId){
-  const cell = assignments[dateStr] || [];
+  const cell = normalizeAssignmentsCell(assignments, dateStr);
   return cell.some(a => a.personId === personId);
 }
 
@@ -560,7 +579,7 @@ function generarPicosParaAnio(year){
 function horasPeriodoPorPersona(assignments, people){
   const map = new Map(people.map(p=>[p.id,0]));
   for (const ds of Object.keys(assignments)){
-    for (const a of (assignments[ds]||[])){
+    for (const a of normalizeAssignmentsCell(assignments, ds)){
       if (!a.personId) continue;
       map.set(a.personId, map.get(a.personId) + effectiveMinutes(a.shift));
     }
@@ -647,7 +666,7 @@ function proponerCierreHoras({
   }
   // asignados ahora mismo (ASS/assignments) ese día
   function currentSlotsCount(ds){
-    const cell = assignments[ds] || [];
+    const cell = normalizeAssignmentsCell(assignments, ds);
     return cell.length;
   }
 
@@ -661,7 +680,7 @@ function proponerCierreHoras({
         const isWE = isWeekend(parseDateValue(ds));
 
         // si la persona ya trabaja ese día, no proponer (evitamos islas)
-        const yaTrabaja = (assignments[ds]||[]).some(c=>c.personId===fp.id);
+        const yaTrabaja = normalizeAssignmentsCell(assignments, ds).some(c=>c.personId===fp.id);
         if (yaTrabaja) continue;
 
         // capacidad del día:
@@ -1570,7 +1589,7 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
     <div className="overflow-x-auto">
       <div className="grid grid-cols-7 gap-4 w-full">
         {days.map(date=>{
-          const dateStr=toDateValue(date); const wd=date.toLocaleDateString(undefined,{weekday:'short'}); const day=date.getDate(); const isWE=isWeekend(date); const cell=assignments[dateStr]||[]; const hasConflict=cell.some(c=>c.conflict); const sorted=[...cell].sort((a,b)=> minutesFromHHMM(a.shift.start)-minutesFromHHMM(b.shift.start));
+          const dateStr=toDateValue(date); const wd=date.toLocaleDateString(undefined,{weekday:'short'}); const day=date.getDate(); const isWE=isWeekend(date); const cell=normalizeAssignmentsCell(assignments, dateStr); const hasConflict=cell.some(c=>c.conflict); const sorted=[...cell].sort((a,b)=> minutesFromHHMM(a.shift.start)-minutesFromHHMM(b.shift.start));
           const isClosed = isClosedBusinessDay2(dateStr, province, closeOnHolidays, closedExtraDates, customHolidaysByYear);
           const shiftEntries = isClosed ? [] : sorted;
           const shiftOptions = shiftEntries.map((entry, idx) => {
@@ -1759,7 +1778,7 @@ function WeeklyView({ startDate, weeks, assignments, people, timeOffs, province,
       {/* Celdas por día */}
       {(header || []).map((h, idx) => {
         // Turnos del día para esta persona
-        const cell = (assignments[h.dateStr] || [])
+        const cell = normalizeAssignmentsCell(assignments, h.dateStr)
           .filter(c => c.personId === p.id)
           .sort((a, b) => minutesFromHHMM(a.shift.start) - minutesFromHHMM(b.shift.start));
 
@@ -1884,7 +1903,9 @@ function SwapsPanel({ state, setState, assignments, isAdmin, currentUser }){
   function approveSwap(i){
     if (!isAdmin) return;
     const sw=state.swaps[i];
-    const A=assignments[sw.dateA]?.[sw.shiftIndexA]; const B=assignments[sw.dateB]?.[sw.shiftIndexB];
+    const cellA = normalizeAssignmentsCell(assignments, sw.dateA);
+    const cellB = normalizeAssignmentsCell(assignments, sw.dateB);
+    const A=cellA[sw.shiftIndexA]; const B=cellB[sw.shiftIndexB];
     if(!A||!B||!A.personId||!B.personId){ alert('No encuentro asignaciones válidas'); return; }
     const keyA=`${A.shift.start}-${A.shift.end}-${A.shift.label||`T${sw.shiftIndexA+1}`}`;
     const keyB=`${B.shift.start}-${B.shift.end}-${B.shift.label||`T${sw.shiftIndexB+1}`}`;
@@ -2140,7 +2161,7 @@ function buildControls({
     : [...Array(weeks*7)].map((_,i)=> toDateValue(addDays(startDate, i)));
 
   for (const ds of dates){
-    const cell = assignments[ds] || [];
+    const cell = normalizeAssignmentsCell(assignments, ds);
     const isWE = isWeekend(parseDateValue(ds));
     for (const c of cell){
       if (!c.personId) continue;
@@ -2170,7 +2191,7 @@ function buildControls({
   }
 
   // Conflictos (por si en el futuro los marcas)
-  const totalConflicts = dates.reduce((acc,ds)=> acc + (assignments[ds]||[]).filter(a=>a.conflict).length, 0);
+  const totalConflicts = dates.reduce((acc,ds)=> acc + normalizeAssignmentsCell(assignments, ds).filter(a=>a.conflict).length, 0);
 
   // Etiqueta de periodo visible en resumen
   const periodStart = startDate;
@@ -2268,8 +2289,43 @@ function DayModal({ dateStr, date, assignments, people, onOverride, onClose, isA
 }
 
 // ===== CSV / ICS =====
-function buildCSV(assignments, people){ const header=["fecha","turno","inicio","fin","persona","tipo","conflicto"]; const rows=[header.join(',')]; const pmap=new Map(people.map(p=>[p.id,p.name])); const dates=Object.keys(assignments).sort(); for(const d of dates){ for(const a of assignments[d]){ rows.push([d,a.shift.label||"",a.shift.start,a.shift.end,a.personId?pmap.get(a.personId):"", isWeekend(parseDateValue(d))?"fin_de_semana":"laborable", a.conflict?"SI":"NO"].join(',')); } } return rows; }
-function buildICS({ assignments, people, personId, startDate, weeks }){ const prod='-//Gestor Turnos 4P//ES'; let ics=`BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:${prod}\nCALSCALE:GREGORIAN\nMETHOD:PUBLISH\n`; const person=people.find(p=>p.id===personId); const fmt=(d)=> d.getFullYear().toString().padStart(4,'0')+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0')+'T'+String(d.getHours()).padStart(2,'0')+String(d.getMinutes()).padStart(2,'0')+'00'; for(let w=0;w<weeks;w++){ for(let d=0;d<7;d++){ const date=addDays(startDate,w*7+d); const ds=toDateValue(date); const cell=assignments[ds]||[]; for(const c of cell){ if(c.personId!==personId) continue; const [sh,sm]=c.shift.start.split(':').map(Number); const [eh,em]=c.shift.end.split(':').map(Number); const s=new Date(date.getFullYear(),date.getMonth(),date.getDate(),sh,sm||0,0); const e=new Date(date.getFullYear(),date.getMonth(),date.getDate(),eh,em||0,0); const uid=`${personId}-${ds}-${c.shift.start.replace(':','')}`; const summary=`${c.shift.label||'Turno'} · ${person?.name||personId}`; ics+=`BEGIN:VEVENT\nUID:${uid}@turnos4p\nDTSTAMP:${fmt(new Date())}\nDTSTART:${fmt(s)}\nDTEND:${fmt(e)}\nSUMMARY:${summary}\nDESCRIPTION:${isWeekend(date)?'Fin de semana':'Laborable'}\nEND:VEVENT\n`; } } } ics+='END:VCALENDAR\n'; return ics; }
+function buildCSV(assignments, people){
+  const header=["fecha","turno","inicio","fin","persona","tipo","conflicto"];
+  const rows=[header.join(',')];
+  const pmap=new Map(people.map(p=>[p.id,p.name]));
+  const dates=Object.keys(assignments).sort();
+  for(const d of dates){
+    for(const a of normalizeAssignmentsCell(assignments, d)){
+      rows.push([d,a.shift.label||"",a.shift.start,a.shift.end,a.personId?pmap.get(a.personId):"", isWeekend(parseDateValue(d))?"fin_de_semana":"laborable", a.conflict?"SI":"NO"].join(','));
+    }
+  }
+  return rows;
+}
+function buildICS({ assignments, people, personId, startDate, weeks }){
+  const prod='-//Gestor Turnos 4P//ES';
+  let ics=`BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:${prod}\nCALSCALE:GREGORIAN\nMETHOD:PUBLISH\n`;
+  const person=people.find(p=>p.id===personId);
+  const fmt=(d)=> d.getFullYear().toString().padStart(4,'0')+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0')+'T'+String(d.getHours()).padStart(2,'0')+String(d.getMinutes()).padStart(2,'0')+'00';
+  for(let w=0;w<weeks;w++){
+    for(let d=0;d<7;d++){
+      const date=addDays(startDate,w*7+d);
+      const ds=toDateValue(date);
+      const cell=normalizeAssignmentsCell(assignments, ds);
+      for(const c of cell){
+        if(c.personId!==personId) continue;
+        const [sh,sm]=c.shift.start.split(':').map(Number);
+        const [eh,em]=c.shift.end.split(':').map(Number);
+        const s=new Date(date.getFullYear(),date.getMonth(),date.getDate(),sh,sm||0,0);
+        const e=new Date(date.getFullYear(),date.getMonth(),date.getDate(),eh,em||0,0);
+        const uid=`${personId}-${ds}-${c.shift.start.replace(':','')}`;
+        const summary=`${c.shift.label||'Turno'} · ${person?.name||personId}`;
+        ics+=`BEGIN:VEVENT\nUID:${uid}@turnos4p\nDTSTAMP:${fmt(new Date())}\nDTSTART:${fmt(s)}\nDTEND:${fmt(e)}\nSUMMARY:${summary}\nDESCRIPTION:${isWeekend(date)?'Fin de semana':'Laborable'}\nEND:VEVENT\n`;
+      }
+    }
+  }
+  ics+='END:VCALENDAR\n';
+  return ics;
+}
 
 
 function AdminUsersAndPerms({ auth }) {
