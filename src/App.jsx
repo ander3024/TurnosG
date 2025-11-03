@@ -369,7 +369,12 @@ let required = isWE? [{...weekendShift}] : [...weekdayShifts];
         pool = pool.filter(p => respectsRules({ personId:p.id, date, shift, assignmentsSoFar: assignments, weeklyMinutes, weeklyDays, rules }));
 
         // Overrides y preferencia finde
-        let chosen=null; const forced=overrides?.[dateStr]?.[key];
+        let chosen=null;
+        const forced=overrides?.[dateStr]?.[key];
+        if (forced === "__EMPTY__") {
+          dayAssignments.push({ shift, personId: null, conflict: true, forcedEmpty: true });
+          continue;
+        }
         if(forced && pool.some(p=>p.id===forced)) chosen=forced;
         if(!chosen && mustWorkOffToday && pool.some(p=>p.id===offId)) chosen = offId;
         else if(isWE && s===0 && weekendFixedId && pool.some(p=>p.id===weekendFixedId)) chosen=weekendFixedId;
@@ -794,15 +799,38 @@ function showToast(msg){ setUI(prev=>({...prev, toast:msg})); setTimeout(()=>set
 });
 
   function forceAssign(dateStr, assignmentIndex, personId){
-  const a = ASS[dateStr]?.[assignmentIndex];
-  if(!a) return;
-  const key = `${a.shift.start}-${a.shift.end}-${a.shift.label||`T${assignmentIndex+1}`}`;
-  const next = structuredClone(state.overrides || {});
-  next[dateStr] = next[dateStr] || {};
-  next[dateStr][key] = personId || null; // si pasas '', quita override
-  up(['overrides'], next);
-  up(['audit'], [ ...(state.audit||[]), { ts:new Date().toISOString(), actor:(auth.user?.email||'unknown'), action:'override', dateStr, assignmentIndex, personId } ]);
-}
+    const a = ASS[dateStr]?.[assignmentIndex];
+    if(!a) return;
+    const key = `${a.shift.start}-${a.shift.end}-${a.shift.label||`T${assignmentIndex+1}`}`;
+    const actor = auth.user?.email || auth.user?.name || "unknown";
+    setState(prev => {
+      const next = structuredClone(prev);
+      const overrides = structuredClone(prev.overrides || {});
+      const isClear = personId === null || personId === undefined || personId === "";
+      if (isClear) {
+        if (overrides[dateStr]) {
+          delete overrides[dateStr][key];
+          if (Object.keys(overrides[dateStr]).length === 0) delete overrides[dateStr];
+        }
+      } else {
+        overrides[dateStr] = overrides[dateStr] || {};
+        overrides[dateStr][key] = personId;
+      }
+      next.overrides = overrides;
+      const auditEntry = {
+        ts: new Date().toISOString(),
+        actor,
+        action: personId === "__EMPTY__" ? "override:force-empty" : (isClear ? "override:clear" : "override:assign"),
+        dateStr,
+        assignmentIndex,
+        shiftKey: key,
+        personId: personId && personId !== "__EMPTY__" ? personId : null,
+      };
+      const auditList = Array.isArray(prev.audit) ? [...prev.audit, auditEntry] : [auditEntry];
+      next.audit = auditList;
+      return next;
+    });
+  }
 
   // Sincroniza offPolicy con window para que generateSchedule lea la política activa
   useEffect(() => {
@@ -1429,16 +1457,129 @@ function CustomHolidaysPanel({ state, up }){
 }
 
 
-function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmin, onQuickAssign, province, closeOnHolidays, closedExtraDates, customHolidaysByYear }){ const todayStr = toDateValue(new Date());
+function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmin, onQuickAssign, province, closeOnHolidays, closedExtraDates, customHolidaysByYear }){
   const days=[]; for(let w=0;w<weeks;w++) for(let d=0;d<7;d++) days.push(addDays(startDate, w*7+d));
   const personMap=new Map(people.map(p=>[p.id,p]));
+  const [editor, setEditor] = useState(null);
+  const [form, setForm] = useState({ personId: people[0]?.id || "", shiftIndex: 0 });
+  const defaultPersonId = people[0]?.id || "";
+
+  const emitCommand = (payload) => {
+    if (typeof onQuickAssign === "function") {
+      onQuickAssign(payload);
+    }
+  };
+
+  const closeEditor = () => {
+    setEditor(null);
+  };
+
+  const prepareForm = (shiftIndex, personId) => {
+    const fallback = defaultPersonId || "";
+    setForm({
+      shiftIndex: typeof shiftIndex === "number" ? shiftIndex : Number(shiftIndex) || 0,
+      personId: personId ?? fallback,
+    });
+  };
+
+  const openNew = (dateStr, shiftOptions) => {
+    if (!isAdmin || (shiftOptions||[]).length === 0) return;
+    const defaultOption = shiftOptions.find(opt => opt.isVacant) || shiftOptions[0];
+    setEditor({ mode: "new", dateStr });
+    prepareForm(defaultOption ? defaultOption.value : 0, defaultPersonId || "");
+  };
+
+  const openEdit = (dateStr, shiftIndex, currentPersonId, forcedEmpty) => {
+    if (!isAdmin) return;
+    setEditor({ mode: "edit", dateStr, fromShiftIndex: shiftIndex, leaveEmpty: forcedEmpty ? false : true });
+    prepareForm(shiftIndex, currentPersonId ?? defaultPersonId ?? "");
+  };
+
+  const handleSubmit = (event, shiftOptions) => {
+    event?.preventDefault();
+    if (!isAdmin || !editor) { closeEditor(); return; }
+    if (!shiftOptions || shiftOptions.length === 0) { closeEditor(); return; }
+    if (!form.personId) { alert('Selecciona una persona'); return; }
+    const targetShift = Number(form.shiftIndex);
+    if (Number.isNaN(targetShift)) { alert('Selecciona un turno válido'); return; }
+    const payload = {
+      dateStr: editor.dateStr,
+      shiftIndex: targetShift,
+      personId: form.personId,
+      type: 'assign'
+    };
+    if (editor.mode === 'edit') {
+      payload.fromShiftIndex = editor.fromShiftIndex;
+      if (targetShift !== editor.fromShiftIndex) {
+        payload.type = 'move';
+        payload.leaveEmpty = editor.leaveEmpty !== false;
+      }
+    }
+    emitCommand(payload);
+    closeEditor();
+  };
+
+  const renderForm = (dateStr, shiftOptions) => {
+    if (!editor) return null;
+    return (
+      <form onSubmit={(e)=>handleSubmit(e, shiftOptions)} className="rounded-lg border bg-white p-2 text-[11px] space-y-2">
+        <div>
+          <label className="block text-[10px] uppercase tracking-wide text-slate-500">Turno</label>
+          <select
+            className="mt-1 w-full border rounded px-2 py-1 text-sm"
+            value={form.shiftIndex}
+            onChange={e=>prepareForm(Number(e.target.value), form.personId)}
+          >
+            {(shiftOptions||[]).map(opt => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="block text-[10px] uppercase tracking-wide text-slate-500">Persona</label>
+          <select
+            className="mt-1 w-full border rounded px-2 py-1 text-sm"
+            value={form.personId}
+            onChange={e=>setForm(prev=>({ ...prev, personId: e.target.value }))}
+          >
+            <option value="">— Selecciona —</option>
+            {(people||[]).map(pp=> <option key={pp.id} value={pp.id}>{pp.name}</option>)}
+          </select>
+        </div>
+        {editor.mode === 'edit' && Number(form.shiftIndex) !== editor.fromShiftIndex && (
+          <label className="flex items-center gap-2 text-[10px] text-slate-600">
+            <input
+              type="checkbox"
+              checked={editor.leaveEmpty !== false}
+              onChange={e=>setEditor(prev=> prev ? { ...prev, leaveEmpty: e.target.checked } : prev)}
+            />
+            Vaciar turno original al mover
+          </label>
+        )}
+        <div className="flex justify-end gap-2">
+          <button type="button" onClick={closeEditor} className="px-2 py-1 border rounded-lg text-[11px]">Cancelar</button>
+          <button type="submit" className="px-2 py-1 border rounded-lg bg-slate-900 text-white text-[11px]">
+            {editor.mode === 'edit' ? 'Guardar' : 'Asignar'}
+          </button>
+        </div>
+      </form>
+    );
+  };
+
   return (
     <div className="overflow-x-auto">
       <div className="grid grid-cols-7 gap-4 w-full">
         {days.map(date=>{
-          const dateStr=toDateValue(date); const wd=date.toLocaleDateString(undefined,{weekday:'short'}); const day=date.getDate(); const isWE=isWeekend(date); const cell=assignments[dateStr]||[]; const hasConflict=cell.some(c=>c.conflict);
-          const sorted=[...cell].sort((a,b)=> minutesFromHHMM(a.shift.start)-minutesFromHHMM(b.shift.start));
+          const dateStr=toDateValue(date); const wd=date.toLocaleDateString(undefined,{weekday:'short'}); const day=date.getDate(); const isWE=isWeekend(date); const cell=assignments[dateStr]||[]; const hasConflict=cell.some(c=>c.conflict); const sorted=[...cell].sort((a,b)=> minutesFromHHMM(a.shift.start)-minutesFromHHMM(b.shift.start));
           const isClosed = isClosedBusinessDay2(dateStr, province, closeOnHolidays, closedExtraDates, customHolidaysByYear);
+          const shiftEntries = isClosed ? [] : sorted;
+          const shiftOptions = shiftEntries.map((entry, idx) => {
+            const lbl=(entry.shift.label|| (isWE?'Finde':`T${idx+1}`));
+            const span=formatSpan(entry.shift.start, entry.shift.end);
+            const isVacant = !entry.personId || entry.conflict || entry.forcedEmpty;
+            return { value: idx, label: `${lbl} · ${span}`, isVacant };
+          });
+          const isEditingNew = editor && editor.mode === 'new' && editor.dateStr === dateStr;
           return (
             <div key={dateStr} className={`rounded-2xl border p-2 ${isWE? 'bg-slate-50':'bg-white'} ${hasConflict? 'border-red-400':'border-slate-200'}`}>
               <div className="flex items-center justify-between mb-2">
@@ -1460,16 +1601,55 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
                     </div>
                   </div>
                 )}
-                {(isClosed? [] : sorted).map((c,i)=>{ const p=c.personId?personMap.get(c.personId):null; const span=formatSpan(c.shift.start,c.shift.end); const dur = effectiveMinutes(c.shift)/60; const lbl=(c.shift.label|| (isWE?'Finde':`T${i+1}`)); const emblem = /mañana/i.test(lbl)? '☀️' : /tarde/i.test(lbl)? '🌙' : isWE? '🗓️' : '➕'; return (
-                  <div key={i} className={`rounded-xl px-2 py-1.5 border text-sm flex items-center justify-between ${c.conflict? 'border-red-300 bg-red-50':'border-slate-200'}`} title={`${lbl} · ${span} (${dur}h)`}>
-                    <div className="truncate">
-                      <span className="text-[11px] mr-1 rounded px-1 py-0.5 border bg-slate-50">{emblem} {lbl}</span>
-                      <span className="text-slate-700">{span}</span>
-                      <span className="text-[11px] ml-1 text-slate-500">({dur}h{c.shift.lunchMinutes ? " · comida "+(c.shift.lunchMinutes)+"m" : ""})</span>
+                {shiftEntries.map((c,i)=>{
+                  const p=c.personId?personMap.get(c.personId):null;
+                  const span=formatSpan(c.shift.start,c.shift.end);
+                  const dur = effectiveMinutes(c.shift)/60;
+                  const lbl=(c.shift.label|| (isWE?'Finde':`T${i+1}`));
+                  const emblem = /mañana/i.test(lbl)? '☀️' : /tarde/i.test(lbl)? '🌙' : /refuerzo/i.test(lbl)? '➕' : isWE? '🗓️' : '⌚️';
+                  const isForcedEmpty = !!c.forcedEmpty;
+                  const occupant = p
+                    ? (<span className="chip inline-flex items-center gap-1 px-1 py-0.5 rounded-lg" style={{background:`${p.color}20`, border:`1px solid ${p.color}55`}}><span className="h-2.5 w-2.5 rounded" style={{background:p.color}}/><span className="text-[10px]">{p.name}</span></span>)
+                    : isForcedEmpty
+                      ? (<span className="inline-flex items-center gap-1 px-1 py-0.5 rounded-lg text-[10px] text-rose-600">🔒 Bloqueado</span>)
+                      : (<span className="inline-flex items-center gap-1 px-1 py-0.5 rounded-lg text-[10px] text-rose-600">⚠ Falta asignar</span>);
+                  const isEditingThis = isAdmin && editor && editor.mode === 'edit' && editor.dateStr === dateStr && editor.fromShiftIndex === i;
+                  return (
+                    <div key={`${dateStr}-${i}`} className="space-y-1">
+                      <div className={`rounded-xl px-2 py-1.5 border text-sm flex items-center justify-between ${c.conflict || isForcedEmpty? 'border-red-300 bg-red-50':'border-slate-200'}`} title={`${lbl} · ${span} (${dur}h)`}>
+                        <div className="truncate">
+                          <span className="text-[11px] mr-1 rounded px-1 py-0.5 border bg-slate-50">{emblem} {lbl}</span>
+                          <span className="text-slate-700">{span}</span>
+                          <span className="text-[11px] ml-1 text-slate-500">({dur}h{c.shift.lunchMinutes ? " · comida "+(c.shift.lunchMinutes)+"m" : ""})</span>
+                        </div>
+                        {occupant}
+                      </div>
+                      {isAdmin && (
+                        <div className="flex flex-wrap justify-end gap-2 text-[11px]">
+                          <button type="button" className="px-2 py-0.5 border rounded-lg" onClick={()=>openEdit(dateStr, i, c.personId || (defaultPersonId||''), isForcedEmpty)}>
+                            {c.personId ? 'Editar' : 'Asignar'}
+                          </button>
+                          {c.personId && (
+                            <button type="button" className="px-2 py-0.5 border rounded-lg text-rose-600" onClick={()=>emitCommand({ type:'clear', dateStr, shiftIndex:i, forceEmpty:true })}>Vaciar</button>
+                          )}
+                          {isForcedEmpty && (
+                            <button type="button" className="px-2 py-0.5 border rounded-lg" onClick={()=>emitCommand({ type:'clear', dateStr, shiftIndex:i, forceEmpty:false })}>Liberar bloqueo</button>
+                          )}
+                        </div>
+                      )}
+                      {isEditingThis && renderForm(dateStr, shiftOptions)}
                     </div>
-                    <div className="flex items-center gap-1">{p? (<span className="chip inline-flex items-center gap-1 px-1 py-0.5 rounded-lg" style={{background:`${p.color}20`, border:`1px solid ${p.color}55`}}><span className="h-2.5 w-2.5 rounded" style={{background:p.color}}/><span className="text-[10px]">{p.name}</span></span>): (<span className="text-red-600 text-sm">⚠ Falta asignar</span>)}</div>
+                  );
+                })}
+                {isAdmin && !isClosed && shiftOptions.length>0 && (
+                  <div className="pt-2">
+                    <button type="button" className="w-full text-[11px] px-2 py-1 border rounded-lg hover:bg-slate-100" onClick={()=>openNew(dateStr, shiftOptions)}>Asignar turno</button>
+                    {isEditingNew && renderForm(dateStr, shiftOptions)}
                   </div>
-                );})}
+                )}
+                {isAdmin && !isClosed && shiftOptions.length===0 && (
+                  <div className="text-[11px] text-slate-500">No hay turnos configurados para este día.</div>
+                )}
               </div>
             </div>
           );
@@ -1491,11 +1671,32 @@ function PrettyAssignment({ a, h, p, i }){
     isWE ? '🗓️' : '⌚️';
 
   const color = (p && p.color) ? p.color : '#475569';
+  const occupant = p
+    ? (
+      <span
+        className="chip inline-flex items-center gap-1 px-1 py-0.5 rounded-lg"
+        style={{background:`${color}20`, border:`1px solid ${color}55`}}
+      >
+        <span className="h-2.5 w-2.5 rounded" style={{background:color}}/>
+        <span className="text-[10px]">{p?.name||''}</span>
+      </span>
+    )
+    : a.forcedEmpty
+      ? (
+        <span className="inline-flex items-center gap-1 px-1 py-0.5 rounded-lg text-[10px] text-rose-600">
+          🔒 Bloqueado
+        </span>
+      )
+      : (
+        <span className="inline-flex items-center gap-1 px-1 py-0.5 rounded-lg text-[10px] text-rose-600">
+          ⚠ Vacío
+        </span>
+      );
 
   return (
     <div
       className={`rounded-xl px-2 py-0.5 border text-[11px] mb-0.5 ${a.conflict ? 'border-red-300 bg-red-50' : 'border-slate-200 bg-white'}`}
-      style={a.conflict?{}:{ background:`1f`, border:`1px solid 33`}} 
+      style={a.conflict?{}:{ background:`1f`, border:`1px solid 33`}}
 title={`${lbl} · ${span} (${dur}h)`}
     >
       <div className="flex items-center justify-between">
@@ -1508,13 +1709,7 @@ title={`${lbl} · ${span} (${dur}h)`}
             ({dur}h{a.shift.lunchMinutes ? ` · comida ${a.shift.lunchMinutes}m` : ''})
           </span>
         </div>
-        <span
-          className="chip inline-flex items-center gap-1 px-1 py-0.5 rounded-lg"
-          style={{background:`${color}20`, border:`1px solid ${color}55`}}
-        >
-          <span className="h-2.5 w-2.5 rounded" style={{background:color}}/>
-          <span className="text-[10px]">{p?.name||''}</span>
-        </span>
+        {occupant}
       </div>
     </div>
   );
@@ -2029,21 +2224,25 @@ function DayModal({ dateStr, date, assignments, people, onOverride, onClose, isA
                 <div className="flex items-center justify-between gap-3">
                   <div className="text-sm">
                     <div className="font-medium">{c.shift.label||`Turno ${i+1}`} · {span} <span className="text-slate-500 font-normal">({dur}h{c.shift.lunchMinutes ? " · comida " + (c.shift.lunchMinutes) + "m" : ""})</span></div>
-                    <div className="text-xs text-slate-500">{c.conflict? '⚠ Falta asignar':'Asignado'}</div>
+                    <div className="text-xs text-slate-500">{c.forcedEmpty ? '🔒 Vacío forzado' : (c.conflict? '⚠ Falta asignar':'Asignado')}</div>
                   </div>
                   <div className="flex items-center gap-2">
                     <select
                       className="border rounded px-2 py-1 text-sm"
-                      value={c.personId || ''}
+                      value={c.forcedEmpty ? '__EMPTY__' : (c.personId || '')}
                       onChange={e=> (isAdmin && onOverride(dateStr, i, e.target.value || null))}
                       disabled={!isAdmin}
                     >
                       <option value="">— Sin override —</option>
+                      {isAdmin && <option value="__EMPTY__">Bloquear (vacío)</option>}
                       {(people || []).map(pp=> <option key={pp.id} value={pp.id}>{pp.name}</option>)}
                     </select>
                     {p && <span className="inline-flex items-center gap-1 text-sm">
                       <span className="h-3 w-3 rounded" style={{background:p.color}}/> {p.name}
                     </span>}
+                    {!p && c.forcedEmpty && (
+                      <span className="inline-flex items-center gap-1 text-sm text-rose-600">🔒 Bloqueado</span>
+                    )}
                   </div>
                 </div>
               </div>
@@ -2435,6 +2634,38 @@ function AuthenticatedApp(props){
   const __ap_auth = (typeof auth !== "undefined" && auth) ? auth : (__ap_props && (__ap_props.auth || __ap_props.Auth || null));
   const isAdmin = !!(__ap_auth && __ap_auth.user && __ap_auth.user.role === "admin");
 
+  function handleCalendarCommand(cmd){
+    if (!isAdmin || !cmd) return;
+    const { dateStr, shiftIndex } = cmd;
+    if (!dateStr || typeof shiftIndex !== 'number') return;
+
+    if (cmd.type === 'clear') {
+      forceAssign(dateStr, shiftIndex, cmd.forceEmpty ? '__EMPTY__' : null);
+      if (typeof showToast === 'function') {
+        showToast(cmd.forceEmpty ? 'Turno vaciado' : 'Override eliminado');
+      }
+      return;
+    }
+
+    if (!cmd.personId) {
+      if (typeof showToast === 'function') showToast('Selecciona una persona');
+      return;
+    }
+
+    if (cmd.type === 'move' && typeof cmd.fromShiftIndex === 'number' && cmd.fromShiftIndex !== shiftIndex) {
+      if (cmd.leaveEmpty) {
+        forceAssign(dateStr, cmd.fromShiftIndex, '__EMPTY__');
+      } else {
+        forceAssign(dateStr, cmd.fromShiftIndex, null);
+      }
+    }
+
+    forceAssign(dateStr, shiftIndex, cmd.personId);
+    if (typeof showToast === 'function') {
+      showToast(cmd.type === 'move' ? 'Turno actualizado' : 'Turno asignado');
+    }
+  }
+
   // ---------- Exportaciones (CSV/ICS/Nómina) ----------
   
   
@@ -2629,6 +2860,24 @@ function AuthenticatedApp(props){
             </div>
             <WeeklyView startDate={weeklyStart} weeks={1} assignments={ASS} people={state.people} timeOffs={state.timeOffs} province={state.province} closeOnHolidays={state.closeOnHolidays} closedExtraDates={state.closedExtraDates} customHolidaysByYear={state.customHolidaysByYear} consumeVacationOnHoliday={state.consumeVacationOnHoliday} />
           </Card>)}
+
+          {isAdmin && (
+            <Card title="Calendario diario (admin)">
+              <CalendarView
+                startDate={startDate}
+                weeks={state.weeks}
+                assignments={ASS}
+                people={state.people}
+                onOpenDay={(ds)=>setModalDayProp(ds)}
+                isAdmin={isAdmin}
+                onQuickAssign={handleCalendarCommand}
+                province={state.province}
+                closeOnHolidays={state.closeOnHolidays}
+                closedExtraDates={state.closedExtraDates}
+                customHolidaysByYear={state.customHolidaysByYear}
+              />
+            </Card>
+          )}
 
           <TimeOffPanel state={state} setState={setState} controls={controls} isAdmin={isAdmin} currentUser={auth.user} />
           <SwapsPanel state={state} setState={setState} assignments={ASS}  isAdmin={isAdmin} currentUser={auth.user} />
