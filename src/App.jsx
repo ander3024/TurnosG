@@ -727,6 +727,7 @@ export default function App(){
   const [modalDay, setModalDay] = useState(null);
   const toastTimeoutRef = React.useRef(null);
   const showToast = React.useCallback((message, duration = 2000) => {
+    const timeoutMs = Number.isFinite(duration) ? duration : 2000;
     setUI(prev => ({ ...prev, toast: message }));
     if (toastTimeoutRef.current) {
       window.clearTimeout(toastTimeoutRef.current);
@@ -734,7 +735,7 @@ export default function App(){
     toastTimeoutRef.current = window.setTimeout(() => {
       setUI(prev => ({ ...prev, toast: null }));
       toastTimeoutRef.current = null;
-    }, duration);
+    }, timeoutMs);
   }, [setUI]);
 
   useEffect(() => {
