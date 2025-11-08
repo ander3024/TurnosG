@@ -1,4 +1,7 @@
-import React, { useEffect, useMemo, useState, useRef, useCallback } from "react";
+import React, { useEffect, useMemo, useState } from "react";
+
+const IDLE_MS = 15 * 60 * 1000; // 15 minutos
+const DEFAULT_TOAST_MS = 2000;
 
 import WeekendAuditPanel from "./components/WeekendAuditPanel";
 
@@ -899,15 +902,70 @@ export default function App(){
   
   // --- ui feedback (banner + toast) ---
   const [ui, setUI] = useState({ sync:null, toast:null });
-  
-  
+  const toastTimeoutRef = React.useRef(null);
+  const idleTimeoutRef = React.useRef(null);
+
+  useEffect(() => () => {
+    if (toastTimeoutRef.current) {
+      clearTimeout(toastTimeoutRef.current);
+      toastTimeoutRef.current = null;
+    }
+  }, []);
+
+  const showToast = React.useCallback((message, duration = DEFAULT_TOAST_MS) => {
+    const safeDuration = Number.isFinite(duration) && duration > 0 ? duration : DEFAULT_TOAST_MS;
+
+    if (toastTimeoutRef.current) {
+      clearTimeout(toastTimeoutRef.current);
+      toastTimeoutRef.current = null;
+    }
+
+    if (!message) {
+      setUI(prev => ({ ...prev, toast: null }));
+      return;
+    }
+
+    setUI(prev => ({ ...prev, toast: message }));
+    toastTimeoutRef.current = setTimeout(() => {
+      setUI(prev => ({ ...prev, toast: null }));
+      toastTimeoutRef.current = null;
+    }, safeDuration);
+  }, [setUI]);
+
   // Modal día (compartido)
   const [modalDay, setModalDay] = useState(null);
-function showToast(msg){ setUI(prev=>({...prev, toast:msg})); setTimeout(()=>setUI(prev=>({...prev, toast:null})), 2000); }
 
+  useEffect(() => {
+    if (!auth?.token) {
+      if (idleTimeoutRef.current) {
+        clearTimeout(idleTimeoutRef.current);
+        idleTimeoutRef.current = null;
+      }
+      return;
+    }
 
+    const resetIdle = () => {
+      if (idleTimeoutRef.current) {
+        clearTimeout(idleTimeoutRef.current);
+      }
+      idleTimeoutRef.current = setTimeout(() => {
+        showToast("Sesión expirada por inactividad");
+        doLogout();
+      }, IDLE_MS);
+    };
 
+    const events = ["click", "keydown", "mousemove", "touchstart", "visibilitychange"];
+    events.forEach(evt => window.addEventListener(evt, resetIdle));
+    resetIdle();
 
+    return () => {
+      if (idleTimeoutRef.current) {
+        clearTimeout(idleTimeoutRef.current);
+        idleTimeoutRef.current = null;
+      }
+      events.forEach(evt => window.removeEventListener(evt, resetIdle));
+    };
+  }, [auth?.token, doLogout, showToast]);
   // --- permisos UI ---
   const isAdmin = auth.user?.role === 'admin';
 
@@ -994,14 +1052,15 @@ function forceAssign(dateStr, assignmentIndex, personId){
 
   // ---------- Cloud (SQLite) ----------
   const [cloud, setCloud] = useState({ spaceId:"turnos-2025", readToken:"READ-2025", writeToken:"WRT-1234", apiKey:"" });
-  async function cloudLoad() { setUI(prev=>({...prev, sync:"loading"}));
-    // (no-admin) intentamos cargar aunque no haya readToken; el backend decidirá
-// // No cortamos a no-admin por falta de readToken; el backend decidirá.
-// if (!isAdmin && !cloud.readToken) { showToast("Falta ReadToken"); setUI(prev=>({...prev, sync:"error"})); return; }
+  async function cloudLoad(options = {}) {
+    const silent = options?.silent === true;
+    if (!silent) {
+      setUI(prev => ({ ...prev, sync: "loading" }));
+    }
     try{
       const extra={}; if(cloud.apiKey) extra["X-API-Key"]=cloud.apiKey; if(cloud.readToken) extra["X-Read-Token"]=cloud.readToken;
       const data = await api(`/state/${encodeURIComponent(cloud.spaceId)}`, { method:"GET" }, auth.token, extra);
-      if(!data.payload){ alert("No hay datos guardados para ese Space ID"); return; }
+      if(!data.payload){ if (!silent) alert("No hay datos guardados para ese Space ID"); return; }
       const payload = { ...data.payload };
       payload.conciliacion = safeConciliacion(payload.conciliacion || {});
 if (!payload.conciliacion) payload.conciliacion = safeConciliacion();
@@ -1019,8 +1078,18 @@ if (!payload.conciliacion) payload.conciliacion = safeConciliacion();
       }
       if (typeof window !== "undefined") window.__OFF_POLICY__ = payload.offPolicy || {};
       setState(prev=>({ ...prev, ...payload }));
-      setUI(prev=>({...prev, sync:"ok"})); showToast("Cargado de nube");
-    }catch(e){ setUI(prev=>({...prev, sync:"error"})); showToast((String(e.message||"")).startsWith("403")?"403: ReadToken inválido o sin permisos":"Error al cargar: "+e.message); }
+      if (!silent) {
+        setUI(prev=>({...prev, sync:"ok"}));
+        showToast("Cargado de nube");
+      }
+    }catch(e){
+      if (!silent) {
+        setUI(prev=>({...prev, sync:"error"}));
+        showToast((String(e.message||"")).startsWith("403")?"403: ReadToken inválido o sin permisos":"Error al cargar: "+e.message);
+        return;
+      }
+      throw e;
+    }
   }
   async function cloudSave() { setUI(prev=>({...prev, sync:"loading"}));
     try{
@@ -1031,6 +1100,35 @@ if (!payload.conciliacion) payload.conciliacion = safeConciliacion();
       setUI(prev=>({...prev, sync:"ok"})); showToast("Guardado en nube");
     }catch(e){ setUI(prev=>({...prev, sync:"error"})); showToast((String(e.message||"")).startsWith("403")?"403: ReadToken inválido o sin permisos":"Error al cargar: "+e.message); }
   }
+
+  useEffect(() => {
+    if (isAdmin || !auth?.token) {
+      return;
+    }
+    let cancelled = false;
+    let timerId = null;
+
+    const schedule = () => {
+      if (cancelled) return;
+      timerId = setTimeout(async () => {
+        try {
+          await cloudLoad({ silent: true });
+        } catch (e) {
+          // Silenciado en modo silent.
+        }
+        schedule();
+      }, 60000);
+    };
+
+    schedule();
+
+    return () => {
+      cancelled = true;
+      if (timerId) {
+        clearTimeout(timerId);
+      }
+    };
+  }, [auth?.token, cloudLoad, isAdmin]);
 
   // ---------- Utilidades de estado ----------
   // deep-set seguro (crea objetos intermedios)
@@ -3510,13 +3608,13 @@ useEffect(() => {
 
   const onVis = () => {
     if (document.visibilityState === 'visible') {
-      cloudLoad().catch(()=>{});
+      cloudLoad({ silent:true }).catch(()=>{});
     }
   };
   document.addEventListener('visibilitychange', onVis);
 
   const id = setInterval(() => {
-    cloudLoad().catch(()=>{});
+    cloudLoad({ silent:true }).catch(()=>{});
   }, 5 * 60 * 1000);
 
   return () => {
@@ -3525,11 +3623,10 @@ useEffect(() => {
   };
 }, [auth?.user, cloudLoad]);
 
-// === Auto-logout por inactividad (30 min) ===
+// === Auto-logout por inactividad (15 min) ===
 useEffect(() => {
   if (!auth?.user) return;
 
-  const IDLE_MS = 30 * 60 * 1000; // 30 minutos
   let last = Date.now();
 
   const bump = () => { last = Date.now(); };
@@ -3599,7 +3696,7 @@ useEffect(() => {
   useEffect(() => {
     if (auth.user && !isAdmin && !autoCloudLoaded) {
       (async () => {
-        try { await cloudLoad(); } catch(e) {}
+        try { await cloudLoad({ silent:true }); } catch(e) {}
         finally { setAutoCloudLoaded(true); }
       })();
     }
