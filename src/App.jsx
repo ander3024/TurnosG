@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useRef, useCallback } from "react";
+import React, { useEffect, useMemo, useState, useRef } from "react";
 
 import WeekendAuditPanel from "./components/WeekendAuditPanel";
 
@@ -725,7 +725,7 @@ export default function App(){
   // Modal día (compartido)
   const [modalDay, setModalDay] = useState(null);
   const toastTimeoutRef = useRef(null);
-  const showToast = useCallback((msg) => {
+  const showToast = React.useCallback((msg) => {
     setUI(prev => ({ ...prev, toast: msg }));
     if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
     toastTimeoutRef.current = setTimeout(() => {
