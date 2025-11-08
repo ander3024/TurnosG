@@ -65,7 +65,11 @@ function parseDateValue(v){ const [y,m,d]=v.split('-').map(Number); return new D
 function addDays(date, days){ const d=new Date(date); d.setDate(d.getDate()+days); return d; }
 function startOfWeekMonday(date){ const d=new Date(date); const day=(d.getDay()+6)%7; d.setDate(d.getDate()-day); d.setHours(0,0,0,0); return d; }
 function isWeekend(date){ const dow=date.getDay(); return dow===6 || dow===0; }
-function minutesFromHHMM(hhmm){ const [h,m]=hhmm.split(':').map(Number); return h*60+(m||0); }
+function minutesFromHHMM(hhmm){
+if (typeof hhmm !== 'string' || !hhmm.includes(':')) return 0;
+  const [h,m] = hhmm.split(':').map(Number);
+  return (isFinite(h)?h:0)*60 + (isFinite(m)?m:0);
+}
 function minutesDiff(a,b){ return minutesFromHHMM(b)-minutesFromHHMM(a); }
 function effectiveMinutes(shift){
   const raw = minutesDiff(shift.start, shift.end);
@@ -246,8 +250,8 @@ function pickBestCandidate(pool,{isWeekend,weekdaysLoad,weekendLoad,priorityMap}
   return scored[0].id;
 }
 
-function generateSchedule({ startDate, weeks, people, weekdayShifts, weekendShift, timeOffs, events, refuerzoWeekdayShift, priorityMap, overrides, rules, province, closeOnHolidays, closedExtraDates, customHolidaysByYear, consumeVacationOnHoliday }){
-  const assignments={};
+function generateSchedule({ startDate, weeks, people, weekdayShifts, weekendShift, timeOffs, events, refuerzoWeekdayShift, refuerzoMorningShift, refuerzoAfternoonShift, priorityMap, overrides, rules, province, closeOnHolidays, closedExtraDates, customHolidaysByYear, consumeVacationOnHoliday, workingHolidays = [] }){
+  const workingSet = new Set(workingHolidays||[]); const assignments={};
   const hoursPerPersonMin=new Map(people.map(p=>[p.id,0]));
   const weekdaysLoad=new Map(people.map(p=>[p.id,0]));
   const weekendLoad=new Map(people.map(p=>[p.id,0]));
@@ -274,13 +278,16 @@ function generateSchedule({ startDate, weeks, people, weekdayShifts, weekendShif
       } else {
         // Laborables: respeta weekdayRefuerzo + numeración por día
         const wType = ev.weekdayRefuerzo || "auto";
+        const safeRMS = (refuerzoMorningShift && refuerzoMorningShift.start && refuerzoMorningShift.end)
+          ? refuerzoMorningShift : (weekdayShifts?.[0] || refuerzoWeekdayShift);
+        const safeRAS = (refuerzoAfternoonShift && refuerzoAfternoonShift.start && refuerzoAfternoonShift.end)
+          ? refuerzoAfternoonShift : (weekdayShifts?.[1] || refuerzoWeekdayShift);
         const base =
-          (wType==="mañana" && (weekdayShifts?.[0])) ? weekdayShifts[0]
-        : (wType==="tarde"  && (weekdayShifts?.[1])) ? weekdayShifts[1]
-        : refuerzoWeekdayShift;
+          (wType==='mañana') ? safeRMS :
+          (wType==='tarde')  ? safeRAS :
+          refuerzoWeekdayShift;
 
-        const baseLabel = (refuerzoWeekdayShift.label || "Refuerzo")
-                        + (wType==="mañana" ? " Mañana" : (wType==="tarde" ? " Tarde" : ""));
+        const baseLabel = (base.label || "Refuerzo");
         let wCounter = weekdayCounter.get(ds) || 0;
         for (let j=0; j<cnt; j++){
           wCounter++;
@@ -339,12 +346,14 @@ const nextOff=computeOffPersonId(people,w+1);
     }
 
     for(let d=0; d<7; d++){
-      const date=addDays(weekStart,d); const dateStr=toDateValue(date); const isWE=isWeekend(date);
-      // Día cerrado por festivo/cierre extra → no se programan turnos
-      if (isClosedBusinessDay2(dateStr, province, closeOnHolidays, closedExtraDates, customHolidaysByYear)) {
-        assignments[dateStr] = [];
-        continue;
-      }
+      const date=addDays(weekStart,d); const dateStr=toDateValue(date);
+      // “Como finde” si es S/D o está marcado como festivo trabajado
+      const isWE = isWeekend(date) || workingSet.has(dateStr);
+      // Cerrar sólo si es festivo y NO está en la lista de “trabajados”
+      if (isClosedBusinessDay2(dateStr, province, closeOnHolidays, closedExtraDates, customHolidaysByYear) && !workingSet.has(dateStr)) {
+         assignments[dateStr] = [];
+         continue;
+       }
       
       // decide si el offId puede librar HOY:
       const dayIdx = date.getDay(); // 0=Dom..6=Sáb
@@ -365,16 +374,16 @@ let required = isWE? [{...weekendShift}] : [...weekdayShifts];
           for (const ev of active){
             const cntW = ev.weekdaysExtraSlots || 0;
             if (cntW <= 0) continue;
+              const choice = ev.weekdayRefuerzo || "auto";
+              const safeRMS = (refuerzoMorningShift && refuerzoMorningShift.start && refuerzoMorningShift.end)
+                ? refuerzoMorningShift : (weekdayShifts?.[0] || refuerzoWeekdayShift);
+              const safeRAS = (refuerzoAfternoonShift && refuerzoAfternoonShift.start && refuerzoAfternoonShift.end)
+                ? refuerzoAfternoonShift : (weekdayShifts?.[1] || refuerzoWeekdayShift);
 
-            const baseLabel = refuerzoWeekdayShift.label || "Refuerzo";
-            const choice = ev.weekdayRefuerzo || "auto";
-            const baseShift =
-              (choice==="mañana" && (weekdayShifts?.[0]))
-                ? { ...weekdayShifts[0], label: `${baseLabel} Mañana` }
-              : (choice==="tarde" && (weekdayShifts?.[1]))
-                ? { ...weekdayShifts[1], label: `${baseLabel} Tarde` }
-              : { ...refuerzoWeekdayShift, label: baseLabel };
-
+              const baseShift =
+                (choice==="mañana") ? { ...safeRMS, label: safeRMS.label || "Refuerzo Mañana" } :
+                (choice==="tarde")  ? { ...safeRAS, label: safeRAS.label || "Refuerzo Tarde" }  :
+                                      { ...refuerzoWeekdayShift, label: refuerzoWeekdayShift.label || "Refuerzo" };
             for(let i=0;i<cntW;i++){
               wCounter++;
               required.push({ ...baseShift, label: `${baseShift.label} ${wCounter}`});
@@ -578,7 +587,9 @@ function scoreConciliacionBreakdown({assignments, people, startDate, weeks, conc
 function improveConciliation({
   assignments, people, startDate, weeks, overrides, conciliacion,
   timeOffs = [], province="Madrid", consumeVacationOnHoliday=false, customHolidaysByYear={},
-  events = [], weekendShift = {start:'10:00',end:'22:00'}, refuerzoWeekdayShift = {start:'12:00',end:'20:00', label:'Refuerzo'},
+  events = [], weekendShift = {start:'10:00',end:'22:00'},
+  refuerzoWeekdayShift = {start:'12:00',end:'20:00', label:'Refuerzo'},
+  refuerzoMorningShift, refuerzoAfternoonShift,
   weekdayShifts = [],
   rules = {}
 }){
@@ -607,11 +618,14 @@ for (const ev of (events||[])) {
     } else {
       // L–V: respeta weekdayRefuerzo + numeración por día (igual que generateSchedule)
       const wType = ev.weekdayRefuerzo || 'auto';
-      const base =
-        (wType==='mañana' && (weekdayShifts?.[0])) ? weekdayShifts[0] :
-        (wType==='tarde'  && (weekdayShifts?.[1])) ? weekdayShifts[1] :
-        refuerzoWeekdayShift;
-
+      const safeRMS = (refuerzoMorningShift && refuerzoMorningShift.start && refuerzoMorningShift.end)
+          ? refuerzoMorningShift : (weekdayShifts?.[0] || refuerzoWeekdayShift);
+        const safeRAS = (refuerzoAfternoonShift && refuerzoAfternoonShift.start && refuerzoAfternoonShift.end)
+          ? refuerzoAfternoonShift : (weekdayShifts?.[1] || refuerzoWeekdayShift);
+        const base =
+          (wType==='mañana') ? safeRMS :
+          (wType==='tarde')  ? safeRAS :
+          refuerzoWeekdayShift;
       let wCounter = weekdayCounterFK.get(ds) || 0;
       const baseLabel = (refuerzoWeekdayShift.label || 'Refuerzo')
                       + (wType==='mañana' ? ' Mañana' : (wType==='tarde' ? ' Tarde' : ''));
@@ -906,7 +920,10 @@ function showToast(msg){ setUI(prev=>({...prev, toast:msg})); setTimeout(()=>set
     weekdayShifts:[{start:"10:00",end:"18:00",label:"Mañana",lunchMinutes:60},{start:"14:00",end:"22:00",label:"Tarde",lunchMinutes:0}],
     weekendShift:{start:"10:00",end:"22:00",label:"Finde"},
     refuerzoWeekdayShift:{start:"12:00",end:"20:00",label:"Refuerzo",lunchMinutes:60},
+    refuerzoMorningShift:{start:"10:00",end:"18:00",label:"Refuerzo Mañana",lunchMinutes:0},
+    refuerzoAfternoonShift:{start:"14:00",end:"22:00",label:"Refuerzo Tarde",lunchMinutes:0},
     events: [], timeOffs: [],
+    workingHolidays: [],   // ← días festivos que se trabajan como finde (12h)
     security:{ adminPin:"1234", personPins:{P1:"1111",P2:"2222",P3:"3333",P4:"4444"} },
     rebalance:false,
     province:"Madrid", consumeVacationOnHoliday:false,
@@ -989,6 +1006,8 @@ function forceAssign(dateStr, assignmentIndex, personId){
       payload.conciliacion = safeConciliacion(payload.conciliacion || {});
 if (!payload.conciliacion) payload.conciliacion = safeConciliacion();
       if (typeof payload.applyConciliation === 'undefined') payload.applyConciliation = true;
+      if (!payload.refuerzoMorningShift)  payload.refuerzoMorningShift  = { start:"10:00", end:"14:00", label:"Refuerzo Mañana",  lunchMinutes:0 };
+      if (!payload.refuerzoAfternoonShift)payload.refuerzoAfternoonShift= { start:"16:00", end:"20:00", label:"Refuerzo Tarde",   lunchMinutes:0 };
       // Defaults de offPolicy si no existen en la nube
       if (!payload.offPolicy) {
         payload.offPolicy = {
@@ -1031,7 +1050,7 @@ if (!payload.conciliacion) payload.conciliacion = safeConciliacion();
 
   // ---------- Generación de cuadrante ----------
   const startDate=useMemo(()=>parseDateValue(state.startDate),[state.startDate]);
-  const base=useMemo(()=> generateSchedule({ startDate, weeks:state.weeks, people:state.people, weekdayShifts:state.weekdayShifts, weekendShift:state.weekendShift, timeOffs:state.timeOffs, events:state.events, refuerzoWeekdayShift:state.refuerzoWeekdayShift, overrides: state.overrides, rules: state.rules, province: state.province, closeOnHolidays: state.closeOnHolidays, closedExtraDates: state.closedExtraDates, customHolidaysByYear: state.customHolidaysByYear }), [state, startDate]);
+  const base=useMemo(()=> generateSchedule({ startDate, weeks:state.weeks, people:state.people, weekdayShifts:state.weekdayShifts, weekendShift:state.weekendShift, timeOffs:state.timeOffs, events:state.events, refuerzoWeekdayShift:state.refuerzoWeekdayShift, refuerzoMorningShift:state.refuerzoMorningShift, refuerzoAfternoonShift:state.refuerzoAfternoonShift, overrides: state.overrides, rules: state.rules, province: state.province, closeOnHolidays: state.closeOnHolidays, closedExtraDates: state.closedExtraDates, customHolidaysByYear: state.customHolidaysByYear, workingHolidays: state.workingHolidays }), [state, startDate]);
 
   const baseControls=useMemo(()=> buildControls({
       assignments:base.assignments, people:state.people,
@@ -1045,7 +1064,7 @@ if (!payload.conciliacion) payload.conciliacion = safeConciliacion();
   const priorityMap=useMemo(()=>{ const m=new Map(); baseControls.rows.forEach(r=> m.set(r.id, Math.max(0,r.remaining))); return m; },[baseControls]);
 
   const { assignments } = useMemo(()=> state.rebalance
-    ? generateSchedule({ startDate, weeks:state.weeks, people:state.people, weekdayShifts:state.weekdayShifts, weekendShift:state.weekendShift, timeOffs:state.timeOffs, events:state.events, refuerzoWeekdayShift:state.refuerzoWeekdayShift, priorityMap, overrides: state.overrides, rules: state.rules, province: state.province, closeOnHolidays: state.closeOnHolidays, closedExtraDates: state.closedExtraDates, customHolidaysByYear: state.customHolidaysByYear, consumeVacationOnHoliday: state.consumeVacationOnHoliday })
+    ? generateSchedule({ startDate, weeks:state.weeks, people:state.people, weekdayShifts:state.weekdayShifts, weekendShift:state.weekendShift, timeOffs:state.timeOffs, events:state.events, refuerzoWeekdayShift:state.refuerzoWeekdayShift, refuerzoMorningShift:state.refuerzoMorningShift, refuerzoAfternoonShift:state.refuerzoAfternoonShift, priorityMap, overrides: state.overrides, rules: state.rules, province: state.province, closeOnHolidays: state.closeOnHolidays, closedExtraDates: state.closedExtraDates, customHolidaysByYear: state.customHolidaysByYear, consumeVacationOnHoliday: state.consumeVacationOnHoliday, workingHolidays: state.workingHolidays })
     : base, [state, startDate, base, priorityMap]);
 
   // Aplica mejorador de conciliación (evita días-isla y reduce cortes)
@@ -1063,6 +1082,8 @@ const assignmentsImproved = useMemo(()=> improveConciliation({
   events: state.events,
   weekendShift: state.weekendShift,
   refuerzoWeekdayShift: state.refuerzoWeekdayShift,
+  refuerzoMorningShift: state.refuerzoMorningShift,
+  refuerzoAfternoonShift: state.refuerzoAfternoonShift,
   weekdayShifts: state.weekdayShifts,
   rules: state.rules,
 }), [assignments, state.people, startDate, state.weeks, state.overrides, state.conciliacion,
@@ -1110,63 +1131,18 @@ function goToday(){
   // ---------- Auth-only: login screen ----------
   
 
+// ---------- Auth-only: login screen ----------
 if (!auth.user || !auth.token) {
-  // Renderiza el header una vez existen state/isAdmin/ui y handlers
-  // Header como componente (recibe todo lo que necesita vía props)
-  // Header como componente robusto: usa props y mapea state desde props
-  function HeaderBar(props){
-    const state = props?.state;
-    const {
-      setState, isAdmin, ui, cloud, setCloud,
-      showToast, doLogout, exportCSV, exportJSON,
-      importJSON, cloudLoad, cloudSave
-    } = props || {};
-    if (!state) return null;
+  function HeaderBarLogin() {
     return (
-<header className="sticky top-0 z-10 bg-white/90 backdrop-blur border-b border-slate-200">
+      <header className="sticky top-0 z-10 bg-white/90 backdrop-blur border-b border-slate-200">
         <div className="w-full max-w-[1800px] mx-auto px-6 py-3 flex items-center justify-between">
-          <h1 className="text-lg font-semibold">Gestor de Turnos · Usuarios + SQLite</h1>
-          <div className="flex items-center gap-2 text-sm">
-            <span className="px-2 py-1 rounded bg-slate-100 border">
-              {auth.user?.name || auth.user?.email || "Usuario"} · {auth.user?.role || ""}
-            </span>
-            {isAdmin && (<button onClick={()=>setState(prev=>({...prev, rebalance:!prev.rebalance}))}
-              className={`px-3 py-1.5 rounded-lg border ${state.rebalance?'bg-emerald-50 border-emerald-300':'border-slate-300 hover:bg-slate-100'}`}>
-              {state.rebalance? 'Reequilibrio ON':'Reequilibrar'}
-            </button>)}
-
-            {/* Export/Import local */}{/* Controles Nube */}{isAdmin && (
-<>
-<>
-            <button onClick={props.exportCSV} className="px-3 py-1.5 rounded-lg border">CSV</button>
-            <button onClick={props.exportJSON} className="px-3 py-1.5 rounded-lg border">Export JSON</button>
-            <label className="px-3 py-1.5 rounded-lg border cursor-pointer">Import JSON
-              <input type="file" accept="application/json" className="hidden" onChange={(e)=> e.target.files && props.importJSON(e.target.files[0])}/>
-            </label>
-
-            
-</>
-<input className="border rounded px-2 py-1 w-32" placeholder="Space ID"
-              value={cloud.spaceId} onChange={e=>setCloud({...cloud,spaceId:e.target.value})}/>
-            <input className="border rounded px-2 py-1 w-28" placeholder="ReadToken"
-              value={cloud.readToken} onChange={e=>setCloud({...cloud,readToken:e.target.value})}/>
-            <input className="border rounded px-2 py-1 w-28" placeholder="WriteToken"
-              value={cloud.writeToken} onChange={e=>setCloud({...cloud,writeToken:e.target.value})}/>
-            <button onClick={props.cloudLoad} className="px-3 py-1.5 rounded-lg border">Cargar nube</button>
-            <button onClick={props.cloudSave} className="px-3 py-1.5 rounded-lg border">Guardar nube</button>
-  </>
-)}
-{ui.sync==="loading" && <span className="px-2 py-1 rounded bg-amber-100 border border-amber-300">Sincronizando…</span>}
-            {ui.sync==="ok" && <span className="px-2 py-1 rounded bg-emerald-100 border border-emerald-300">¡Listo!</span>}
-            {ui.sync==="error" && <span className="px-2 py-1 rounded bg-rose-100 border border-rose-300">Error</span>}
-            {ui.toast && (<div className="fixed right-4 bottom-4 z-50 bg-black text-white px-3 py-2 rounded-lg shadow">{ui.toast}</div>)}
-            <button onClick={()=>props.setAuth({ token:"", user:null })} className="px-2 py-1 rounded border">Salir</button>
-          </div>
+          <h1 className="text-lg font-semibold">Gestor de Turnos</h1>
+          <span className="px-2 py-1 rounded bg-slate-100 border text-sm">No autenticado</span>
         </div>
       </header>
     );
   }
-
 
 
     return (
@@ -1519,6 +1495,7 @@ return (
   up={up}
   upPerson={upPerson}
   forceAssign={forceAssign}
+  validateCanAssign={validateCanAssign}
 />
 );
 }
@@ -1717,6 +1694,20 @@ function PersonasPanel({ state, upPerson }){
   );
 }
 function TurnosPanel({ state, up }){
+  const rmsRaw = state.refuerzoMorningShift || {};
+  const rasRaw = state.refuerzoAfternoonShift || {};
+  const rms = {
+    start: rmsRaw.start || "10:00",
+    end:   rmsRaw.end   || "14:00",
+    label: (rmsRaw.label ?? "Refuerzo Mañana"),
+    lunchMinutes: Number(rmsRaw.lunchMinutes||0)
+  };
+  const ras = {
+    start: rasRaw.start || "16:00",
+    end:   rasRaw.end   || "20:00",
+    label: (rasRaw.label ?? "Refuerzo Tarde"),
+    lunchMinutes: Number(rasRaw.lunchMinutes||0)
+  };
   return (
     <Card title="Turnos (Admin)">
       <div className="space-y-4">
@@ -1741,14 +1732,92 @@ function TurnosPanel({ state, up }){
           </div>
         </div>
         <div>
-          <div className="text-sm font-medium mb-2">Turno de Refuerzo (L–V)</div>
-          <div className="grid grid-cols-12 items-end gap-2">
-            <div className="col-span-4"><label className="text-xs">Inicio</label><input type="time" value={state.refuerzoWeekdayShift.start} onChange={(e)=>up(['refuerzoWeekdayShift','start'],e.target.value)} className="px-2 py-1 rounded border w-full"/></div>
-            <div className="col-span-4"><label className="text-xs">Fin</label><input type="time" value={state.refuerzoWeekdayShift.end} onChange={(e)=>up(['refuerzoWeekdayShift','end'],e.target.value)} className="px-2 py-1 rounded border w-full"/></div>
-            <div className="col-span-4"><label className="text-xs">Etiqueta</label><input value={state.refuerzoWeekdayShift.label||''} onChange={(e)=>up(['refuerzoWeekdayShift','label'],e.target.value)} className="px-2 py-1 rounded border w-full"/></div>
-            <div className="col-span-4"><label className="text-xs">Comida (min)</label><input type="number" min={0} max={180} value={state.refuerzoWeekdayShift.lunchMinutes||0} onChange={(e)=>up(['refuerzoWeekdayShift','lunchMinutes'], Number(e.target.value)||0)} className="px-2 py-1 rounded border w-full"/></div>
-            <div className="col-span-12 text-[11px] text-slate-500">Horas: {(minutesDiff(state.refuerzoWeekdayShift.start,state.refuerzoWeekdayShift.end)/60).toFixed(1)}h brutas · {(effectiveMinutes(state.refuerzoWeekdayShift)/60).toFixed(1)}h netas{(state.refuerzoWeekdayShift.lunchMinutes||0) ? (" (comida "+(state.refuerzoWeekdayShift.lunchMinutes)+"m)") : ""}</div>
+        <div className="text-sm font-medium mb-2">Refuerzos L–V</div>
+
+        {/* Refuerzo Mañana */}
+        <div className="grid grid-cols-12 items-end gap-2 mb-2">
+          <div className="col-span-4">
+            <label className="text-xs">Inicio</label>
+            <input
+              type="time"
+              value={rms.start}
+              onChange={(e)=>up(['refuerzoMorningShift','start'], e.target.value)}
+              className="px-2 py-1 rounded border w-full"
+            />
           </div>
+          <div className="col-span-4">
+            <label className="text-xs">Fin</label>
+            <input
+              type="time"
+              value={rms.end}
+              onChange={(e)=>up(['refuerzoMorningShift','end'], e.target.value)}
+              className="px-2 py-1 rounded border w-full"
+            />
+          </div>
+          <div className="col-span-4">
+            <label className="text-xs">Etiqueta</label>
+            <input
+              value={rms.label || ''}
+              onChange={(e)=>up(['refuerzoMorningShift','label'], e.target.value)}
+              className="px-2 py-1 rounded border w-full"
+            />
+          </div>
+          <div className="col-span-4">
+            <label className="text-xs">Comida (min)</label>
+            <input
+              type="number" min={0} max={180}
+              value={rms.lunchMinutes || 0}
+              onChange={(e)=>up(['refuerzoMorningShift','lunchMinutes'], Number(e.target.value) || 0)}
+              className="px-2 py-1 rounded border w-full"
+            />
+          </div>
+          <div className="col-span-12 text-[11px] text-slate-500">
+            Horas: {(minutesDiff(rms.start, rms.end)/60).toFixed(1)}h brutas · {(effectiveMinutes(rms)/60).toFixed(1)}h netas
+          </div>
+        </div>
+
+        {/* Refuerzo Tarde */}
+        <div className="grid grid-cols-12 items-end gap-2">
+          <div className="col-span-4">
+            <label className="text-xs">Inicio</label>
+            <input
+              type="time"
+              value={ras.start}
+              onChange={(e)=>up(['refuerzoAfternoonShift','start'], e.target.value)}
+              className="px-2 py-1 rounded border w-full"
+            />
+          </div>
+          <div className="col-span-4">
+            <label className="text-xs">Fin</label>
+            <input
+              type="time"
+              value={ras.end}
+              onChange={(e)=>up(['refuerzoAfternoonShift','end'], e.target.value)}
+              className="px-2 py-1 rounded border w-full"
+            />
+          </div>
+          <div className="col-span-4">
+            <label className="text-xs">Etiqueta</label>
+            <input
+              value={ras.label || ''}
+              onChange={(e)=>up(['refuerzoAfternoonShift','label'], e.target.value)}
+              className="px-2 py-1 rounded border w-full"
+            />
+          </div>
+          <div className="col-span-4">
+            <label className="text-xs">Comida (min)</label>
+            <input
+              type="number" min={0} max={180}
+              value={ras.lunchMinutes || 0}
+              onChange={(e)=>up(['refuerzoAfternoonShift','lunchMinutes'], Number(e.target.value) || 0)}
+              className="px-2 py-1 rounded border w-full"
+            />
+          </div>
+          <div className="col-span-12 text-[11px] text-slate-500">
+            Horas: {(minutesDiff(ras.start, ras.end)/60).toFixed(1)}h brutas · {(effectiveMinutes(ras)/60).toFixed(1)}h netas
+          </div>
+        </div>
+
         </div>
       </div>
     </Card>
@@ -1852,18 +1921,60 @@ function CustomHolidaysPanel({ state, up }){
   );
 }
 
+function WorkingHolidaysPanel({ state, up }){
+  const [newDate, setNewDate] = React.useState(toDateValue(new Date()));
+  const list = state.workingHolidays || [];
+  return (
+    <Card title="Guardias en festivo (12h como finde)">
+      <div className="grid grid-cols-12 gap-2 text-sm">
+        <div className="col-span-8">
+          <label className="text-xs">Añadir fecha</label>
+          <input type="date" className="w-full border rounded px-2 py-1" value={newDate} onChange={e=>setNewDate(e.target.value)} />
+        </div>
+        <div className="col-span-4 flex items-end">
+          <button
+            className="px-3 py-1.5 rounded-lg border w-full"
+            onClick={()=>{
+              if(!/^\d{4}-\d{2}-\d{2}$/.test(newDate)) return;
+              if (list.includes(newDate)) return;
+              up(['workingHolidays'], [...list, newDate].sort());
+            }}
+          >Añadir</button>
+        </div>
+        <div className="col-span-12">
+          <div className="border rounded-lg p-2 bg-white max-h-40 overflow-auto">
+            {list.length===0 && <div className="text-sm text-slate-500">No hay guardias en festivo.</div>}
+            {list.map((d,idx)=>(
+              <div key={d} className="flex items-center justify-between text-sm py-1">
+                <div>{d}</div>
+                <button
+                  onClick={()=> up(['workingHolidays'], list.filter(x=>x!==d))}
+                  className="text-rose-700 underline text-xs">Eliminar</button>
+              </div>
+            ))}
+          </div>
+          <div className="text-[11px] text-slate-500 mt-1">
+            * Estos días, aunque sean festivo/cierre, generan 1 turno de 12h (como fin de semana).
+          </div>
+        </div>
+      </div>
+    </Card>
+  );
+}
 
-function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmin, onQuickAssign, province, closeOnHolidays, closedExtraDates, customHolidaysByYear, pillClass, forceAssign }){
+function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmin, onQuickAssign, province, closeOnHolidays, closedExtraDates, customHolidaysByYear, pillClass, forceAssign, workingHolidays=[] }){
   const days=[]; for(let w=0;w<weeks;w++) for(let d=0;d<7;d++) days.push(addDays(startDate, w*7+d));
   const personMap=new Map(people.map(p=>[p.id,p]));
   const todayStr = toDateValue(new Date());
+  const workingSet = new Set(workingHolidays||[]);
   return (
     <div className="overflow-x-auto">
       <div className="grid grid-cols-7 gap-4 w-full">
         {days.map(date=>{
           const dateStr=toDateValue(date); const wd=date.toLocaleDateString(undefined,{weekday:'short'}); const day=date.getDate(); const isWE=isWeekend(date); const cell=assignments[dateStr]||[]; const hasConflict=cell.some(c=>c.conflict);
-          const sorted=[...cell].sort((a,b)=> minutesFromHHMM(a.shift.start)-minutesFromHHMM(b.shift.start));
-          const isClosed = isClosedBusinessDay2(dateStr, province, closeOnHolidays, closedExtraDates, customHolidaysByYear);
+          const sorted=[...cell].sort((a,b)=> minutesFromHHMM(a?.shift?.start || "00:00") - minutesFromHHMM(b?.shift?.start || "00:00"));
+          const isClosedFestivo = isClosedBusinessDay2(dateStr, province, closeOnHolidays, closedExtraDates, customHolidaysByYear);
+          const isClosed = isClosedFestivo && !workingSet.has(dateStr);
           return (
             <div key={dateStr} className={`rounded-2xl border p-2 ${isWE? 'bg-transparent':'bg-transparent'} ${hasConflict? 'border-red-400':'border-slate-200'} ${dateStr===todayStr ? 'ring-2 ring-amber-400' : ''}`}>
               <div className="flex items-center justify-between mb-2">
@@ -1885,9 +1996,21 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
                     </div>
                   </div>
                 )}
-                {(isClosed? [] : sorted).map((c,i)=>{ const p=c.personId?personMap.get(c.personId):null; const span=formatSpan(c.shift.start,c.shift.end); const dur = effectiveMinutes(c.shift)/60; const lbl=(c.shift.label|| (isWE?'Finde':`T${i+1}`)); const emblem = /mañana/i.test(lbl)? '☀️' : /tarde/i.test(lbl)? '🌙' : isWE? '🗓️' : '➕'; return (
+                 {(isClosed? [] : sorted).map((c,i)=>{
+                    // === índice real del slot en assignments[dateStr] (robusto) ===
+                    const keyOf = x => `${x?.shift?.start}-${x?.shift?.end}-${x?.shift?.label||''}`;
+                    let assignmentIndex = (assignments[dateStr] || []).indexOf(c);
+                    if (assignmentIndex === -1) {
+                      const curKey = keyOf(c);
+                      assignmentIndex = (assignments[dateStr] || []).findIndex(x => keyOf(x) === curKey);
+                    }
+                    const p = c.personId ? personMap.get(c.personId) : null;
+                    const span = formatSpan(c.shift.start, c.shift.end);
+                    const dur  = effectiveMinutes(c.shift)/60;
+                    const lbl  = (c.shift.label || (isWE ? 'Finde' : `T${i+1}`));
+                    const emblem = /mañana/i.test(lbl)? '☀️' : /tarde/i.test(lbl)? '🌙' : isWE? '🗓️' : '➕'; return (
                     <div
-                      key={i}
+                      key={`${dateStr}-${assignmentIndex}`}
                       className={`rounded-xl ${pillClass} border leading-tight flex flex-col items-start gap-1 w-full ${c.conflict? 'border-red-300 bg-red-50':'border-slate-200'}`}
                       title={`${lbl} · ${span} (${dur}h)`}
                     >
@@ -1919,77 +2042,78 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
                         {isAdmin && (
                           <details className="relative inline-block ml-1">
                             <summary className="cursor-pointer select-none text-[12px]" title="Cambiar persona (override)">👤</summary>
-                            <div className="absolute z-20 mt-1 bg-white border rounded-xl shadow-lg p-3 space-y-3 w-[280px]">
+                            <div className="absolute z-50 mt-1 bg-white border rounded-xl shadow-lg p-3 space-y-3 w-[320px] max-w-[92vw] left-1/2 -translate-x-1/2 md:left-0 md:-translate-x-0">
                               {/* Seleccionar persona (override directo en este slot) */}
                               <div className="space-y-1">
-                                <div className="text-[11px] text-slate-600">Asignar persona</div>
-                                <select
-                                  className="border rounded px-1 py-0.5 text-[11px] w-full"
-                                  value={c.personId || ''}
-                                  onChange={e => {
-                                    onQuickAssign({
-                                      type: 'assign',
-                                      dateStr,
-                                      shiftIndex: i,
-                                      personId: e.target.value || null
-                                    });
-                                    // Cierra el panel 👤 después de asignar
-                                    setTimeout(() => {
-                                      document.querySelectorAll('details[open]').forEach(d => (d.open = false));
-                                    }, 0);
-                                  }}
-                                  title="Asignar persona a este turno"
-                                >
-                                  <option value="">—</option>
-                                  {(people || []).map(pp => (
-                                    <option key={pp.id} value={pp.id}>{pp.name}</option>
-                                  ))}
-                                </select>
-                              </div>
+                              <div className="text-[11px] text-slate-600">Asignar persona</div>
+                              <select
+                                id={`assign-${dateStr}-${assignmentIndex}`}
+                                className="border rounded px-1 py-0.5 text-[11px] w-full"
+                                value={c.personId || ''}
+                                onChange={e => {
+                                  onQuickAssign({
+                                    type: 'assign',
+                                    dateStr,
+                                    shiftIndex: assignmentIndex,
+                                    personId: e.target.value || null
+                                  });
+                                  // Nota: si falla validación, el handler muestra el motivo y NO cierra.
+                                  // Si tiene éxito, el handler sí cierra el panel.
+                                }}
+                                title="Asignar persona a este turno"
+                              >
+                                <option value="">—</option>
+                                {(people || []).map(pp => (
+                                  <option key={pp.id} value={pp.id}>{pp.name}</option>
+                                ))}
+                              </select>
+                            </div>
                               {/* Mover a otro turno del mismo día */}
                               <div className="space-y-1 border-t pt-2">
-                                <div className="text-[11px] text-slate-600">Mover al turno</div>
-                                <div className="flex items-center gap-1">
-                                  <select
-                                    className="border rounded px-1 py-0.5 text-[11px] grow"
-                                    defaultValue={i}
-                                    id={`mv-${dateStr}-${i}`}>
-                                    {sorted.map((entry, idx) => {
-                                      const lbl = entry.shift.label || `T${idx+1}`;
-                                      const span = `${entry.shift.start}–${entry.shift.end}`;
-                                      return (
-                                        <option key={idx} value={idx} disabled={idx===i}>
-                                          {lbl} · {span}
-                                        </option>
-                                      );
-                                    })}
-                                  </select>
-                                  <label className="text-[11px] inline-flex items-center gap-1 whitespace-nowrap">
-                                    <input type="checkbox" defaultChecked id={`mv-empty-${dateStr}-${i}`} />
-                                    Vaciar origen
-                                  </label>
-                                  <button
-                                    type="button"
-                                    className="px-2 py-0.5 border rounded text-[11px]"
-                                    onClick={()=>{
-                                      const sel = document.getElementById(`mv-${dateStr}-${i}`);
-                                      const chk = document.getElementById(`mv-empty-${dateStr}-${i}`);
-                                      const target = Number(sel?.value||i);
-                                      onQuickAssign({
-                                        type:'move',
-                                        dateStr,
-                                        fromShiftIndex: i,
-                                        shiftIndex: target,
-                                        personId: c.personId,
-                                        leaveEmpty: !!chk?.checked
-                                      });
-                                    }}
-                                  >
-                                    Mover
-                                  </button>
-                                </div>
+                              <div className="text-[11px] text-slate-600">Mover al turno</div>
+                              <div className="flex items-center gap-1">
+                                <select
+                                  className="border rounded px-1 py-0.5 text-[11px] grow"
+                                  id={`mv-${dateStr}-${assignmentIndex}`}
+                                  defaultValue={assignmentIndex}
+                                >
+                                  {sorted.map((entry) => {
+                                    const idxReal = (assignments[dateStr] || []).findIndex(x => keyOf(x) === keyOf(entry));
+                                    const lbl = entry.shift.label || `T${idxReal+1}`;
+                                    const span = `${entry.shift.start}–${entry.shift.end}`;
+                                    return (
+                                      <option key={idxReal} value={idxReal} disabled={idxReal===assignmentIndex}>
+                                        {lbl} · {span}
+                                      </option>
+                                    );
+                                  })}
+                                </select>
+                                <label className="text-[11px] inline-flex items-center gap-1 whitespace-nowrap">
+                                  <input type="checkbox" defaultChecked id={`mv-empty-${dateStr}-${assignmentIndex}`} />
+                                  Vaciar origen
+                                </label>
+                                <button
+                                  type="button"
+                                  className="px-2 py-0.5 border rounded text-[11px]"
+                                  onClick={()=>{
+                                    const sel = document.getElementById(`mv-${dateStr}-${assignmentIndex}`);
+                                    const chk = document.getElementById(`mv-empty-${dateStr}-${assignmentIndex}`);
+                                    const target = Number(sel?.value ?? assignmentIndex);
+                                    onQuickAssign({
+                                      type:'move',
+                                      dateStr,
+                                      fromShiftIndex: assignmentIndex,
+                                      shiftIndex: target,
+                                      personId: c.personId,
+                                      leaveEmpty: !!chk?.checked
+                                    });
+                                    setTimeout(()=>document.querySelectorAll('details[open]').forEach(d=>d.open=false), 0);
+                                  }}
+                                >
+                                  Mover
+                                </button>
                               </div>
-
+                            </div>
                               {/* Acciones rápidas */}
                               <div className="space-y-1 border-t pt-2">
                                 <div className="text-[11px] text-slate-600">Acciones rápidas</div>
@@ -1998,7 +2122,7 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
                                     type="button"
                                     className="px-2 py-0.5 border rounded text-[11px]"
                                     onClick={()=>{
-                                      forceAssign(dateStr, i, null);
+                                      forceAssign(dateStr, assignmentIndex, null);
                                       setTimeout(()=>document.querySelectorAll('details[open]').forEach(d=>d.open=false), 0);
                                     }}
                                   >Liberar</button>
@@ -2006,7 +2130,7 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
                                     type="button"
                                     className="px-2 py-0.5 border rounded text-[11px] text-rose-600"
                                     onClick={()=>{
-                                      forceAssign(dateStr, i, "__EMPTY__");
+                                      forceAssign(dateStr, assignmentIndex, "__EMPTY__");
                                       setTimeout(()=>document.querySelectorAll('details[open]').forEach(d=>d.open=false), 0);
                                     }}
                                   >Bloquear</button>
@@ -2014,21 +2138,44 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
                                     type="button"
                                     className="px-2 py-0.5 border rounded text-[11px] text-slate-600"
                                     onClick={()=>{
-                                      onQuickAssign({ type:'removeExtraSlot', dateStr, shiftIndex:i });
+                                      onQuickAssign({ type:'removeExtraSlot', dateStr, shiftIndex: assignmentIndex });
                                       setTimeout(()=>document.querySelectorAll('details[open]').forEach(d=>d.open=false), 0);
-                                    }}>
+                                    }}
+                                  >
                                     Eliminar un refuerzo de este día
                                   </button>
                                 </div>
                               </div>
-
+                              <div className="space-y-1">
+                                <button
+                                  type="button"
+                                  className="px-2 py-0.5 border rounded text-[11px] text-amber-700"
+                                  title="Ignorar reglas (solo admin)"
+                                  onClick={() => {
+                                    const sel = document.getElementById(`assign-${dateStr}-${assignmentIndex}`);
+                                    const pid = (sel?.value || '').trim();
+                                    if (!pid) { alert('Elige persona'); return; }
+                                    if (confirm('Forzar asignación e ignorar reglas?')) {
+                                      onQuickAssign({
+                                        type: 'assign',
+                                        dateStr,
+                                        shiftIndex: assignmentIndex,   // ← índice real del slot
+                                        personId: pid,                 // ← la persona elegida en el combo
+                                        force: true
+                                      });
+                                    }
+                                  }}
+                                >
+                                  Forzar asignación
+                                </button>
+                              </div>
                               {/* Añadir nuevo turno (slot) y asignar */}
                               <div className="space-y-1 border-t pt-2">
                                 <div className="text-[11px] text-slate-600">Añadir turno y asignar</div>
                                 <div className="flex items-center gap-1">
                                   <select
                                     className="border rounded px-1 py-0.5 text-[11px]"
-                                    id={`addslot-shift-${dateStr}-${i}`}
+                                    id={`addslot-shift-${dateStr}-${assignmentIndex}`}
                                     defaultValue="auto"
                                     title="Tipo de refuerzo"
                                   >
@@ -2038,7 +2185,7 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
                                   </select>
                                   <select
                                     className="border rounded px-1 py-0.5 text-[11px]"
-                                    id={`addslot-person-${dateStr}-${i}`}
+                                    id={`addslot-person-${dateStr}-${assignmentIndex}`}
                                     defaultValue=""
                                     title="Persona a asignar"
                                   >
@@ -2049,13 +2196,13 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
                                     type="button"
                                     className="px-2 py-0.5 border rounded text-[11px]"
                                     onClick={()=>{
-                                      const s = document.getElementById(`addslot-shift-${dateStr}-${i}`)?.value || 'auto';
-                                      const p = document.getElementById(`addslot-person-${dateStr}-${i}`)?.value || '';
+                                    const s = document.getElementById(`addslot-shift-${dateStr}-${assignmentIndex}`)?.value || 'auto';
+                                    const p = document.getElementById(`addslot-person-${dateStr}-${assignmentIndex}`)?.value || '';
                                       if (!p) { alert('Elige persona'); return; }
                                       onQuickAssign({
                                         type: 'addSlotAssign',
                                         dateStr,
-                                        shiftIndex: i,          // no se usa para crear, pero mantenemos la firma
+                                        shiftIndex: assignmentIndex, 
                                         personId: p,
                                         weekdayRefuerzo: s      // 'auto' | 'mañana' | 'tarde'
                                       });
@@ -2080,6 +2227,7 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
   );
 }
 function PrettyAssignment({ a, h, p, i, pillClass }){
+  if (!a?.shift) return null;   // ← evita crashear si llegase algo sin shift
   const span = `${a.shift.start}–${a.shift.end}`;
   const dur  = (effectiveMinutes(a.shift)/60);
   const lbl  = a.shift.label || `T${i+1}`;
@@ -2215,8 +2363,8 @@ for(let d=0; d<7*weeks; d++){
       {(header || []).map((h, idx) => {
         // Turnos del día para esta persona
         const cell = (assignments[h.dateStr] || [])
-          .filter(c => c.personId === p.id)
-          .sort((a, b) => minutesFromHHMM(a.shift.start) - minutesFromHHMM(b.shift.start));
+          .filter(c => c?.personId === p.id && c?.shift)              // ← descarta sin shift
+          .sort((a, b) => minutesFromHHMM(a?.shift?.start || "00:00") - minutesFromHHMM(b?.shift?.start || "00:00"));
         // Tipo de “Time Off” y festivo para celda vacía
         // Tipo de “Time Off” (aprobado) y festivo
         let toType = (typeof getTOType === 'function') ? getTOType(h.dateStr, p.id) : null;
@@ -2397,9 +2545,7 @@ function SwapsPanel({ state, setState, assignments, isAdmin, currentUser }){
     setState(prev=>({...prev, overrides, swaps }));
   }
   function denySwap(i){ if (!isAdmin) return;  setState(prev=>({...prev, swaps: prev.swaps.map((r,idx)=> idx===i? {...r,status:'denegada'}:r)})); }
-    if (!isAdmin) return;
   function archiveSwap(i){ if (!isAdmin) return;  setState(prev=>({...prev, swaps: prev.swaps.map((r,idx)=> idx===i? {...r,status:'archivada'}:r)})); }
-    if (!isAdmin) return;
   function deleteSwap(i){ if (!isAdmin) return;  setState(prev=>({...prev, swaps: prev.swaps.filter((_,idx)=> idx!==i)})); }
 
   return (
@@ -2969,6 +3115,167 @@ function AdminUsersAndPerms({ auth }) {
   );
 }
 
+function AdminSessionsAuditCard({ auth, showToast }) {
+  const [day, setDay] = React.useState(toDateValue(new Date()));
+  const [logs, setLogs] = React.useState([]);
+  const [loading, setLoading] = React.useState(false);
+
+  async function load() {
+    try {
+      setLoading(true);
+      const d = await api(`/admin/sessions?day=${encodeURIComponent(day)}`, { method:'GET' }, auth.token);
+      setLogs(d?.sessions || []);
+    } catch (e) {
+      showToast('Error cargando sesiones');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // tabla agregada por usuario
+  const byUser = React.useMemo(() => {
+    const m = new Map();
+    for (const s of logs) {
+      const email = s?.user?.email || 'desconocido';
+      const name  = s?.user?.name  || '';
+      const ip    = s?.ip || 'n/a';
+      const ts    = s?.ts || '0000-00-00T00:00:00Z';
+      const ua    = s?.ua || '';
+      if (!m.has(email)) m.set(email, { email, name, total:0, ips:new Map(), lastTs:'', lastUa:'' });
+      const u = m.get(email);
+      u.total += 1;
+      u.ips.set(ip, (u.ips.get(ip)||0) + 1);
+      if (ts > u.lastTs) { u.lastTs = ts; u.lastUa = ua; }
+    }
+    const rows = [];
+    for (const u of m.values()) {
+      const ips = Array.from(u.ips.entries()).map(([ip,c]) => `${ip} (${c})`).join(', ');
+      rows.push({ email:u.email, name:u.name, total:u.total, ips, lastUa:u.lastUa });
+    }
+    rows.sort((a,b)=> b.total - a.total || a.email.localeCompare(b.email));
+    return rows;
+  }, [logs]);
+
+  // filtros “live” para la tabla cruda
+  const [filter, setFilter] = React.useState('');
+  const filteredLogs = React.useMemo(() => {
+    const q = (filter || '').toLowerCase();
+    if (!q) return logs;
+    return logs.filter(s => {
+      const email = s?.user?.email || '';
+      const ip    = s?.ip || '';
+      const ua    = s?.ua || '';
+      return email.toLowerCase().includes(q) || ip.toLowerCase().includes(q) || ua.toLowerCase().includes(q);
+    });
+  }, [logs, filter]);
+
+  const exportCSV = () => {
+    const rows = [['ts','email','name','ip','ua'].join(',')];
+    (filteredLogs||[]).forEach(s=>{
+      const r = [
+        s.ts,
+        s?.user?.email || '',
+        s?.user?.name  || '',
+        s.ip || '',
+        (s.ua || '').replace(/"/g,'""')
+      ].map(x=>`"${x}"`).join(',');
+      rows.push(r);
+    });
+    const blob = new Blob([rows.join('\n')], {type:'text/csv;charset=utf-8;'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `sesiones_${day}.csv`;
+    a.click();
+  };
+
+  return (
+    <Card title="Auditoría de sesiones (Admin)">
+      <div className="space-y-2">
+        <div className="flex items-center gap-2">
+          <input type="date" className="border rounded px-2 py-1" value={day} onChange={e=>setDay(e.target.value)} />
+          <button onClick={load} className="px-3 py-1.5 rounded-lg border" disabled={loading}>
+            {loading ? 'Cargando…' : 'Cargar'}
+          </button>
+          <span className="text-xs text-slate-500">{logs.length} eventos</span>
+        </div>
+
+        {/* Agregado por usuario */}
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm border-separate border-spacing-y-1">
+            <thead>
+              <tr className="text-left text-slate-600">
+                <th className="py-1 px-2">Usuario</th>
+                <th className="py-1 px-2">Email</th>
+                <th className="py-1 px-2">Conexiones (día)</th>
+                <th className="py-1 px-2">IPs</th>
+                <th className="py-1 px-2">Navegador</th>
+              </tr>
+            </thead>
+            <tbody>
+              {byUser.length===0 && <tr><td colSpan={5} className="py-2 px-2 text-slate-500">Sin datos para ese día.</td></tr>}
+              {byUser.map(r=>(
+                <tr key={r.email} className="bg-white border-b">
+                  <td className="py-1 px-2">{r.name||'—'}</td>
+                  <td className="py-1 px-2">{r.email}</td>
+                  <td className="py-1 px-2">{r.total}</td>
+                  <td className="py-1 px-2">{r.ips}</td>
+                  <td className="py-1 px-2 truncate max-w-[24rem]" title={r.lastUa}>{r.lastUa || '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Crudo + filtro y export */}
+        <div className="mt-3">
+          <div className="flex items-center justify-between mb-1">
+            <div className="text-sm font-medium">Detalle de sesiones del día</div>
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                placeholder="Filtrar por email/IP/UA…"
+                className="border rounded px-2 py-1 text-sm"
+                value={filter}
+                onChange={e => setFilter(e.target.value)}
+              />
+              <button className="px-2 py-1 rounded border text-sm" onClick={exportCSV}>
+                Export CSV
+              </button>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto max-h-64 border rounded bg-white">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-left text-slate-600 border-b">
+                  <th className="py-1 px-2">Hora (UTC)</th>
+                  <th className="py-1 px-2">Email</th>
+                  <th className="py-1 px-2">IP</th>
+                  <th className="py-1 px-2">Navegador</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredLogs.length===0 && (
+                  <tr><td colSpan={4} className="py-2 px-2 text-slate-500">Sin datos.</td></tr>
+                )}
+                {filteredLogs.map((s,i)=>(
+                  <tr key={i} className="border-b">
+                    <td className="py-1 px-2 whitespace-nowrap">{(s.ts||'').replace('T',' ').replace('Z','')}</td>
+                    <td className="py-1 px-2">{s?.user?.email || '—'}</td>
+                    <td className="py-1 px-2">{s?.ip || '—'}</td>
+                    <td className="py-1 px-2 truncate max-w-[36rem]" title={s?.ua||''}>{s?.ua || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+
 export { }
 
 
@@ -3148,7 +3455,7 @@ function AuthenticatedApp(props){
           ASS, controls,
           exportCSV, exportJSON, importJSON, exportICS, exportPayroll,
           up, upPerson, forceAssign, pillClass, density, setDensity,
-          personFilter, setPersonFilter, clearVisibleOverrides, duplicateVisibleToNextWeek, undoLastOverride, onQuickAssign } = props;
+          personFilter, setPersonFilter, clearVisibleOverrides, duplicateVisibleToNextWeek, undoLastOverride, onQuickAssign, validateCanAssign } = props;
 
   // === AUDITORÍA DE PRESENCIA (online) ===
   const [online, setOnline] = useState({ users: [], at: null });
@@ -3195,6 +3502,59 @@ useEffect(() => {
     window.removeEventListener('beforeunload', onUnload);
   };
 }, [auth?.user, auth?.token]);
+
+// === Auto-refresh de datos para usuarios NO admin ===
+useEffect(() => {
+  const isAdmin = !!(auth?.user?.role === 'admin');
+  if (!auth?.user || isAdmin) return;
+
+  const onVis = () => {
+    if (document.visibilityState === 'visible') {
+      cloudLoad().catch(()=>{});
+    }
+  };
+  document.addEventListener('visibilitychange', onVis);
+
+  const id = setInterval(() => {
+    cloudLoad().catch(()=>{});
+  }, 5 * 60 * 1000);
+
+  return () => {
+    document.removeEventListener('visibilitychange', onVis);
+    clearInterval(id);
+  };
+}, [auth?.user, cloudLoad]);
+
+// === Auto-logout por inactividad (30 min) ===
+useEffect(() => {
+  if (!auth?.user) return;
+
+  const IDLE_MS = 30 * 60 * 1000; // 30 minutos
+  let last = Date.now();
+
+  const bump = () => { last = Date.now(); };
+  const evs = ['mousemove','keydown','scroll','click','touchstart'];
+  evs.forEach(ev => window.addEventListener(ev, bump, { passive:true }));
+
+  const timer = setInterval(() => {
+    if (Date.now() - last > IDLE_MS) {
+      showToast('Sesión expirada por inactividad');
+      try { localStorage.removeItem('turnos_auth'); } catch {}
+      setAuth({ token:'', user:null });
+      setTimeout(() => window.location.reload(), 0);
+    }
+  }, 30 * 1000); // comprueba cada 30s
+
+  const onVis = () => { if (document.visibilityState === 'visible') last = Date.now(); };
+  document.addEventListener('visibilitychange', onVis);
+
+  return () => {
+    clearInterval(timer);
+    document.removeEventListener('visibilitychange', onVis);
+    evs.forEach(ev => window.removeEventListener(ev, bump));
+  };
+}, [auth?.user, setAuth, showToast]);
+
 
   // Pull de usuarios online cada 10s
   useEffect(() => {
@@ -3247,8 +3607,10 @@ useEffect(() => {
 
 function handleCalendarCommand(cmd){
   if (!isAdmin || !cmd) return;
-  const { dateStr, shiftIndex } = cmd;
-  if (!dateStr || typeof shiftIndex !== 'number') return;
+   const { dateStr, shiftIndex } = cmd;
+  if (!dateStr) return;
+  // Para 'assign' y 'move' sí exigimos índice numérico
+  if ((cmd.type === 'assign' || cmd.type === 'move') && typeof shiftIndex !== 'number') return;
 
   // Quitar o bloquear
   if (cmd.type === 'clear') {
@@ -3257,27 +3619,50 @@ function handleCalendarCommand(cmd){
     return;
   }
 
- // asignación directa con validación
- if (cmd.type === 'assign' && cmd.personId){
-   const shift = ASS[dateStr]?.[shiftIndex]?.shift;
-   if (!shift) { showToast('Turno no encontrado'); return; }
-   const v = validateCanAssign({ dateStr, shift, personId: cmd.personId });
-   if (!v.ok) { showToast(v.msg); return; }
-   forceAssign(dateStr, shiftIndex, cmd.personId);
-   setTimeout(()=>document.querySelectorAll('details[open]').forEach(d=>d.open=false), 0);
-   return;
- }
+// asignación (valida; si falla muestra motivo; opcionalmente forzar)
+if (cmd.type === 'assign' && typeof shiftIndex === 'number') {
+  // 0) slot y estado actual
+  const cell  = ASS[dateStr] || [];
+  const slot  = cell[shiftIndex];
+  if (!slot || !slot.shift) { showToast('Turno no encontrado'); return; }
 
- if (cmd.type === 'move' && typeof cmd.fromShiftIndex === 'number' && cmd.personId){
-   const shift = ASS[dateStr]?.[shiftIndex]?.shift;
-   if (!shift) { showToast('Destino no encontrado'); return; }
-   const v = validateCanAssign({ dateStr, shift, personId: cmd.personId });
-   if (!v.ok) { showToast(v.msg); return; }
-   forceAssign(dateStr, shiftIndex, cmd.personId);
-   forceAssign(dateStr, cmd.fromShiftIndex, cmd.leaveEmpty ? '__EMPTY__' : null);
-   setTimeout(()=>document.querySelectorAll('details[open]').forEach(d=>d.open=false), 0);
-   return;
- }
+  // si eliges lo mismo, no cambiamos nada (pero avisamos)
+  const target  = String(cmd.personId || '');
+  const current = String(slot.personId || '');
+  if (!target) { showToast('Sin cambios'); return; }
+  if (target === current) { showToast('Sin cambios'); return; }
+
+  // 1) validación "dura"
+  const v = validateCanAssign({ dateStr, shift: slot.shift, personId: target });
+  if (!v.ok && !cmd.force) { showToast(v.msg); return; } // deja el panel abierto
+
+  // 2) aplicar (normal o forzado)
+  forceAssign(dateStr, shiftIndex, target);
+  showToast(cmd.force ? 'Asignado (forzado)' : 'Asignado');
+
+  // cerramos el panel solo si se aplicó
+  setTimeout(()=>document.querySelectorAll('details[open]').forEach(d=>d.open=false), 0);
+  return;
+}
+
+if (cmd.type === 'move' && typeof cmd.fromShiftIndex === 'number' && cmd.personId){
+  const samePerson = (ASS[dateStr]?.[cmd.fromShiftIndex]?.personId === cmd.personId);
+  if (samePerson){
+    forceAssign(dateStr, cmd.fromShiftIndex, cmd.leaveEmpty ? '__EMPTY__' : null);
+    forceAssign(dateStr, cmd.shiftIndex, cmd.personId);
+    setTimeout(()=>document.querySelectorAll('details[open]').forEach(d=>d.open=false), 0);
+    return;
+  }
+  const shift = ASS[dateStr]?.[cmd.shiftIndex]?.shift;
+  if (!shift) { showToast('Destino no encontrado'); return; }
+  const v = validateCanAssign({ dateStr, shift, personId: cmd.personId });
+  if (!v.ok) { showToast(v.msg); return; }
+  forceAssign(dateStr, cmd.shiftIndex, cmd.personId);
+  forceAssign(dateStr, cmd.fromShiftIndex, cmd.leaveEmpty ? '__EMPTY__' : null);
+  setTimeout(()=>document.querySelectorAll('details[open]').forEach(d=>d.open=false), 0);
+  return;
+}
+
 
 // crear slot extra (refuerzo) y asignar
 if (cmd.type === 'addSlotAssign' && cmd.personId) {
@@ -3383,32 +3768,58 @@ if (cmd.type === 'removeExtraSlot') {
               {state.rebalance? 'Reequilibrio ON':'Reequilibrar'}
             </button>)}
 
-            {/* Export/Import local */}{/* Controles Nube */}{isAdmin && (
-<>
-<>
-            <button onClick={props.exportCSV} className="px-3 py-1.5 rounded-lg border">CSV</button>
-            <button onClick={props.exportJSON} className="px-3 py-1.5 rounded-lg border">Export JSON</button>
-            <label className="px-3 py-1.5 rounded-lg border cursor-pointer">Import JSON
-              <input type="file" accept="application/json" className="hidden" onChange={(e)=> e.target.files && props.importJSON(e.target.files[0])}/>
-            </label>
+{/* Controles Nube / Import-Export (solo admin) */}
+{isAdmin && (
+  <>
+    <button onClick={exportCSV}  className="px-3 py-1.5 rounded-lg border">CSV</button>
+    <button onClick={exportJSON} className="px-3 py-1.5 rounded-lg border">Export JSON</button>
 
-            
-</>
-<input className="border rounded px-2 py-1 w-32" placeholder="Space ID"
-              value={cloud.spaceId} onChange={e=>setCloud({...cloud,spaceId:e.target.value})}/>
-            <input className="border rounded px-2 py-1 w-28" placeholder="ReadToken"
-              value={cloud.readToken} onChange={e=>setCloud({...cloud,readToken:e.target.value})}/>
-            <input className="border rounded px-2 py-1 w-28" placeholder="WriteToken"
-              value={cloud.writeToken} onChange={e=>setCloud({...cloud,writeToken:e.target.value})}/>
-            <button onClick={props.cloudLoad} className="px-3 py-1.5 rounded-lg border">Cargar nube</button>
-            <button onClick={props.cloudSave} className="px-3 py-1.5 rounded-lg border">Guardar nube</button>
+    <label className="px-3 py-1.5 rounded-lg border cursor-pointer">Import JSON
+      <input
+        type="file"
+        accept="application/json"
+        className="hidden"
+        onChange={(e)=> e.target.files && importJSON(e.target.files[0])}
+      />
+    </label>
+
+    <input
+      className="border rounded px-2 py-1 w-32"
+      placeholder="Space ID"
+      value={cloud?.spaceId || ''}
+      onChange={e=>setCloud({...cloud, spaceId:e.target.value})}
+    />
+    <input
+      className="border rounded px-2 py-1 w-28"
+      placeholder="ReadToken"
+      value={cloud?.readToken || ''}
+      onChange={e=>setCloud({...cloud, readToken:e.target.value})}
+    />
+    <input
+      className="border rounded px-2 py-1 w-28"
+      placeholder="WriteToken"
+      value={cloud?.writeToken || ''}
+      onChange={e=>setCloud({...cloud, writeToken:e.target.value})}
+    />
+
+    <button onClick={cloudLoad} className="px-3 py-1.5 rounded-lg border">Cargar nube</button>
+    <button onClick={cloudSave} className="px-3 py-1.5 rounded-lg border">Guardar nube</button>
   </>
 )}
+
+{/* Logout (para todos) */}
+<button
+  onClick={()=>setAuth({ token:"", user:null })}
+  className="px-2 py-1 rounded border"
+>
+  Salir
+</button>
+
 {ui.sync==="loading" && <span className="px-2 py-1 rounded bg-amber-100 border border-amber-300">Sincronizando…</span>}
-            {ui.sync==="ok" && <span className="px-2 py-1 rounded bg-emerald-100 border border-emerald-300">¡Listo!</span>}
-            {ui.sync==="error" && <span className="px-2 py-1 rounded bg-rose-100 border border-rose-300">Error</span>}
-            {ui.toast && (<div className="fixed right-4 bottom-4 z-50 bg-black text-white px-3 py-2 rounded-lg shadow">{ui.toast}</div>)}
-            <button onClick={()=>props.setAuth({ token:"", user:null })} className="px-2 py-1 rounded border">Salir</button>
+{ui.sync==="ok" && <span className="px-2 py-1 rounded bg-emerald-100 border border-emerald-300">¡Listo!</span>}
+{ui.sync==="error" && <span className="px-2 py-1 rounded bg-rose-100 border border-rose-300">Error</span>}
+{ui.toast && (<div className="fixed right-4 bottom-4 z-50 bg-black text-white px-3 py-2 rounded-lg shadow">{ui.toast}</div>)}
+
           </div>
         </div>
       </header>
@@ -3458,163 +3869,7 @@ if (cmd.type === 'removeExtraSlot') {
             </div>
           </Card>
 
-{isAdmin && (
-  <Card title="Auditoría de sesiones (Admin)">
-    {(() => {
-      const [day, setDay] = React.useState(toDateValue(new Date()));
-      const [logs, setLogs] = React.useState([]);
-      const [loading, setLoading] = React.useState(false);
-
-      async function load() {
-        try {
-          setLoading(true);
-          const d = await api(`/admin/sessions?day=${encodeURIComponent(day)}`, { method:'GET' }, auth.token);
-          setLogs(d?.sessions || []);
-        } catch (e) {
-          showToast('Error cargando sesiones');
-        } finally {
-          setLoading(false);
-        }
-      }
-
-      const byUser = React.useMemo(() => {
-        const m = new Map();
-        for (const s of logs) {
-          const email = s?.user?.email || 'desconocido';
-          const name  = s?.user?.name  || '';
-          const ip    = s?.ip || 'n/a';
-          const ts    = s?.ts || '0000-00-00T00:00:00Z';
-          const ua    = s?.ua || '';
-          if (!m.has(email)) m.set(email, { email, name, total:0, ips:new Map(), lastTs:'', lastUa:'' });
-          const u = m.get(email);
-          u.total += 1;
-          u.ips.set(ip, (u.ips.get(ip)||0) + 1);
-          if (ts > u.lastTs) { u.lastTs = ts; u.lastUa = ua; }
-        }
-        const rows = [];
-        for (const u of m.values()) {
-          const ips = Array.from(u.ips.entries()).map(([ip,c]) => `${ip} (${c})`).join(', ');
-          rows.push({ email:u.email, name:u.name, total:u.total, ips, lastUa:u.lastUa });
-        }
-        rows.sort((a,b)=> b.total - a.total || a.email.localeCompare(b.email));
-        return rows;
-      }, [logs]);
-
-      return (
-        <div className="space-y-2">
-          <div className="flex items-center gap-2">
-            <input type="date" className="border rounded px-2 py-1" value={day} onChange={e=>setDay(e.target.value)} />
-            <button onClick={load} className="px-3 py-1.5 rounded-lg border" disabled={loading}>
-              {loading?'Cargando…':'Cargar'}
-            </button>
-            <span className="text-xs text-slate-500">{logs.length} eventos</span>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm border-separate border-spacing-y-1">
-              <thead>
-                <tr className="text-left text-slate-600">
-                    <th className="py-1 px-2">Usuario</th>
-                    <th className="py-1 px-2">Email</th>
-                    <th className="py-1 px-2">Conexiones (día)</th>
-                    <th className="py-1 px-2">IPs</th>
-                    <th className="py-1 px-2">Navegador</th>
-                </tr>
-              </thead>
-              <tbody>
-                {byUser.length===0 && <tr><td colSpan={4} className="py-2 px-2 text-slate-500">Sin datos para ese día.</td></tr>}
-                {byUser.map(r=>(
-                  <tr key={r.email} className="bg-white">
-                    <td className="py-1 px-2">{r.name||'—'}</td>
-                    <td className="py-1 px-2">{r.email}</td>
-                    <td className="py-1 px-2">{r.total}</td>
-                    <td className="py-1 px-2">{r.ips}</td>
-                    <td className="py-1 px-2 truncate max-w-[24rem]" title={r.lastUa}>{r.lastUa || '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-
-          {/* DETALLE DE SESIONES (crudo) */}
-            <div className="mt-3">
-              <div className="flex items-center justify-between mb-1">
-                <div className="text-sm font-medium">Detalle de sesiones del día</div>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    placeholder="Filtrar por email/IP/UA…"
-                    className="border rounded px-2 py-1 text-sm"
-                    onChange={e => {
-                      const q = (e.target.value || '').toLowerCase();
-                      const filtered = logs.filter(s => {
-                        const email = s?.user?.email || '';
-                        const ip = s?.ip || '';
-                        const ua = s?.ua || '';
-                        return email.toLowerCase().includes(q)
-                            || ip.toLowerCase().includes(q)
-                            || ua.toLowerCase().includes(q);
-                      });
-                      setLogs(filtered.length ? filtered : logs); // simple filtro sobre la vista
-                    }}
-                  />
-                  <button
-                    className="px-2 py-1 rounded border text-sm"
-                    onClick={()=>{
-                      const rows = [
-                        ['ts','email','name','ip','ua'].join(',')
-                      ];
-                      (logs||[]).forEach(s=>{
-                        const r = [
-                          s.ts,
-                          s?.user?.email || '',
-                          s?.user?.name || '',
-                          s.ip || '',
-                          (s.ua || '').replace(/"/g,'""')
-                        ].map(x=>`"${x}"`).join(',');
-                        rows.push(r);
-                      });
-                      const blob = new Blob([rows.join('\n')], {type:'text/csv;charset=utf-8;'});
-                      const a = document.createElement('a');
-                      a.href = URL.createObjectURL(blob);
-                      a.download = `sesiones_${day}.csv`;
-                      a.click();
-                    }}
-                  >Export CSV</button>
-                </div>
-              </div>
-
-              <div className="overflow-x-auto max-h-64 border rounded bg-white">
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr className="text-left text-slate-600 border-b">
-                      <th className="py-1 px-2">Hora (UTC)</th>
-                      <th className="py-1 px-2">Email</th>
-                      <th className="py-1 px-2">IP</th>
-                      <th className="py-1 px-2">Navegador</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(logs||[]).length===0 && (
-                      <tr><td colSpan={4} className="py-2 px-2 text-slate-500">Sin datos.</td></tr>
-                    )}
-                    {(logs||[]).map((s,i)=>(
-                      <tr key={i} className="border-b">
-                        <td className="py-1 px-2 whitespace-nowrap">{(s.ts||'').replace('T',' ').replace('Z','')}</td>
-                        <td className="py-1 px-2">{s?.user?.email || '—'}</td>
-                        <td className="py-1 px-2">{s?.ip || '—'}</td>
-                        <td className="py-1 px-2 truncate max-w-[36rem]" title={s?.ua||''}>{s?.ua || '—'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-  
-          </div>
-        </div>
-      );
-    })()}
-  </Card>
-)}
+{isAdmin && <AdminSessionsAuditCard auth={auth} showToast={showToast} />}
 
 
           <Card title="Auditoría (últimos 100)">
@@ -3634,6 +3889,7 @@ if (cmd.type === 'removeExtraSlot') {
 <PersonasPanel state={state} upPerson={upPerson} />
           <TurnosPanel state={state} up={up} />
           <FestivosPanel state={state} up={up} />
+          <WorkingHolidaysPanel state={state} up={up} />
           <CustomHolidaysPanel state={state} up={up} /></>)}
         </section>
 
@@ -3718,6 +3974,7 @@ if (cmd.type === 'removeExtraSlot') {
       closeOnHolidays={state.closeOnHolidays}
       closedExtraDates={state.closedExtraDates}
       customHolidaysByYear={state.customHolidaysByYear}
+      workingHolidays={state.workingHolidays}
       pillClass={pillClass}
     />
   </Card>
@@ -3784,7 +4041,7 @@ if (cmd.type === 'removeExtraSlot') {
             <div className="grid grid-cols-12 gap-2">
               <div className="col-span-6"><label className="text-xs">Desde</label><input type="date" value={payroll.from} onChange={(e)=>setPayroll({...payroll,from:e.target.value})} className="w-full px-2 py-1 rounded border"/></div>
               <div className="col-span-6"><label className="text-xs">Hasta</label><input type="date" value={payroll.to} onChange={(e)=>setPayroll({...payroll,to:e.target.value})} className="w-full px-2 py-1 rounded border"/></div>
-              <div className="col-span-12"><button onClick={props.exportPayroll} className="px-3 py-1.5 rounded-lg border w-full">Exportar Nómina (CSV)</button></div>
+              <button onClick={exportPayroll} className="px-3 py-1.5 rounded-lg border w-full">Exportar Nómina (CSV)</button>
             </div>
           </Card>
 
