@@ -29,6 +29,7 @@ function renderEmptyCell(toType, isClosed){
 
 // === Defaults para autoload de usuarios no-admin ===
 const PUBLIC_SPACE = { id: "turnos-2025", readToken: "READ-2025" };
+const IDLE_MS = 15 * 60 * 1000;
 
 // ===================== Config API (proxy Apache → Flask) =====================
 const API_BASE = "/api";
@@ -757,7 +758,7 @@ export default function App(){
       idleTimerRef.current = setTimeout(() => {
         showToast("Sesión cerrada por inactividad");
         doLogout();
-      }, 15 * 60 * 1000);
+      }, IDLE_MS);
     };
     const events = ["click", "mousemove", "keydown", "touchstart", "focus"];
     events.forEach(ev => window.addEventListener(ev, resetTimer));
@@ -834,7 +835,7 @@ export default function App(){
   // ---------- Cloud (SQLite) ----------
   const [cloud, setCloud] = useState({ spaceId:"turnos-2025", readToken:"READ-2025", writeToken:"WRT-1234", apiKey:"" });
   async function cloudLoad(options = {}) {
-    const silent = !!options.silent;
+    const silent = options?.silent === true;
     if (!silent) setUI(prev=>({...prev, sync:"loading"}));
     // (no-admin) intentamos cargar aunque no haya readToken; el backend decidirá
 // // No cortamos a no-admin por falta de readToken; el backend decidirá.
