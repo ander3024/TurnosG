@@ -902,6 +902,7 @@ export default function App(){
   // --- ui feedback (banner + toast) ---
   const [ui, setUI] = useState({ sync:null, toast:null });
   const toastTimeoutRef = React.useRef(null);
+  const DEFAULT_TOAST_MS = 2000;
   const idleTimeoutRef = React.useRef(null);
 
   useEffect(() => () => {
@@ -911,8 +912,8 @@ export default function App(){
     }
   }, []);
 
-  const showToast = React.useCallback((message, duration = 2000) => {
-    const safeDuration = Number.isFinite(duration) && duration > 0 ? duration : 2000;
+  const showToast = React.useCallback((message, duration = DEFAULT_TOAST_MS) => {
+    const safeDuration = Number.isFinite(duration) && duration > 0 ? duration : DEFAULT_TOAST_MS;
 
     if (toastTimeoutRef.current) {
       clearTimeout(toastTimeoutRef.current);
