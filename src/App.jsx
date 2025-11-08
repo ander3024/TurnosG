@@ -720,11 +720,56 @@ export default function App(){
   
   // --- ui feedback (banner + toast) ---
   const [ui, setUI] = useState({ sync:null, toast:null });
-  
-  
+
+
   // Modal día (compartido)
   const [modalDay, setModalDay] = useState(null);
-function showToast(msg){ setUI(prev=>({...prev, toast:msg})); setTimeout(()=>setUI(prev=>({...prev, toast:null})), 2000); }
+  const toastTimeoutRef = useRef(null);
+  const showToast = useCallback((msg) => {
+    setUI(prev => ({ ...prev, toast: msg }));
+    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+    toastTimeoutRef.current = setTimeout(() => {
+      setUI(prev => ({ ...prev, toast: null }));
+      toastTimeoutRef.current = null;
+    }, 2000);
+  }, [setUI]);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimeoutRef.current) {
+        clearTimeout(toastTimeoutRef.current);
+        toastTimeoutRef.current = null;
+      }
+    };
+  }, []);
+
+  const idleTimerRef = useRef(null);
+  useEffect(() => {
+    if (!auth?.token) {
+      if (idleTimerRef.current) {
+        clearTimeout(idleTimerRef.current);
+        idleTimerRef.current = null;
+      }
+      return;
+    }
+    const resetTimer = () => {
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+      idleTimerRef.current = setTimeout(() => {
+        showToast("Sesión cerrada por inactividad");
+        doLogout();
+      }, 15 * 60 * 1000);
+    };
+    const events = ["click", "mousemove", "keydown", "touchstart", "focus"];
+    events.forEach(ev => window.addEventListener(ev, resetTimer));
+    resetTimer();
+    return () => {
+      events.forEach(ev => window.removeEventListener(ev, resetTimer));
+      if (idleTimerRef.current) {
+        clearTimeout(idleTimerRef.current);
+        idleTimerRef.current = null;
+      }
+    };
+  }, [auth?.token, showToast, doLogout]);
 
 
 
@@ -788,7 +833,9 @@ function showToast(msg){ setUI(prev=>({...prev, toast:msg})); setTimeout(()=>set
 
   // ---------- Cloud (SQLite) ----------
   const [cloud, setCloud] = useState({ spaceId:"turnos-2025", readToken:"READ-2025", writeToken:"WRT-1234", apiKey:"" });
-  async function cloudLoad() { setUI(prev=>({...prev, sync:"loading"}));
+  async function cloudLoad(options = {}) {
+    const silent = !!options.silent;
+    if (!silent) setUI(prev=>({...prev, sync:"loading"}));
     // (no-admin) intentamos cargar aunque no haya readToken; el backend decidirá
 // // No cortamos a no-admin por falta de readToken; el backend decidirá.
 // if (!isAdmin && !cloud.readToken) { showToast("Falta ReadToken"); setUI(prev=>({...prev, sync:"error"})); return; }
@@ -811,8 +858,16 @@ if (!payload.conciliacion) payload.conciliacion = safeConciliacion();
       }
       if (typeof window !== "undefined") window.__OFF_POLICY__ = payload.offPolicy || {};
       setState(prev=>({ ...prev, ...payload }));
-      setUI(prev=>({...prev, sync:"ok"})); showToast("Cargado de nube");
-    }catch(e){ setUI(prev=>({...prev, sync:"error"})); showToast((String(e.message||"")).startsWith("403")?"403: ReadToken inválido o sin permisos":"Error al cargar: "+e.message); }
+      if (!silent) {
+        setUI(prev=>({...prev, sync:"ok"}));
+        showToast("Cargado de nube");
+      }
+    }catch(e){
+      if (!silent) {
+        setUI(prev=>({...prev, sync:"error"}));
+        showToast((String(e.message||"")).startsWith("403")?"403: ReadToken inválido o sin permisos":"Error al cargar: "+e.message);
+      }
+    }
   }
   async function cloudSave() { setUI(prev=>({...prev, sync:"loading"}));
     try{
@@ -2429,10 +2484,18 @@ function AuthenticatedApp(props){
   useEffect(() => {
     if (auth.user && !isAdmin && !autoCloudLoaded) {
       (async () => {
-        try { await cloudLoad(); } catch(e) {}
+        try { await cloudLoad({ silent: true }); } catch(e) {}
         finally { setAutoCloudLoaded(true); }
       })();
     }
+  }, [auth.user, isAdmin, autoCloudLoaded]);
+
+  useEffect(() => {
+    if (!auth.user || isAdmin || !autoCloudLoaded) return;
+    const interval = setInterval(() => {
+      cloudLoad({ silent: true }).catch(() => {});
+    }, 2 * 60 * 1000);
+    return () => clearInterval(interval);
   }, [auth.user, isAdmin, autoCloudLoaded]);
 
 // ---------- Render principal ----------
