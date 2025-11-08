@@ -726,19 +726,21 @@ export default function App(){
   // Modal día (compartido)
   const [modalDay, setModalDay] = useState(null);
   const toastTimeoutRef = useRef(null);
-  const showToast = React.useCallback((msg) => {
-    setUI(prev => ({ ...prev, toast: msg }));
-    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
-    toastTimeoutRef.current = setTimeout(() => {
+  const showToast = React.useCallback((message, duration = 2000) => {
+    setUI(prev => ({ ...prev, toast: message }));
+    if (toastTimeoutRef.current) {
+      window.clearTimeout(toastTimeoutRef.current);
+    }
+    toastTimeoutRef.current = window.setTimeout(() => {
       setUI(prev => ({ ...prev, toast: null }));
       toastTimeoutRef.current = null;
-    }, 2000);
+    }, duration);
   }, [setUI]);
 
   useEffect(() => {
     return () => {
       if (toastTimeoutRef.current) {
-        clearTimeout(toastTimeoutRef.current);
+        window.clearTimeout(toastTimeoutRef.current);
         toastTimeoutRef.current = null;
       }
     };
