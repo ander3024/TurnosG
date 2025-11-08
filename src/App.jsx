@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 
 const IDLE_MS = 15 * 60 * 1000; // 15 minutos
+const DEFAULT_TOAST_MS = 2000;
 
 import WeekendAuditPanel from "./components/WeekendAuditPanel";
 
@@ -902,7 +903,6 @@ export default function App(){
   // --- ui feedback (banner + toast) ---
   const [ui, setUI] = useState({ sync:null, toast:null });
   const toastTimeoutRef = React.useRef(null);
-  const DEFAULT_TOAST_MS = 2000;
   const idleTimeoutRef = React.useRef(null);
 
   useEffect(() => () => {
