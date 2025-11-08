@@ -13,3 +13,6 @@ src/App.jsx.backup_*
 # build
 /dist
 
+
+# Local patches
+changes.patch

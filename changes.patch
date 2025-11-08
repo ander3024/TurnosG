@@ -1,138 +1,86 @@
+From 205d536fda4fb1e998fe9303777fc9e3c36d4942 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Andr=C3=A9s=20Fern=C3=A1ndez?= <andres@careucom.com>
+Date: Sun, 19 Oct 2025 18:56:35 +0000
+Subject: [PATCH] =?UTF-8?q?UI(admin):=20pack2=20(DayModal=20RO=20para=20us?=
+ =?UTF-8?q?er,=20nube=20limitada,=20swaps=20admin-only,=20audit=20b=C3=A1s?=
+ =?UTF-8?q?ico)?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ src/App.jsx | 21 +++++++++++++++------
+ 1 file changed, 15 insertions(+), 6 deletions(-)
+
 diff --git a/src/App.jsx b/src/App.jsx
+index e32fcca..5cbcd97 100644
 --- a/src/App.jsx
 +++ b/src/App.jsx
-@@ -41,6 +41,9 @@ export default function App(){
-   }
-   function doLogout(){ setAuth({ token:"", user:null }); }
+@@ -498,6 +498,7 @@ export default function App(){
+   next[dateStr] = next[dateStr] || {};
+   next[dateStr][key] = personId || null; // si pasas '', quita override
+   up(['overrides'], next);
++  up(['audit'], [ ...(state.audit||[]), { ts:new Date().toISOString(), actor:(auth.user?.email||'unknown'), action:'override', dateStr, assignmentIndex, personId } ]);
+ }
  
-+  // --- helpers de permisos en UI ---
-+  const isAdmin = auth.user?.role === 'admin';
-+
-   // ---------- Estado principal ----------
-   const defaultStart = startOfWeekMonday(new Date());
-   const [state,setState]=usePersistentState({
-@@ -126,18 +129,29 @@ export default function App(){
-             <label className="px-3 py-1.5 rounded-lg border cursor-pointer">Import JSON
-               <input type="file" accept="application/json" className="hidden" onChange={(e)=> e.target.files && importJSON(e.target.files[0])}/>
-             </label>
  
--            {/* Controles Nube */}
--            <input className="border rounded px-2 py-1 w-32" placeholder="Space ID"
--              value={cloud.spaceId} onChange={e=>setCloud({...cloud,spaceId:e.target.value})}/>
--            <input className="border rounded px-2 py-1 w-28" placeholder="ReadToken"
--              value={cloud.readToken} onChange={e=>setCloud({...cloud,readToken:e.target.value})}/>
--            <input className="border rounded px-2 py-1 w-28" placeholder="WriteToken"
--              value={cloud.writeToken} onChange={e=>setCloud({...cloud,writeToken:e.target.value})}/>
--            <button onClick={cloudLoad} className="px-3 py-1.5 rounded-lg border">Cargar nube</button>
--            <button onClick={cloudSave} className="px-3 py-1.5 rounded-lg border">Guardar nube</button>
-+            {/* Controles Nube */}
-+            {isAdmin ? (
-+              <>
-+                <input className="border rounded px-2 py-1 w-32" placeholder="Space ID"
-+                  value={cloud.spaceId} onChange={(e)=>setCloud({...cloud,spaceId:e.target.value})}/>
-+                <input className="border rounded px-2 py-1 w-28" placeholder="ReadToken"
-+                  value={cloud.readToken} onChange={(e)=>setCloud({...cloud,readToken:e.target.value})}/>
-+                <input className="border rounded px-2 py-1 w-28" placeholder="WriteToken"
-+                  value={cloud.writeToken} onChange={(e)=>setCloud({...cloud,writeToken:e.target.value})}/>
-+                <button onClick={cloudLoad} className="px-3 py-1.5 rounded-lg border">Cargar nube</button>
-+                <button onClick={cloudSave} className="px-3 py-1.5 rounded-lg border">Guardar nube</button>
-+              </>
-+            ) : (
-+              <>
-+                <input className="border rounded px-2 py-1 w-32" placeholder="Space ID"
-+                  value={cloud.spaceId} onChange={(e)=>setCloud({...cloud,spaceId:e.target.value})}/>
-+                <button onClick={cloudLoad} className="px-3 py-1.5 rounded-lg border">Cargar nube</button>
-+              </>
-+            )}
- 
-             <button onClick={doLogout} className="px-2 py-1 rounded border">Salir</button>
-           </div>
-         </div>
-       </header>
- 
--      <main className="w-full max-w-[1800px] mx-auto px-6 py-6 grid lg:grid-cols-3 gap-6">
--        {/* Configuración */}
--        <section className="lg:col-span-1 space-y-6">
--          <ConfigBasica state={state} up={up} />
--          <ReglasPanel state={state} up={up} />
--          <ConciliacionPanel state={state} up={up} />
--          <PersonasPanel state={state} upPerson={upPerson} />
--          <TurnosPanel state={state} up={up} />
--          <FestivosPanel state={state} up={up} />
--        </section>
-+      <main className="w-full max-w-[1800px] mx-auto px-6 py-6 grid lg:grid-cols-3 gap-6">
-+        {/* Configuración (solo admin) */}
-+        {isAdmin && (
-+          <section className="lg:col-span-1 space-y-6">
-+            <ConfigBasica state={state} up={up} />
-+            <ReglasPanel state={state} up={up} />
-+            <ConciliacionPanel state={state} up={up} />
-+            <PersonasPanel state={state} upPerson={upPerson} />
-+            <TurnosPanel state={state} up={up} />
-+            <FestivosPanel state={state} up={up} />
-+          </section>
-+        )}
-+        {!isAdmin && <section className="lg:col-span-1" />}
- 
-         {/* Calendarios y reportes */}
-         <section className="lg:col-span-2 space-y-6">
-@@ -161,13 +175,15 @@ export default function App(){
-             <WeeklyView startDate={weeklyStart} weeks={1} assignments={ASS} people={state.people} />
+@@ -708,7 +709,7 @@ export default function App(){
            </Card>
  
--          <TimeOffPanel state={state} setState={setState} controls={controls} />
+           <TimeOffPanel state={state} setState={setState} controls={controls} isAdmin={isAdmin} currentUser={auth.user} />
 -          <SwapsPanel state={state} setState={setState} assignments={ASS} />
--          <RefuerzosPanel state={state} up={up} />
--          <GeneradorPicos state={state} up={up} />
-+          <TimeOffPanel state={state} setState={setState} controls={controls} isAdmin={isAdmin} currentUser={auth.user} />
-+          <SwapsPanel state={state} setState={setState} assignments={ASS} isAdmin={isAdmin} currentUser={auth.user} />
-+          {isAdmin && <RefuerzosPanel state={state} up={up} />}
-+          {isAdmin && <GeneradorPicos state={state} up={up} />}
++          <SwapsPanel state={state} setState={setState} assignments={ASS}  isAdmin={isAdmin} currentUser={auth.user} />
+           {isAdmin && <RefuerzosPanel state={state} up={up} />}
+           {isAdmin && <GeneradorPicos state={state} up={up} />}
            <PropuestaCierre
-             state={state}
-             startDate={startDate}
-             weeks={state.weeks}
-             people={state.people}
-             assignments={ASS}
-             onApply={(evs)=> up(['events'], [...state.events, ...evs])}
-             annualTarget={state.annualTargetHours}
-           />
+@@ -1029,6 +1030,10 @@ function TimeOffPanel({ state, setState, controls, isAdmin, currentUser }){
+   function setTOStatus(idx,status){
+     if (!isAdmin) return;
+     setState(prev=>({...prev, timeOffs: prev.timeOffs.map((t,i)=> i===idx? {...t,status}:t)}));
++    setState(prev=> ({...prev, audit:[...(prev.audit||[]), {
++      ts:new Date().toISOString(), actor:(currentUser?.email||'unknown'), action:'vacaciones:'+status,
++      personId: (prev.timeOffs[idx]? prev.timeOffs[idx].personId : null)
++    }]}));
+   }
  
-             <ScoreDebugPanel
-             assignments={ASS}
-             people={state.people}
-             startDate={startDate}
-             weeks={state.weeks}
-             conciliacion={state.conciliacion}
--            applyConciliation={state.applyConciliation}
--            onToggleApply={(v)=>up(['applyConciliation'], v)}
-+            applyConciliation={state.applyConciliation}
-+            onToggleApply={(v)=> isAdmin && up(['applyConciliation'], v)}
-           />
-@@ -186,7 +202,7 @@ export default function App(){
-         </section>
+   return (
+@@ -1043,7 +1048,7 @@ function TimeOffPanel({ state, setState, controls, isAdmin, currentUser }){
+         <div className="col-span-4"><label className="text-xs">Hasta</label><input type="date" value={newTO.end} onChange={(e)=>setNewTO({...newTO,end:e.target.value})} className="w-full px-2 py-1 rounded border"/></div>
+         <div className="col-span-4"><label className="text-xs">Tipo</label>
+           <select value={newTO.type} onChange={(e)=>setNewTO({...newTO,type:e.target.value})} className="w-full px-2 py-1 rounded border">
+-            <option value="vacaciones">Vacaciones</option>
++            <option value="vacaciones">Vacaciones</option disabled={!isAdmin}>
+             <option value="libranza">Libranza</option>
+             <option value="viaje">Viaje (día entero)</option>
+           </select>
+@@ -1084,11 +1089,12 @@ function TimeOffPanel({ state, setState, controls, isAdmin, currentUser }){
+ }
  
--        {auth.user.role === 'admin' && (
-+        {isAdmin && (
-           <section className="lg:col-span-3 space-y-6">
-             <AdminUsersAndPerms auth={auth} />
-           </section>
-         )}
-@@ -204,9 +220,10 @@ export default function App(){
-         <DayModal
-           dateStr={modalDay}
-           date={parseDateValue(modalDay)}
-           assignments={ASS[modalDay]||[]}
-           people={state.people}
--          onOverride={forceAssign}
-+          onOverride={forceAssign}
-+          isAdmin={isAdmin}
-           onClose={()=>setModalDay(null)}
-         />
-       )}
-     </div>
-   );
-@@ -319,7 +336,7 @@ function ResumenPanel({ controls, annualTarget, onExportICS }){
+ // ===== Swaps =====
+-function SwapsPanel({ state, setState, assignments }){
++function SwapsPanel({ state, setState, assignments, isAdmin, currentUser }){
+   const [swapDraft,setSwapDraft]=useState({ dateA: state.startDate, shiftIndexA:0, dateB: state.startDate, shiftIndexB:0 });
+ 
+   function proposeSwap(){ const req={...swapDraft, requestedBy: "user", status:'pendiente'}; setState(prev=>({...prev, swaps:[...prev.swaps, req]})); }
+   function approveSwap(i){
++    if (!isAdmin) return;
+     const sw=state.swaps[i];
+     const A=assignments[sw.dateA]?.[sw.shiftIndexA]; const B=assignments[sw.dateB]?.[sw.shiftIndexB];
+     if(!A||!B||!A.personId||!B.personId){ alert('No encuentro asignaciones válidas'); return; }
+@@ -1099,9 +1105,12 @@ function SwapsPanel({ state, setState, assignments }){
+     overrides[sw.dateA][keyA]=B.personId; overrides[sw.dateB][keyB]=A.personId;
+     const swaps=state.swaps.map((r,idx)=> idx===i? {...r,status:'aprobada'}:r);
+     setState(prev=>({...prev, overrides, swaps }));
++    setState(prev=> ({...prev, audit:[...(prev.audit||[]), {ts:new Date().toISOString(), actor:(currentUser?.email||'unknown'), action:'swap:aprobada', index:i}] }));
+   }
+   function denySwap(i){ setState(prev=>({...prev, swaps: prev.swaps.map((r,idx)=> idx===i? {...r,status:'denegada'}:r)})); }
++    if (!isAdmin) return;
+   function archiveSwap(i){ setState(prev=>({...prev, swaps: prev.swaps.map((r,idx)=> idx===i? {...r,status:'archivada'}:r)})); }
++    setState(prev=> ({...prev, audit:[...(prev.audit||[]), {ts:new Date().toISOString(), actor:(currentUser?.email||'unknown'), action:'swap:denegada', index:i}] }));
+   function deleteSwap(i){ setState(prev=>({...prev, swaps: prev.swaps.filter((_,idx)=> idx!==i)})); }
+ 
+   return (
+@@ -1369,7 +1378,7 @@ function ResumenPanel({ controls, annualTarget, onExportICS }){
    );
  }
  // ===== Modal Día =====
@@ -141,68 +89,24 @@ diff --git a/src/App.jsx b/src/App.jsx
    const pmap=new Map(people.map(p=>[p.id,p]));
    const sorted=assignments.map(x=>x); // ya vienen ordenados por ASS
    return (
-@@ -348,9 +365,10 @@ function DayModal({ dateStr, date, assignments, people, onOverride, onClose }){
-                   <div className="flex items-center gap-2">
-                     <select
+@@ -1397,7 +1406,7 @@ function DayModal({ dateStr, date, assignments, people, onOverride, onClose }){
                        className="border rounded px-2 py-1 text-sm"
                        value={c.personId || ''}
--                      onChange={e=> onOverride(dateStr, i, e.target.value || null)}
-+                      onChange={e=> isAdmin && onOverride(dateStr, i, e.target.value || null)}
-+                      disabled={!isAdmin}
-                     >
+                       onChange={e=> onOverride(dateStr, i, e.target.value || null)}
+-                    >
++                     disabled={!isAdmin}>
                        <option value="">— Sin override —</option>
                        {people.map(pp=> <option key={pp.id} value={pp.id}>{pp.name}</option>)}
                      </select>
-@@ -390,7 +408,7 @@ function buildCSV(assignments, people){ const header=["fecha","turno","inicio","turno...
-   return ics; }
- 
- 
--function TimeOffPanel({ state, setState, controls }){
-+function TimeOffPanel({ state, setState, controls, isAdmin, currentUser }){
-   const [newTO,setNewTO]=useState({ personId: state.people[0]?.id||"P1", start: state.startDate, end: state.startDate, type:'vacaciones', note:'', hoursPerDay: state.travelDefaultHours, status: 'pendiente' });
- 
-   function addTimeOff(){
-@@ -409,7 +427,11 @@ function TimeOffPanel({ state, setState, controls }){
-     setNewTO({...newTO, note:''});
-   }
-   function removeTimeOff(idx){ setState(prev=>({...prev, timeOffs: prev.timeOffs.filter((_,i)=>i!==idx)})); }
--  function setTOStatus(idx,status){ setState(prev=>({...prev, timeOffs: prev.timeOffs.map((t,i)=> i===idx? {...t,status}:t)})); }
-+  function setTOStatus(idx,status){
-+    if (!isAdmin) return; // solo admin aprueba/deniega
-+    setState(prev=>({...prev, timeOffs: prev.timeOffs.map((t,i)=> i===idx? {...t,status}:t)}));
-+  }
-@@ -447,9 +469,9 @@ function TimeOffPanel({ state, setState, controls }){
+@@ -1529,7 +1538,7 @@ function AdminUsersAndPerms({ auth }) {
+             <div><label className="text-xs">Rol</label>
+               <select className="w-full border rounded px-2 py-1"
+                       value={creating.role} onChange={e=>setCreating({...creating,role:e.target.value})}>
+-                <option value="user">user</option>
++                <option value="user">user</option disabled={!isAdmin}>
+                 <option value="admin">admin</option>
+               </select>
              </div>
-             <div className="flex items-center gap-2">
--              {t.status!=='aprobada' && <button onClick={()=>setTOStatus(idx,'aprobada')} className="text-emerald-700 hover:underline">Aprobar</button>}
--              {t.status!=='denegada' && <button onClick={()=>setTOStatus(idx,'denegada')} className="text-rose-700 hover:underline">Denegar</button>}
--              <button onClick={()=>removeTimeOff(idx)} className="text-red-600 hover:underline">Eliminar</button>
-+              {isAdmin && t.status!=='aprobada' && <button onClick={()=>setTOStatus(idx,'aprobada')} className="text-emerald-700 hover:underline">Aprobar</button>}
-+              {isAdmin && t.status!=='denegada' && <button onClick={()=>setTOStatus(idx,'denegada')} className="text-rose-700 hover:underline">Denegar</button>}
-+              {isAdmin && <button onClick={()=>removeTimeOff(idx)} className="text-red-600 hover:underline">Eliminar</button>}
-             </div>
-           </div>
-         ))}
-@@ -462,7 +484,7 @@ function TimeOffPanel({ state, setState, controls }){
-   );
- }
- 
--function SwapsPanel({ state, setState, assignments }){
-+function SwapsPanel({ state, setState, assignments, isAdmin, currentUser }){
-   const [swapDraft,setSwapDraft]=useState({ dateA: state.startDate, shiftIndexA:0, dateB: state.startDate, shiftIndexB:0 });
- 
-   function proposeSwap(){ const req={...swapDraft, requestedBy: "user", status:'pendiente'}; setState(prev=>({...prev, swaps:[...prev.swaps, req]})); }
-@@ -470,7 +492,8 @@ function SwapsPanel({ state, setState, assignments }){
-   function approveSwap(i){
-+    if (!isAdmin) return; // solo admin aprueba
-     const sw=state.swaps[i];
-     const A=assignments[sw.dateA]?.[sw.shiftIndexA]; const B=assignments[sw.dateB]?.[sw.shiftIndexB];
-     if(!A||!B||!A||!B||!A.personId||!B.personId){ alert('No encuentro asignaciones válidas'); return; }
-@@ -482,8 +505,8 @@ function SwapsPanel({ state, setState, assignments }){
-     const swaps=state.swaps.map((r,idx)=> idx===i? {...r,status:'aprobada'}:r);
-     setState(prev=>({...prev, overrides, swaps }));
-   }
--  function denySwap(i){ setState(prev=>({...prev, swaps: prev.swaps.map((r,idx)=> idx===i? {...r,status:'denegada'}:r)})); }
--  function archiveSwap(i){ setState(prev=>({...prev, swaps: prev.swaps.map((r,idx)=> idx===i? {...r,status:'archivada'}:r)})); }
-+  function denySwap(i){ if (!isAdmin) return; setState(prev=>({...prev, swaps: prev.swaps.map((r,idx)=> idx===i? {...r,status:'denegada'}:r)})); }
-+  function archiveSwap(i){ if (!isAdmin) return; setState(prev=>({...prev, swaps: prev.swaps.map((r,idx)=> idx===i? {...r,status:'archivada'}:r)})); }
+-- 
+2.43.0
+
