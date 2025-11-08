@@ -22,3 +22,6 @@
 ## Recomendaciones
 - Añadir pruebas automatizadas para `handleCalendarCommand` y para la normalización de celdas (`normalizeAssignmentsCell`) reduciría regresiones cuando se importen datos antiguos.
 - Considerar cachear la última respuesta de `/audit/ips` para mostrar datos incluso si la llamada posterior falla.
+
+## Seguimiento
+- Confirmado rebase sobre `v2025.11.08` antes de preparar el PR.
