@@ -1033,7 +1033,6 @@ function forceAssign(dateStr, assignmentIndex, personId){
       if(!data.payload){ alert("No hay datos guardados para ese Space ID"); return; }
       const payload = { ...data.payload };
       payload.conciliacion = safeConciliacion(payload.conciliacion || {});
-if (!payload.conciliacion) payload.conciliacion = safeConciliacion();
       if (typeof payload.applyConciliation === 'undefined') payload.applyConciliation = true;
       if (!payload.refuerzoMorningShift)  payload.refuerzoMorningShift  = { start:"10:00", end:"14:00", label:"Refuerzo Mañana",  lunchMinutes:0 };
       if (!payload.refuerzoAfternoonShift)payload.refuerzoAfternoonShift= { start:"16:00", end:"20:00", label:"Refuerzo Tarde",   lunchMinutes:0 };
