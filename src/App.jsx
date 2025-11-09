@@ -1,7 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
-
-const IDLE_MS = 15 * 60 * 1000; // 15 minutos
-const DEFAULT_TOAST_MS = 2000;
+import React, { useEffect, useMemo, useState, useRef, useCallback } from "react";
 
 import WeekendAuditPanel from "./components/WeekendAuditPanel";
 
@@ -49,12 +46,24 @@ const PUBLIC_SPACE = { id: "turnos-2025", readToken: "READ-2025" };
 
 // ===================== Config API (proxy Apache → Flask) =====================
 const API_BASE = "/api";
+const DEFAULT_TOAST_MS = 2000;
+
+function resolveApiUrl(path) {
+  if (typeof path !== "string" || !path) return API_BASE;
+  if (/^https?:\/\//i.test(path)) return path;
+  const envBase = (typeof import.meta !== "undefined" && import.meta?.env?.VITE_API_BASE)
+    ? String(import.meta.env.VITE_API_BASE).replace(/\/$/, "")
+    : "";
+  const base = envBase ? `${envBase}${API_BASE}` : API_BASE;
+  if (path.startsWith("/")) return `${base}${path}`;
+  return `${base}/${path}`;
+}
 
 // ===================== Helper fetch con/ sin JWT =====================
 async function api(path, opts = {}, token = "", extraHeaders = {}) {
   const headers = { ...(opts.headers || {}), ...extraHeaders };
   if (token) headers["Authorization"] = `Bearer ${token}`;
-  const res = await fetch(`${API_BASE}${path}`, { ...opts, headers });
+  const res = await fetch(resolveApiUrl(path), { ...opts, headers });
   if (!res.ok) {
     const txt = await res.text();
     throw new Error(`${res.status} ${txt}`);
@@ -902,8 +911,19 @@ export default function App(){
   
   // --- ui feedback (banner + toast) ---
   const [ui, setUI] = useState({ sync:null, toast:null });
-  const toastTimeoutRef = React.useRef(null);
-  const idleTimeoutRef = React.useRef(null);
+  const toastTimeoutRef = useRef(null);
+
+  // Modal día (compartido)
+  const [modalDay, setModalDay] = useState(null);
+  const showToast = useCallback((message, duration = DEFAULT_TOAST_MS) => {
+    const ms = Number.isFinite(duration) && duration > 0 ? duration : DEFAULT_TOAST_MS;
+    setUI(prev => ({ ...prev, toast: message }));
+    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+    toastTimeoutRef.current = setTimeout(() => {
+      setUI(prev => ({ ...prev, toast: null }));
+      toastTimeoutRef.current = null;
+    }, ms);
+  }, [setUI]);
 
   useEffect(() => () => {
     if (toastTimeoutRef.current) {
@@ -912,60 +932,9 @@ export default function App(){
     }
   }, []);
 
-  const showToast = React.useCallback((message, duration = DEFAULT_TOAST_MS) => {
-    const safeDuration = Number.isFinite(duration) && duration > 0 ? duration : DEFAULT_TOAST_MS;
 
-    if (toastTimeoutRef.current) {
-      clearTimeout(toastTimeoutRef.current);
-      toastTimeoutRef.current = null;
-    }
 
-    if (!message) {
-      setUI(prev => ({ ...prev, toast: null }));
-      return;
-    }
 
-    setUI(prev => ({ ...prev, toast: message }));
-    toastTimeoutRef.current = setTimeout(() => {
-      setUI(prev => ({ ...prev, toast: null }));
-      toastTimeoutRef.current = null;
-    }, safeDuration);
-  }, [setUI]);
-
-  // Modal día (compartido)
-  const [modalDay, setModalDay] = useState(null);
-
-  useEffect(() => {
-    if (!auth?.token) {
-      if (idleTimeoutRef.current) {
-        clearTimeout(idleTimeoutRef.current);
-        idleTimeoutRef.current = null;
-      }
-      return;
-    }
-
-    const resetIdle = () => {
-      if (idleTimeoutRef.current) {
-        clearTimeout(idleTimeoutRef.current);
-      }
-      idleTimeoutRef.current = setTimeout(() => {
-        showToast("Sesión expirada por inactividad");
-        doLogout();
-      }, IDLE_MS);
-    };
-
-    const events = ["click", "keydown", "mousemove", "touchstart", "visibilitychange"];
-    events.forEach(evt => window.addEventListener(evt, resetIdle));
-    resetIdle();
-
-    return () => {
-      if (idleTimeoutRef.current) {
-        clearTimeout(idleTimeoutRef.current);
-        idleTimeoutRef.current = null;
-      }
-      events.forEach(evt => window.removeEventListener(evt, resetIdle));
-    };
-  }, [auth?.token, doLogout, showToast]);
   // --- permisos UI ---
   const isAdmin = auth.user?.role === 'admin';
 
@@ -1054,13 +1023,14 @@ function forceAssign(dateStr, assignmentIndex, personId){
   const [cloud, setCloud] = useState({ spaceId:"turnos-2025", readToken:"READ-2025", writeToken:"WRT-1234", apiKey:"" });
   async function cloudLoad(options = {}) {
     const silent = options?.silent === true;
-    if (!silent) {
-      setUI(prev => ({ ...prev, sync: "loading" }));
-    }
+    if (!silent) setUI(prev=>({...prev, sync:"loading"}));
+    // (no-admin) intentamos cargar aunque no haya readToken; el backend decidirá
+// // No cortamos a no-admin por falta de readToken; el backend decidirá.
+// if (!isAdmin && !cloud.readToken) { showToast("Falta ReadToken"); setUI(prev=>({...prev, sync:"error"})); return; }
     try{
       const extra={}; if(cloud.apiKey) extra["X-API-Key"]=cloud.apiKey; if(cloud.readToken) extra["X-Read-Token"]=cloud.readToken;
       const data = await api(`/state/${encodeURIComponent(cloud.spaceId)}`, { method:"GET" }, auth.token, extra);
-      if(!data.payload){ if (!silent) alert("No hay datos guardados para ese Space ID"); return; }
+      if(!data.payload){ alert("No hay datos guardados para ese Space ID"); return; }
       const payload = { ...data.payload };
       payload.conciliacion = safeConciliacion(payload.conciliacion || {});
       if (typeof payload.applyConciliation === 'undefined') payload.applyConciliation = true;
@@ -1077,15 +1047,14 @@ function forceAssign(dateStr, assignmentIndex, personId){
       }
       if (typeof window !== "undefined") window.__OFF_POLICY__ = payload.offPolicy || {};
       setState(prev=>({ ...prev, ...payload }));
-      if (!silent) {
-        setUI(prev=>({...prev, sync:"ok"}));
-        showToast("Cargado de nube");
-      }
+      if (!silent) { setUI(prev=>({...prev, sync:"ok"})); showToast("Cargado de nube"); }
+      return { ok:true };
     }catch(e){
       if (!silent) {
         setUI(prev=>({...prev, sync:"error"}));
-        showToast((String(e.message||"")).startsWith("403")?"403: ReadToken inválido o sin permisos":"Error al cargar: "+e.message);
-        return;
+        const raw = String(e?.message || "");
+        const msg = raw.startsWith("403") ? "403: ReadToken inválido o sin permisos" : `Error al cargar: ${raw}`;
+        showToast(msg);
       }
       throw e;
     }
@@ -1095,39 +1064,15 @@ function forceAssign(dateStr, assignmentIndex, personId){
       const headers={ "Content-Type":"application/json", "X-Write-Token": cloud.writeToken };
       if(cloud.apiKey) headers["X-API-Key"]=cloud.apiKey;
       const payload = state; // si quieres excluir PINs: const { security, ...payload } = state;
-      const out = await api(`/state/${encodeURIComponent(cloud.spaceId)}`, { method:"PUT", headers, body: JSON.stringify({ payload, read_token: cloud.readToken || null }) }, auth.token);
+      await api(`/state/${encodeURIComponent(cloud.spaceId)}`, { method:"PUT", headers, body: JSON.stringify({ payload, read_token: cloud.readToken || null }) }, auth.token);
       setUI(prev=>({...prev, sync:"ok"})); showToast("Guardado en nube");
-    }catch(e){ setUI(prev=>({...prev, sync:"error"})); showToast((String(e.message||"")).startsWith("403")?"403: ReadToken inválido o sin permisos":"Error al cargar: "+e.message); }
-  }
-
-  useEffect(() => {
-    if (isAdmin || !auth?.token) {
-      return;
+    }catch(e){
+      setUI(prev=>({...prev, sync:"error"}));
+      const raw = String(e?.message || "");
+      const msg = raw.startsWith("403") ? "403: ReadToken inválido o sin permisos" : `Error al guardar: ${raw}`;
+      showToast(msg);
     }
-    let cancelled = false;
-    let timerId = null;
-
-    const schedule = () => {
-      if (cancelled) return;
-      timerId = setTimeout(async () => {
-        try {
-          await cloudLoad({ silent: true });
-        } catch (e) {
-          // Silenciado en modo silent.
-        }
-        schedule();
-      }, 60000);
-    };
-
-    schedule();
-
-    return () => {
-      cancelled = true;
-      if (timerId) {
-        clearTimeout(timerId);
-      }
-    };
-  }, [auth?.token, cloudLoad, isAdmin]);
+  }
 
   // ---------- Utilidades de estado ----------
   // deep-set seguro (crea objetos intermedios)
@@ -1325,6 +1270,26 @@ if (!auth.user || !auth.token) {
     a.click();
   }
 
+  function exportAuditCsv(){
+    const entries = (state.audit || []).slice(-100).reverse();
+    if (!entries.length) { showToast('Sin eventos para exportar'); return; }
+    const header = ['ts','actor','action','dateStr'];
+    const rows = [header.join(',')];
+    for (const e of entries) {
+      rows.push([
+        (e.ts || '').replace('T',' ').replace('Z',''),
+        e.actor || 'sys',
+        e.action || '',
+        e.dateStr || ''
+      ].join(','));
+    }
+    const blob = new Blob([rows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `audit_${toDateValue(new Date())}.csv`;
+    a.click();
+  }
+
   function clearVisibleOverrides(){
     if (!confirm('¿Eliminar los overrides del rango visible?')) return;
     const from = weeklyStart;
@@ -1345,7 +1310,9 @@ function duplicateVisibleToNextWeek(){
   const periodEnd = addDays(startDate, state.weeks*7 - 1);
 
   const out = structuredClone(state.overrides || {});
-  let copiados = 0, saltados = 0;
+  let copiados = 0, saltados = 0, saltadosConflicto = 0;
+  const appliedPerPerson = new Map();
+  const skippedPerPerson = new Map();
 
   for (let d = new Date(from); d <= to; d = addDays(d, 1)) {
     const srcDs = toDateValue(d);
@@ -1362,15 +1329,31 @@ function duplicateVisibleToNextWeek(){
       out[tgtDs] = out[tgtDs] || {};
       if (out[tgtDs][key] != null) { // ya había override → no pisar
         saltados++;
+        saltadosConflicto++;
+        skippedPerPerson.set(a.personId, (skippedPerPerson.get(a.personId) || 0) + 1);
         continue;
       }
       out[tgtDs][key] = a.personId;
       copiados++;
+      appliedPerPerson.set(a.personId, (appliedPerPerson.get(a.personId) || 0) + 1);
     }
   }
 
   setState(prev => ({ ...prev, overrides: out }));
-  showToast(`Duplicado seguro: ${copiados} asignaciones · ${saltados} no copiadas`);
+  const nameOf = (pid) => (state.people.find(p => p.id === pid)?.name || pid);
+  const formatMap = (map) => {
+    return Array.from(map.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([pid, count]) => `${nameOf(pid)}:${count}`)
+      .join(", ");
+  };
+  const appliedList = formatMap(appliedPerPerson);
+  const skippedList = formatMap(skippedPerPerson);
+  const msgParts = [
+    `Duplicadas ${copiados} asign.${appliedList ? ` (${appliedList})` : ""}`,
+    `Saltadas ${saltados}${skippedList && saltadosConflicto ? ` (${skippedList})` : ""}`
+  ];
+  showToast(msgParts.join(" · "));
 }
 
 function undoLastOverride(){
@@ -2062,11 +2045,49 @@ function WorkingHolidaysPanel({ state, up }){
   );
 }
 
-function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmin, onQuickAssign, province, closeOnHolidays, closedExtraDates, customHolidaysByYear, pillClass, forceAssign, workingHolidays=[] }){
+function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmin, onQuickAssign, province, closeOnHolidays, closedExtraDates, customHolidaysByYear, pillClass, workingHolidays=[] }){
   const days=[]; for(let w=0;w<weeks;w++) for(let d=0;d<7;d++) days.push(addDays(startDate, w*7+d));
   const personMap=new Map(people.map(p=>[p.id,p]));
   const todayStr = toDateValue(new Date());
   const workingSet = new Set(workingHolidays||[]);
+  const [menuState, setMenuState] = useState({});
+
+  const closeMenus = useCallback(() => {
+    setTimeout(()=>document.querySelectorAll('details[open]').forEach(d=>{ d.open = false; }), 0);
+  }, []);
+
+  const runCommand = useCallback(async (slotKey, payload, opts = {}) => {
+    if (typeof onQuickAssign !== 'function') return { ok:false, msg:'Acción no disponible' };
+    setMenuState(prev => ({
+      ...prev,
+      [slotKey]: { ...(prev[slotKey] || {}), pending: true, error: '' }
+    }));
+    try {
+      const result = onQuickAssign(payload);
+      const resolved = (result && typeof result.then === 'function') ? await result : result;
+      const success = !resolved || resolved.ok !== false;
+      setMenuState(prev => ({
+        ...prev,
+        [slotKey]: { ...(prev[slotKey] || {}), pending: false, error: success ? '' : (resolved?.msg || '') }
+      }));
+      if (success && opts.closeOnSuccess) closeMenus();
+      return resolved;
+    } catch (err) {
+      setMenuState(prev => ({
+        ...prev,
+        [slotKey]: { ...(prev[slotKey] || {}), pending: false, error: err?.message || 'Error inesperado' }
+      }));
+      throw err;
+    }
+  }, [onQuickAssign, closeMenus]);
+
+  const clearError = useCallback((slotKey) => {
+    setMenuState(prev => ({
+      ...prev,
+      [slotKey]: { ...(prev[slotKey] || {}), error: '' }
+    }));
+  }, []);
+
   return (
     <div className="overflow-x-auto">
       <div className="grid grid-cols-7 gap-4 w-full">
@@ -2108,7 +2129,12 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
                     const span = formatSpan(c.shift.start, c.shift.end);
                     const dur  = effectiveMinutes(c.shift)/60;
                     const lbl  = (c.shift.label || (isWE ? 'Finde' : `T${i+1}`));
-                    const emblem = /mañana/i.test(lbl)? '☀️' : /tarde/i.test(lbl)? '🌙' : isWE? '🗓️' : '➕'; return (
+                    const emblem = /mañana/i.test(lbl)? '☀️' : /tarde/i.test(lbl)? '🌙' : isWE? '🗓️' : '➕';
+                    const slotKey = `${dateStr}-${assignmentIndex}`;
+                    const slotState = menuState[slotKey] || {};
+                    const pending = !!slotState.pending;
+                    const lastError = slotState.error || '';
+                    return (
                     <div
                       key={`${dateStr}-${assignmentIndex}`}
                       className={`rounded-xl ${pillClass} border leading-tight flex flex-col items-start gap-1 w-full ${c.conflict? 'border-red-300 bg-red-50':'border-slate-200'}`}
@@ -2150,15 +2176,15 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
                                 id={`assign-${dateStr}-${assignmentIndex}`}
                                 className="border rounded px-1 py-0.5 text-[11px] w-full"
                                 value={c.personId || ''}
-                                onChange={e => {
-                                  onQuickAssign({
+                                disabled={pending}
+                                onChange={async e => {
+                                  clearError(slotKey);
+                                  await runCommand(slotKey, {
                                     type: 'assign',
                                     dateStr,
                                     shiftIndex: assignmentIndex,
                                     personId: e.target.value || null
                                   });
-                                  // Nota: si falla validación, el handler muestra el motivo y NO cierra.
-                                  // Si tiene éxito, el handler sí cierra el panel.
                                 }}
                                 title="Asignar persona a este turno"
                               >
@@ -2167,6 +2193,7 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
                                   <option key={pp.id} value={pp.id}>{pp.name}</option>
                                 ))}
                               </select>
+                              {lastError && <div className="text-[11px] text-rose-700 mt-1">{lastError}</div>}
                             </div>
                               {/* Mover a otro turno del mismo día */}
                               <div className="space-y-1 border-t pt-2">
@@ -2195,19 +2222,19 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
                                 <button
                                   type="button"
                                   className="px-2 py-0.5 border rounded text-[11px]"
-                                  onClick={()=>{
+                                  disabled={pending}
+                                  onClick={async ()=>{
                                     const sel = document.getElementById(`mv-${dateStr}-${assignmentIndex}`);
                                     const chk = document.getElementById(`mv-empty-${dateStr}-${assignmentIndex}`);
                                     const target = Number(sel?.value ?? assignmentIndex);
-                                    onQuickAssign({
+                                    await runCommand(slotKey, {
                                       type:'move',
                                       dateStr,
                                       fromShiftIndex: assignmentIndex,
                                       shiftIndex: target,
                                       personId: c.personId,
                                       leaveEmpty: !!chk?.checked
-                                    });
-                                    setTimeout(()=>document.querySelectorAll('details[open]').forEach(d=>d.open=false), 0);
+                                    }, { closeOnSuccess: true });
                                   }}
                                 >
                                   Mover
@@ -2221,22 +2248,23 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
                                   <button
                                     type="button"
                                     className="px-2 py-0.5 border rounded text-[11px]"
+                                    disabled={pending}
                                     onClick={()=>{
-                                      forceAssign(dateStr, assignmentIndex, null);
-                                      setTimeout(()=>document.querySelectorAll('details[open]').forEach(d=>d.open=false), 0);
+                                      runCommand(slotKey, { type:'clear', dateStr, shiftIndex: assignmentIndex }, { closeOnSuccess: true });
                                     }}
                                   >Liberar</button>
                                   <button
                                     type="button"
                                     className="px-2 py-0.5 border rounded text-[11px] text-rose-600"
+                                    disabled={pending}
                                     onClick={()=>{
-                                      forceAssign(dateStr, assignmentIndex, "__EMPTY__");
-                                      setTimeout(()=>document.querySelectorAll('details[open]').forEach(d=>d.open=false), 0);
+                                      runCommand(slotKey, { type:'clear', dateStr, shiftIndex: assignmentIndex, forceEmpty: true }, { closeOnSuccess: true });
                                     }}
                                   >Bloquear</button>
                                   <button
                                     type="button"
                                     className="px-2 py-0.5 border rounded text-[11px] text-slate-600"
+                                    disabled={pending}
                                     onClick={()=>{
                                       if (!confirm('¿Eliminar un refuerzo extra de este día?')) return;
                                       runCommand(slotKey, { type:'removeExtraSlot', dateStr, shiftIndex: assignmentIndex }, { closeOnSuccess: true });
@@ -2251,12 +2279,13 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
                                   type="button"
                                   className="px-2 py-0.5 border rounded text-[11px] text-amber-700"
                                   title="Ignorar reglas (solo admin)"
-                                  onClick={() => {
+                                  disabled={pending}
+                                  onClick={async () => {
                                     const sel = document.getElementById(`assign-${dateStr}-${assignmentIndex}`);
                                     const pid = (sel?.value || '').trim();
                                     if (!pid) { alert('Elige persona'); return; }
                                     if (confirm('Forzar asignación e ignorar reglas?')) {
-                                      onQuickAssign({
+                                      await runCommand(slotKey, {
                                         type: 'assign',
                                         dateStr,
                                         shiftIndex: assignmentIndex,   // ← índice real del slot
@@ -2295,17 +2324,18 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
                                   <button
                                     type="button"
                                     className="px-2 py-0.5 border rounded text-[11px]"
-                                    onClick={()=>{
+                                    disabled={pending}
+                                    onClick={async ()=>{
                                     const s = document.getElementById(`addslot-shift-${dateStr}-${assignmentIndex}`)?.value || 'auto';
                                     const p = document.getElementById(`addslot-person-${dateStr}-${assignmentIndex}`)?.value || '';
                                       if (!p) { alert('Elige persona'); return; }
-                                      onQuickAssign({
+                                      await runCommand(slotKey, {
                                         type: 'addSlotAssign',
                                         dateStr,
-                                        shiftIndex: assignmentIndex, 
+                                        shiftIndex: assignmentIndex,
                                         personId: p,
                                         weekdayRefuerzo: s      // 'auto' | 'mañana' | 'tarde'
-                                      });
+                                      }, { closeOnSuccess: true });
                                     }}
                                   >
                                     Crear y asignar
@@ -3560,44 +3590,63 @@ function AuthenticatedApp(props){
 
   // === AUDITORÍA DE PRESENCIA (online) ===
   const [online, setOnline] = useState({ users: [], at: null });
+  const IDLE_MS = 15 * 60 * 1000;
 
-  // Heartbeat cada 60s
+// Heartbeat con reintentos silenciosos
 useEffect(() => {
   if (!auth?.user || !auth?.token) return;
 
-  let stop = false, t;
+  let stop = false;
+  let timer = null;
+  let retryMs = 5_000;
+  const envBase = (typeof import.meta !== "undefined" && import.meta?.env?.VITE_API_BASE)
+    ? String(import.meta.env.VITE_API_BASE).replace(/\/$/, '')
+    : '';
+  const heartbeatUrl = envBase ? `${envBase}/auth/heartbeat` : '/auth/heartbeat';
 
-  const beat = async () => {
-    try {
-      // intento normal con keepalive
-      await fetch('/auth/heartbeat', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${auth.token}` },
-        keepalive: true,            // ← importante para pestañas en background
-      });
-    } catch {}
-    if (!stop) t = setTimeout(beat, 25_000); // ← cada 25s
+  const schedule = (ms) => {
+    if (stop) return;
+    timer = setTimeout(beat, ms);
   };
 
-  // 1ª marca rápida
-  beat();
+  const beat = async () => {
+    if (stop) return;
+    try {
+      await fetch(heartbeatUrl, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${auth.token}` },
+        keepalive: true,
+      });
+      retryMs = 5_000;
+      schedule(25_000);
+    } catch {
+      retryMs = Math.min(retryMs * 2, 60_000);
+      schedule(retryMs);
+    }
+  };
 
-  // Marca al volver a foco
-  const onVis = () => { if (document.visibilityState === 'visible') beat(); };
+  schedule(0);
+
+  const onVis = () => {
+    if (document.visibilityState === 'visible') {
+      retryMs = 5_000;
+      beat();
+    }
+  };
   document.addEventListener('visibilitychange', onVis);
 
-  // Marca al cerrar/navegar (no esperes respuesta)
   const onUnload = () => {
     try {
       const blob = new Blob([], { type: 'application/octet-stream' });
-      navigator.sendBeacon('/auth/heartbeat', blob);
+      navigator.sendBeacon(heartbeatUrl, blob);
     } catch {}
   };
   window.addEventListener('pagehide', onUnload);
   window.addEventListener('beforeunload', onUnload);
 
   return () => {
-    stop = true; clearTimeout(t);
+    stop = true;
+    if (timer) clearTimeout(timer);
     document.removeEventListener('visibilitychange', onVis);
     window.removeEventListener('pagehide', onUnload);
     window.removeEventListener('beforeunload', onUnload);
@@ -3706,17 +3755,18 @@ useEffect(() => {
   }, [auth.user, isAdmin, autoCloudLoaded]);
 
 function handleCalendarCommand(cmd){
-  if (!isAdmin || !cmd) return;
-   const { dateStr, shiftIndex } = cmd;
-  if (!dateStr) return;
-  // Para 'assign' y 'move' sí exigimos índice numérico
-  if ((cmd.type === 'assign' || cmd.type === 'move') && typeof shiftIndex !== 'number') return;
+  if (!isAdmin || !cmd) return { ok:false, msg:'No autorizado' };
+  const { dateStr, shiftIndex } = cmd;
+  if (!dateStr) return { ok:false, msg:'Fecha no válida' };
+  if ((cmd.type === 'assign' || cmd.type === 'move') && typeof shiftIndex !== 'number') {
+    return { ok:false, msg:'Turno no válido' };
+  }
 
   // Quitar o bloquear
   if (cmd.type === 'clear') {
     forceAssign(dateStr, shiftIndex, cmd.forceEmpty ? '__EMPTY__' : null);
     setTimeout(()=>document.querySelectorAll('details[open]').forEach(d=>d.open=false), 0);
-    return;
+    return { ok:true };
   }
 
 // asignación (valida; si falla muestra motivo; opcionalmente forzar)
@@ -3724,17 +3774,17 @@ if (cmd.type === 'assign' && typeof shiftIndex === 'number') {
   // 0) slot y estado actual
   const cell  = ASS[dateStr] || [];
   const slot  = cell[shiftIndex];
-  if (!slot || !slot.shift) { showToast('Turno no encontrado'); return; }
+  if (!slot || !slot.shift) { showToast('Turno no encontrado'); return { ok:false, msg:'Turno no encontrado' }; }
 
   // si eliges lo mismo, no cambiamos nada (pero avisamos)
   const target  = String(cmd.personId || '');
   const current = String(slot.personId || '');
-  if (!target) { showToast('Sin cambios'); return; }
-  if (target === current) { showToast('Sin cambios'); return; }
+  if (!target) { showToast('Sin cambios'); return { ok:false, msg:'Sin cambios' }; }
+  if (target === current) { showToast('Sin cambios'); return { ok:false, msg:'Sin cambios' }; }
 
   // 1) validación "dura"
   const v = validateCanAssign({ dateStr, shift: slot.shift, personId: target });
-  if (!v.ok && !cmd.force) { showToast(v.msg); return; } // deja el panel abierto
+  if (!v.ok && !cmd.force) { showToast(v.msg); return { ok:false, msg:v.msg }; }
 
   // 2) aplicar (normal o forzado)
   forceAssign(dateStr, shiftIndex, target);
@@ -3742,7 +3792,7 @@ if (cmd.type === 'assign' && typeof shiftIndex === 'number') {
 
   // cerramos el panel solo si se aplicó
   setTimeout(()=>document.querySelectorAll('details[open]').forEach(d=>d.open=false), 0);
-  return;
+  return { ok:true };
 }
 
 if (cmd.type === 'move' && typeof cmd.fromShiftIndex === 'number' && cmd.personId){
@@ -3751,16 +3801,16 @@ if (cmd.type === 'move' && typeof cmd.fromShiftIndex === 'number' && cmd.personI
     forceAssign(dateStr, cmd.fromShiftIndex, cmd.leaveEmpty ? '__EMPTY__' : null);
     forceAssign(dateStr, cmd.shiftIndex, cmd.personId);
     setTimeout(()=>document.querySelectorAll('details[open]').forEach(d=>d.open=false), 0);
-    return;
+    return { ok:true };
   }
   const shift = ASS[dateStr]?.[cmd.shiftIndex]?.shift;
-  if (!shift) { showToast('Destino no encontrado'); return; }
+  if (!shift) { showToast('Destino no encontrado'); return { ok:false, msg:'Destino no encontrado' }; }
   const v = validateCanAssign({ dateStr, shift, personId: cmd.personId });
-  if (!v.ok) { showToast(v.msg); return; }
+  if (!v.ok) { showToast(v.msg); return { ok:false, msg:v.msg }; }
   forceAssign(dateStr, cmd.shiftIndex, cmd.personId);
   forceAssign(dateStr, cmd.fromShiftIndex, cmd.leaveEmpty ? '__EMPTY__' : null);
   setTimeout(()=>document.querySelectorAll('details[open]').forEach(d=>d.open=false), 0);
-  return;
+  return { ok:true };
 }
 
 
@@ -3782,7 +3832,7 @@ if (cmd.type === 'addSlotAssign' && cmd.personId) {
   showToast('Refuerzo creado y asignado');
   // ⬅️ cierra el panel 👤 tras la acción
   setTimeout(()=>document.querySelectorAll('details[open]').forEach(d=>d.open=false), 0);
-  return;
+  return { ok:true };
 }
 
 // eliminar UN refuerzo del día (sin tocar el turno base)
@@ -3793,48 +3843,56 @@ if (cmd.type === 'removeExtraSlot') {
   // No elimines si sólo queda el turno base
   const baseCount = isWE ? 1 : (state.weekdayShifts?.length || 1);
   const slotsHoy = (ASS[dateStr] || []).length;
-  if (slotsHoy <= baseCount) { showToast('No hay refuerzos que eliminar'); return; }
+  if (slotsHoy <= baseCount) { showToast('No hay refuerzos que eliminar'); return { ok:false, msg:'No hay refuerzos que eliminar' }; }
 
+  let removed = false;
+  let message = 'Refuerzo eliminado';
   setState(prev => {
     const next = structuredClone(prev);
     const list = next.events || [];
 
-    // Prioriza eventos de 1 día y etiqueta "Refuerzo manual"
     let idx = list.findIndex(e =>
       e.label==='Refuerzo manual' &&
       e.start===e.end && e.start===dateStr &&
       (isWE ? (e.weekendExtraSlots||0) : (e.weekdaysExtraSlots||0)) > 0
     );
     if (idx < 0) {
-      // fallback: cualquier evento que cubra el día con extra>0
       idx = list.findIndex(e =>
         parseDateValue(e.start) <= d && d <= parseDateValue(e.end) &&
         (isWE ? (e.weekendExtraSlots||0) : (e.weekdaysExtraSlots||0)) > 0
       );
     }
-    if (idx < 0) { showToast('No hay refuerzos para eliminar en este día'); return next; }
+    if (idx < 0) {
+      message = 'No hay refuerzos para eliminar en este día';
+      return prev;
+    }
 
     const ev = {...list[idx]};
     if (isWE) ev.weekendExtraSlots = Math.max(0,(ev.weekendExtraSlots||0)-1);
     else      ev.weekdaysExtraSlots= Math.max(0,(ev.weekdaysExtraSlots||0)-1);
 
-    // Si el evento queda a cero y sólo era de 1 día, elimínalo
     if ((ev.weekendExtraSlots||0)===0 && (ev.weekdaysExtraSlots||0)===0 && ev.start===ev.end) {
       list.splice(idx,1);
     } else {
       list[idx] = ev;
     }
     next.events = list;
-    showToast('Refuerzo eliminado');
+    removed = true;
     return next;
   });
 
-  // ⬅️ cierra el panel 👤
+  showToast(message);
+
+  if (!removed) {
+    return { ok:false, msg: message };
+  }
+
   setTimeout(()=>document.querySelectorAll('details[open]').forEach(d=>d.open=false), 0);
-  return;
+  return { ok:true };
 
  }
 
+ return { ok:false };
 }
 
 // ---------- Render principal ----------
@@ -3973,6 +4031,7 @@ if (cmd.type === 'removeExtraSlot') {
 
 
           <Card title="Auditoría (últimos 100)">
+  <button onClick={exportAuditCsv} className="mb-2 px-2 py-0.5 border rounded text-xs">Export CSV</button>
   <div className="max-h-40 overflow-auto text-xs">
     {((state.audit||[]).slice(-100).reverse()).map((e,i)=>(
       <div key={i} className="py-0.5 border-b last:border-0">
@@ -4063,13 +4122,12 @@ if (cmd.type === 'removeExtraSlot') {
   <Card title="Calendario diario (admin)">
     <CalendarView
       startDate={weeklyStart}
-      weeks={userWeeks} 
+      weeks={userWeeks}
       assignments={ASS}
       people={state.people}
       isAdmin={isAdmin}
       onOpenDay={(ds)=>setModalDayProp(ds)}
       onQuickAssign={handleCalendarCommand}
-      forceAssign={forceAssign}   // ← aquí va el handler nuevo
       province={state.province}
       closeOnHolidays={state.closeOnHolidays}
       closedExtraDates={state.closedExtraDates}
