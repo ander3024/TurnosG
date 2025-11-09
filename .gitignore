@@ -13,22 +13,4 @@ src/App.jsx.backup_*
 # build
 /dist
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-changes.patch
-changes.patch
-=======
-
-# Local patches
->>>>>>> codex-pr
-=======
-
-changes.patch
-changes.patch
-changes.patch
-changes.patch
->>>>>>> codex-pr
-=======
->>>>>>> codex-verify
 changes.patch
