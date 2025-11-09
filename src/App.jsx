@@ -130,7 +130,19 @@ function diffAssignments(base, candidate){
       const curId = current?.personId || null;
       const nextId = next?.personId || null;
       if (curId === nextId) continue;
-      diffs.push({ dateStr, slotIndex: i, fromPerson: curId, toPerson: nextId, shift: next?.shift || current?.shift || null });
+      const shift = next?.shift || current?.shift || null;
+      const shiftLabel = shift?.label || `Slot ${i+1}`;
+      const start = shift?.start || next?.start || current?.start || "";
+      const end = shift?.end || next?.end || current?.end || "";
+      diffs.push({
+        dateStr,
+        slotIndex: i,
+        shiftLabel,
+        start,
+        end,
+        fromPerson: curId,
+        toPerson: nextId
+      });
     }
   }
   return diffs;
@@ -1599,17 +1611,43 @@ const assignmentsImproved = useMemo(()=> improveConciliation({
     else showToast('Batch no encontrado');
   }, [setState, showToast]);
 
+  const personById = useMemo(() => {
+    const m = new Map();
+    (state.people || []).forEach(person => {
+      if (!person?.id) return;
+      m.set(person.id, person);
+    });
+    return m;
+  }, [state.people]);
+
+  const pName = useCallback((id) => {
+    if (!id) return "Vacío";
+    return personById.get(id)?.name || id || "—";
+  }, [personById]);
+
+  const pColor = useCallback((id) => {
+    if (!id) return "#94a3b8";
+    return personById.get(id)?.color || "#64748b";
+  }, [personById]);
+
   const sandboxComparison = useMemo(() => {
-    if (!activeSandboxLayer) return { perPerson: [], diffDates: [], totalChanges: 0 };
+    if (!activeSandboxLayer) return { perPerson: [], diffsByDate: [], totalChanges: 0 };
     const perPerson = compareAssignments(ASS, activeSandboxLayer.assignments);
-    const diffs = diffAssignments(ASS, activeSandboxLayer.assignments);
-    const map = new Map();
-    for (const diff of diffs){
-      map.set(diff.dateStr, (map.get(diff.dateStr) || 0) + 1);
-    }
-    const diffDates = Array.from(map.entries()).map(([dateStr, changes]) => ({ dateStr, changes })).sort((a,b)=>a.dateStr.localeCompare(b.dateStr));
-    return { perPerson, diffDates, totalChanges: diffs.length };
-  }, [ASS, activeSandboxLayer]);
+    const diffs = diffAssignments(ASS, activeSandboxLayer.assignments).map(diff => ({
+      ...diff,
+      fromName: pName(diff.fromPerson),
+      toName: pName(diff.toPerson)
+    }));
+    diffs.sort((a,b) => {
+      const dateCompare = (a.dateStr || "").localeCompare(b.dateStr || "");
+      if (dateCompare !== 0) return dateCompare;
+      const startA = a.start || "";
+      const startB = b.start || "";
+      if (startA !== startB) return startA.localeCompare(startB);
+      return (a.slotIndex ?? 0) - (b.slotIndex ?? 0);
+    });
+    return { perPerson, diffsByDate: diffs, totalChanges: diffs.length };
+  }, [ASS, activeSandboxLayer, pName]);
 
   // ---------- Hooks que deben ejecutarse SIEMPRE ----------
   const [payroll,setPayroll]=useState({ from: state.startDate, to: toDateValue(addDays(startDate, state.weeks*7-1)) });
@@ -2249,12 +2287,56 @@ function SandboxObjectivesCard({ objectives, onChange }){
   );
 }
 
-function SandboxComparatorCard({ activeLayer, comparison }){
+function SandboxComparatorCard({ activeLayer, comparison, pName, pColor, onExportDiffs }){
   const rows = comparison?.perPerson || [];
-  const diffDates = comparison?.diffDates || [];
+  const diffsByDate = comparison?.diffsByDate || [];
+
+  const renderPerson = (personId) => {
+    if (!personId) {
+      return <span className="text-slate-400">Vacío</span>;
+    }
+    return (
+      <span className="inline-flex items-center gap-2">
+        <span className="inline-block w-3 h-3 rounded-full" style={{ backgroundColor: pColor(personId) }} />
+        <span>{pName(personId)}</span>
+      </span>
+    );
+  };
+
+  const handleExportDiffs = () => {
+    if (!diffsByDate.length) return;
+    if (typeof onExportDiffs === "function") {
+      onExportDiffs(diffsByDate);
+      return;
+    }
+    const header = ["fecha","turno","inicio","fin","de","a"];
+    const csvRows = diffsByDate.map(item => [
+      item.dateStr || "",
+      item.shiftLabel || "",
+      item.start || "",
+      item.end || "",
+      pName(item.fromPerson),
+      pName(item.toPerson)
+    ]);
+    const csv = [header, ...csvRows].map(line => line.map(value => {
+      if (value == null) return "";
+      const str = String(value);
+      return /[",\n]/.test(str) ? `"${str.replace(/"/g,'""')}"` : str;
+    }).join(",")).join("\n");
+    const layerName = activeLayer?.name ? activeLayer.name.replace(/\s+/g, '_') : 'sandbox';
+    downloadBlob(`sandbox_diffs_${layerName}.csv`, csv, "text/csv;charset=utf-8");
+  };
+
   return (
     <Card title={`Comparador sandbox · ${activeLayer?.name || ''}`}>
-      <div className="text-sm text-slate-600 mb-3">Cambios totales respecto al cuadrante real: {comparison?.totalChanges || 0}</div>
+      <div className="flex items-center justify-between gap-3 mb-3 text-sm text-slate-600">
+        <span>Cambios totales respecto al cuadrante real: {comparison?.totalChanges || 0}</span>
+        {diffsByDate.length > 0 && (
+          <button type="button" className="px-2 py-1 rounded border text-xs" onClick={handleExportDiffs}>
+            Exportar difs CSV
+          </button>
+        )}
+      </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
           <h3 className="text-xs font-semibold mb-2 uppercase tracking-wide text-slate-500">Por persona</h3>
@@ -2273,8 +2355,15 @@ function SandboxComparatorCard({ activeLayer, comparison }){
               )}
               {rows.map(row => (
                 <tr key={row.personId}>
-                  <td className="px-2 py-1 border">{row.personId}</td>
-                  <td className={`px-2 py-1 border ${row.diffMinutes>0?'text-emerald-600':row.diffMinutes<0?'text-rose-600':''}`}>{(row.diffMinutes/60).toFixed(1)}h</td>
+                  <td className="px-2 py-1 border">
+                    <div className="flex items-center gap-2">
+                      <span className="inline-block w-3 h-3 rounded-full" style={{ backgroundColor: pColor(row.personId) }} />
+                      <span>{pName(row.personId)}</span>
+                    </div>
+                  </td>
+                  <td className={`px-2 py-1 border ${row.diffMinutes>0?'text-emerald-600':row.diffMinutes<0?'text-rose-600':''}`}>
+                    {(row.diffMinutes/60).toFixed(1)}h
+                  </td>
                   <td className="px-2 py-1 border">{row.diffDays >= 0 ? `+${row.diffDays}` : row.diffDays}</td>
                   <td className="px-2 py-1 border">{row.diffWeekends >= 0 ? `+${row.diffWeekends}` : row.diffWeekends}</td>
                 </tr>
@@ -2289,17 +2378,28 @@ function SandboxComparatorCard({ activeLayer, comparison }){
               <thead className="bg-slate-100 text-left">
                 <tr>
                   <th className="px-2 py-1 border">Fecha</th>
-                  <th className="px-2 py-1 border">Cambios</th>
+                  <th className="px-2 py-1 border">Turno</th>
+                  <th className="px-2 py-1 border">De</th>
+                  <th className="px-2 py-1 border">A</th>
                 </tr>
               </thead>
               <tbody>
-                {diffDates.length === 0 && (<tr><td className="px-2 py-2 text-center text-slate-500" colSpan={2}>Sin cambios</td></tr>)}
-                {diffDates.map(item => (
-                  <tr key={item.dateStr}>
-                    <td className="px-2 py-1 border">{item.dateStr}</td>
-                    <td className="px-2 py-1 border">{item.changes}</td>
-                  </tr>
-                ))}
+                {diffsByDate.length === 0 && (
+                  <tr><td className="px-2 py-2 text-center text-slate-500" colSpan={4}>Sin cambios</td></tr>
+                )}
+                {diffsByDate.map(item => {
+                  const range = item.start && item.end ? `${item.start}–${item.end}` : item.start || item.end || '';
+                  const turnLabel = range ? `${item.shiftLabel} · ${range}` : item.shiftLabel;
+                  const key = `${item.dateStr || 'fecha'}_${item.start || 'start'}_${item.slotIndex ?? 0}_${item.fromPerson || 'from'}_${item.toPerson || 'to'}`;
+                  return (
+                    <tr key={key}>
+                      <td className="px-2 py-1 border whitespace-nowrap">{item.dateStr}</td>
+                      <td className="px-2 py-1 border">{turnLabel}</td>
+                      <td className="px-2 py-1 border">{renderPerson(item.fromPerson)}</td>
+                      <td className="px-2 py-1 border">{renderPerson(item.toPerson)}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -4908,6 +5008,8 @@ if (cmd.type === 'removeExtraSlot') {
             <SandboxComparatorCard
               activeLayer={activeSandboxLayer}
               comparison={sandboxComparison}
+              pName={pName}
+              pColor={pColor}
             />
           )}
             {(isAdmin && (state?.debug?.weekendAudit===true)) && (
