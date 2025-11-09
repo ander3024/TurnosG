@@ -1303,73 +1303,57 @@ if (!auth.user || !auth.token) {
     setState(prev => ({ ...prev, overrides: next }));
     showToast("Overrides del rango visible eliminados");
   }
-  
-function duplicateVisibleToNextWeek() {
+
+function duplicateVisibleToNextWeek(){
   const from = weeklyStart;
-  const to   = addDays(weeklyStart, userWeeks * 7 - 1);
-  const periodEnd = addDays(startDate, state.weeks * 7 - 1);
+  const to   = addDays(weeklyStart, userWeeks*7 - 1);
+  const periodEnd = addDays(startDate, state.weeks*7 - 1);
 
   const out = structuredClone(state.overrides || {});
-  let copiados = 0, saltados = 0;
-  const copiedBy  = new Map(); // pid -> count
-  const skippedBy = new Map(); // pid -> count
-  const personName = new Map((state.people || []).map(p => [p.id, p.name]));
+  let copiados = 0, saltados = 0, saltadosConflicto = 0;
+  const appliedPerPerson = new Map();
+  const skippedPerPerson = new Map();
 
-  const inc = (map, pid) => { if (!pid) return; map.set(pid, (map.get(pid) || 0) + 1); };
-
-  // Recorre los días visibles
   for (let d = new Date(from); d <= to; d = addDays(d, 1)) {
     const srcDs = toDateValue(d);
     const tgtDs = toDateValue(addDays(d, 7));
+    if (parseDateValue(tgtDs) > periodEnd) { saltados++; continue; }
 
-    // Si el destino se sale del rango de semanas configuradas, todo lo de hoy cuenta como "saltado"
-    if (parseDateValue(tgtDs) > periodEnd) {
-      for (const a of (ASS[srcDs] || [])) {
-        if (!a?.personId) continue;
-        saltados++;
-        inc(skippedBy, a.personId);
-      }
-      continue;
-    }
-
-    const cell = ASS[srcDs] || [];
-    if (!cell.length) continue;
+    const cell = (ASS[srcDs] || []);
+    if (!cell.length) { continue; }
 
     for (let i = 0; i < cell.length; i++) {
       const a = cell[i];
-      if (!a?.personId) continue; // no copiar vacíos
-
+      if (!a.personId) continue; // no copiar vacíos
       const key = `${a.shift.start}-${a.shift.end}-${a.shift.label || `T${i+1}`}`;
       out[tgtDs] = out[tgtDs] || {};
-
-      // Si ya hay override en destino para esa clave, no lo pisamos → saltado
-      if (out[tgtDs][key] != null) {
+      if (out[tgtDs][key] != null) { // ya había override → no pisar
         saltados++;
-        inc(skippedBy, a.personId);
+        saltadosConflicto++;
+        skippedPerPerson.set(a.personId, (skippedPerPerson.get(a.personId) || 0) + 1);
         continue;
       }
-
-      // Copiamos como override
       out[tgtDs][key] = a.personId;
       copiados++;
-      inc(copiedBy, a.personId);
+      appliedPerPerson.set(a.personId, (appliedPerPerson.get(a.personId) || 0) + 1);
     }
   }
 
   setState(prev => ({ ...prev, overrides: out }));
-
-  // Construye resumen por persona
-  const fmt = (map) => {
-    const arr = Array.from(map.entries());
-    if (!arr.length) return '—';
-    return arr
-      .sort((a, b) => (personName.get(a[0]) || a[0]).localeCompare(personName.get(b[0]) || b[0]))
-      .map(([pid, n]) => `${personName.get(pid) || pid}: ${n}`)
-      .join(', ');
+  const nameOf = (pid) => (state.people.find(p => p.id === pid)?.name || pid);
+  const formatMap = (map) => {
+    return Array.from(map.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([pid, count]) => `${nameOf(pid)}:${count}`)
+      .join(", ");
   };
-
-  // Texto con la forma que luego grepeamos: "Duplicadas ... · Saltadas ..."
-  showToast(`Duplicadas ${copiados} asign. (${fmt(copiedBy)}) · Saltadas ${saltados} (${fmt(skippedBy)})`);
+  const appliedList = formatMap(appliedPerPerson);
+  const skippedList = formatMap(skippedPerPerson);
+  const msgParts = [
+    `Duplicadas ${copiados} asign.${appliedList ? ` (${appliedList})` : ""}`,
+    `Saltadas ${saltados}${skippedList && saltadosConflicto ? ` (${skippedList})` : ""}`
+  ];
+  showToast(msgParts.join(" · "));
 }
 
 function undoLastOverride(){
@@ -2067,6 +2051,7 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
   const todayStr = toDateValue(new Date());
   const workingSet = new Set(workingHolidays||[]);
   const [menuState, setMenuState] = useState({});
+  const menuPendingRef = useRef(new Set());
 
   const closeMenus = useCallback(() => {
     setTimeout(()=>document.querySelectorAll('details[open]').forEach(d=>{ d.open = false; }), 0);
@@ -2074,10 +2059,17 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
 
   const runCommand = useCallback(async (slotKey, payload, opts = {}) => {
     if (typeof onQuickAssign !== 'function') return { ok:false, msg:'Acción no disponible' };
+
+    if (menuPendingRef.current.has(slotKey)) {
+      return { ok:false, msg:'Acción en curso' };
+    }
+
+    menuPendingRef.current.add(slotKey);
     setMenuState(prev => ({
       ...prev,
       [slotKey]: { ...(prev[slotKey] || {}), pending: true, error: '' }
     }));
+
     try {
       const result = onQuickAssign(payload);
       const resolved = (result && typeof result.then === 'function') ? await result : result;
@@ -2094,6 +2086,8 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
         [slotKey]: { ...(prev[slotKey] || {}), pending: false, error: err?.message || 'Error inesperado' }
       }));
       throw err;
+    } finally {
+      menuPendingRef.current.delete(slotKey);
     }
   }, [onQuickAssign, closeMenus]);
 
@@ -3733,29 +3727,6 @@ useEffect(() => {
     return () => clearInterval(id);
   }, [auth?.user, auth?.token]);
 
-  // === Export CSV de auditoría (últimos 100) ===
-const exportAuditCsv = React.useCallback(() => {
-  const audits = (state.audit || []).slice(-100).reverse();
-  const rows = [["ts","actor","action","dateStr"].join(",")];
-
-  audits.forEach(e => {
-    const r = [
-      e?.ts || "",
-      e?.actor || "sys",
-      e?.action || "",
-      e?.dateStr || ""
-    ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(",");
-    rows.push(r);
-  });
-
-  const blob = new Blob([rows.join("\n")], { type: "text/csv;charset=utf-8;" });
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = `audit_${new Date().toISOString().slice(0,10)}.csv`;
-  a.click();
-}, [state.audit]);
-
-
 
   // --- scope admin (robusto tras refactor) ---
   // Aliases seguros para modal del día (local o via props)
@@ -4069,12 +4040,8 @@ if (cmd.type === 'removeExtraSlot') {
 {isAdmin && <AdminSessionsAuditCard auth={auth} showToast={showToast} />}
 
 
-  <Card title="Auditoría (últimos 100)">
-  {typeof exportAuditCsv === "function" && (
-  <button onClick={exportAuditCsv} className="mb-2 px-2 py-0.5 border rounded text-xs">
-    Export CSV
-  </button>
-)}
+          <Card title="Auditoría (últimos 100)">
+  <button onClick={exportAuditCsv} className="mb-2 px-2 py-0.5 border rounded text-xs">Export CSV</button>
   <div className="max-h-40 overflow-auto text-xs">
     {((state.audit||[]).slice(-100).reverse()).map((e,i)=>(
       <div key={i} className="py-0.5 border-b last:border-0">
