@@ -48,6 +48,178 @@ const PUBLIC_SPACE = { id: "turnos-2025", readToken: "READ-2025" };
 const API_BASE = "/api";
 const DEFAULT_TOAST_MS = 2000;
 
+const SANDBOX_DEFAULT = {
+  active: null,
+  layers: [],
+  snapshots: [],
+  objectives: { fairness: 1, conciliacion: 1, priority: 1, minChanges: 1 },
+  appliedBatches: []
+};
+
+function normalizeSandbox(raw){
+  const base = { ...SANDBOX_DEFAULT, ...(raw || {}) };
+  base.layers = Array.isArray(base.layers) ? base.layers.map(layer => ({
+    id: layer.id || `layer-${cryptoRandom()}`,
+    name: layer.name || "Capa",
+    createdAt: layer.createdAt || new Date().toISOString(),
+    assignments: cloneAssignmentsMap(layer.assignments || {}),
+    metrics: layer.metrics || null,
+    lastOptimizedAt: layer.lastOptimizedAt || null
+  })) : [];
+  base.snapshots = Array.isArray(base.snapshots) ? base.snapshots.map(snap => ({
+    id: snap.id || `snap-${cryptoRandom()}`,
+    layerId: snap.layerId || base.active,
+    label: snap.label || "Snapshot",
+    createdAt: snap.createdAt || new Date().toISOString(),
+    assignments: cloneAssignmentsMap(snap.assignments || {})
+  })) : [];
+  base.appliedBatches = Array.isArray(base.appliedBatches) ? base.appliedBatches.map(batch => ({
+    batchId: batch.batchId || `batch-${cryptoRandom()}`,
+    layerId: batch.layerId || base.active,
+    createdAt: batch.createdAt || new Date().toISOString(),
+    changes: Array.isArray(batch.changes) ? batch.changes.map(ch => ({ ...ch })) : []
+  })) : [];
+  if (typeof base.active !== 'string' && base.layers.length) {
+    base.active = base.layers[0].id;
+  }
+  base.objectives = {
+    fairness: Number(base.objectives?.fairness ?? 1) || 0,
+    conciliacion: Number(base.objectives?.conciliacion ?? 1) || 0,
+    priority: Number(base.objectives?.priority ?? 1) || 0,
+    minChanges: Number(base.objectives?.minChanges ?? 1) || 0
+  };
+  return base;
+}
+
+function cloneAssignmentsMap(assignments){
+  const out = {};
+  for (const key of Object.keys(assignments || {})){
+    out[key] = (assignments[key] || []).map(slot => ({ ...slot }));
+  }
+  return out;
+}
+
+function cryptoRandom(){
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues){
+    const arr = new Uint32Array(1);
+    crypto.getRandomValues(arr);
+    return arr[0].toString(16);
+  }
+  return Math.random().toString(16).slice(2);
+}
+
+function deepClone(value){
+  if (typeof structuredClone === 'function') {
+    try { return structuredClone(value); } catch { /* noop */ }
+  }
+  try { return JSON.parse(JSON.stringify(value)); } catch { return value; }
+}
+
+function downloadBlob(name, content, mime="application/json"){ const blob = new Blob([content],{ type:mime }); const url = URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=name; document.body.appendChild(a); a.click(); setTimeout(()=>{ document.body.removeChild(a); URL.revokeObjectURL(url); },0); }
+
+function diffAssignments(base, candidate){
+  const diffs = [];
+  const keys = new Set([...(base ? Object.keys(base) : []), ...(candidate ? Object.keys(candidate) : [])]);
+  for (const dateStr of keys){
+    const from = base?.[dateStr] || [];
+    const to = candidate?.[dateStr] || [];
+    const len = Math.max(from.length, to.length);
+    for (let i=0;i<len;i++){
+      const current = from[i] || null;
+      const next = to[i] || null;
+      const curId = current?.personId || null;
+      const nextId = next?.personId || null;
+      if (curId === nextId) continue;
+      diffs.push({ dateStr, slotIndex: i, fromPerson: curId, toPerson: nextId, shift: next?.shift || current?.shift || null });
+    }
+  }
+  return diffs;
+}
+
+function assignmentsToCSV(assignments){
+  const rows = [["date","slot","label","start","end","personId"]];
+  const dates = Object.keys(assignments||{}).sort();
+  for (const ds of dates){
+    const arr = assignments[ds] || [];
+    arr.forEach((slot, idx) => {
+      rows.push([
+        ds,
+        String(idx+1),
+        slot?.shift?.label || '',
+        slot?.shift?.start || '',
+        slot?.shift?.end || '',
+        slot?.personId || ''
+      ]);
+    });
+  }
+  return rows.map(r => r.map(value => {
+    if (value == null) return '';
+    const str = String(value);
+    if (str.includes('"') || str.includes(',') || str.includes('\n')){
+      return `"${str.replace(/"/g,'""')}"`;
+    }
+    return str;
+  }).join(',')).join('\n');
+}
+
+function shiftKeyForSlot(slot, index){
+  if (slot?.shift){
+    const label = slot.shift.label || `T${(index||0)+1}`;
+    return `${slot.shift.start}-${slot.shift.end}-${label}`;
+  }
+  return `slot-${(index||0)+1}`;
+}
+
+function buildTimeOffDateIndex(timeOffs){
+  const map = {};
+  for (const to of timeOffs || []){
+    const effective = (to.type === 'libranza') || (to.status === 'aprobada');
+    if (!effective) continue;
+    const dates = expandRange(to.start, to.end);
+    for (const ds of dates){
+      map[to.personId] = map[to.personId] || [];
+      map[to.personId].push(ds);
+    }
+  }
+  return map;
+}
+
+function compareAssignments(base, candidate){
+  const perPerson = new Map();
+  const ensure = (pid) => {
+    if (!perPerson.has(pid)) perPerson.set(pid, { personId: pid, baseMinutes:0, candidateMinutes:0, baseDays:0, candidateDays:0, baseWeekends:0, candidateWeekends:0 });
+    return perPerson.get(pid);
+  };
+  const accumulate = (source, fieldPrefix) => {
+    for (const [dateStr, arr] of Object.entries(source || {})){
+      const weekend = isWeekend(parseDateValue(dateStr));
+      const seenDay = new Map();
+      for (const slot of arr){
+        if (!slot?.personId) continue;
+        const stats = ensure(slot.personId);
+        stats[`${fieldPrefix}Minutes`] += effectiveMinutes(slot.shift);
+        if (!seenDay.get(slot.personId)){
+          stats[`${fieldPrefix}Days`] += 1;
+          seenDay.set(slot.personId, true);
+        }
+        if (weekend) stats[`${fieldPrefix}Weekends`] += 1;
+      }
+    }
+  };
+  accumulate(base, 'base');
+  accumulate(candidate, 'candidate');
+  const rows = Array.from(perPerson.values()).map(stat => ({
+    personId: stat.personId,
+    diffMinutes: stat.candidateMinutes - stat.baseMinutes,
+    diffDays: stat.candidateDays - stat.baseDays,
+    diffWeekends: stat.candidateWeekends - stat.baseWeekends,
+    baseMinutes: stat.baseMinutes,
+    candidateMinutes: stat.candidateMinutes
+  }));
+  rows.sort((a,b)=>Math.abs(b.diffMinutes)-Math.abs(a.diffMinutes));
+  return rows;
+}
+
 function resolveApiUrl(path) {
   if (typeof path !== "string" || !path) return API_BASE;
   if (/^https?:\/\//i.test(path)) return path;
@@ -104,7 +276,7 @@ const HOLIDAYS_2025 = {
 // ===================== Persistencia local =====================
 const STORAGE_KEY = "gestor-turnos-4p-v10";
 function usePersistentState(defaultValue){
-  const [state,setState]=useState(()=>{ try{ const raw=localStorage.getItem(STORAGE_KEY); return raw?JSON.parse(raw):defaultValue; }catch{ return defaultValue; } });
+  const [state,setState]=useState(()=>{ try{ const raw=localStorage.getItem(STORAGE_KEY); const parsed = raw?JSON.parse(raw):defaultValue; return { ...parsed, sandbox: normalizeSandbox(parsed?.sandbox) }; }catch{ return { ...defaultValue, sandbox: normalizeSandbox(defaultValue?.sandbox) }; } });
   useEffect(()=>{ try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }catch{} },[state]);
   return [state,setState];
 }
@@ -973,7 +1145,8 @@ export default function App(){
     refuerzoPolicy:{ allowedMonths:[1,2,3,4,5,9,10,11,12], includeSaturdays:false,
       maxPerWeekPerPerson:1, maxPerMonthPerPerson:4, horizonDefault:'fin',
       goalFill:true, skipPast:true, maxEscalation:3, weekBoost:1, monthBoost:2 },
-    managed:{ lastConciliationBatchId:null }
+    managed:{ lastConciliationBatchId:null },
+    sandbox: normalizeSandbox({})
 });
 
 function forceAssign(dateStr, assignmentIndex, personId){
@@ -1045,6 +1218,7 @@ function forceAssign(dateStr, assignmentIndex, personId){
           adjacencyWindow: 1
         };
       }
+      payload.sandbox = normalizeSandbox(payload.sandbox);
       if (typeof window !== "undefined") window.__OFF_POLICY__ = payload.offPolicy || {};
       setState(prev=>({ ...prev, ...payload }));
       if (!silent) { setUI(prev=>({...prev, sync:"ok"})); showToast("Cargado de nube"); }
@@ -1144,6 +1318,298 @@ const assignmentsImproved = useMemo(()=> improveConciliation({
       startDate, weeks:state.weeks, vacationDaysNatural:state.vacationDaysNatural,
       timeOffs:state.timeOffs, province:state.province, consumeVacationOnHoliday:state.consumeVacationOnHoliday
     }), [ASS, state.people, state.weekdayShifts, state.weekendShift, state.annualTargetHours, startDate, state.weeks, state.vacationDaysNatural, state.timeOffs, state.province, state.consumeVacationOnHoliday]);
+
+  const sandboxState = useMemo(() => normalizeSandbox(state.sandbox), [state.sandbox]);
+  const activeSandboxLayer = useMemo(() => sandboxState.layers.find(l => l.id === sandboxState.active) || null, [sandboxState]);
+  const activeSnapshots = useMemo(() => sandboxState.snapshots.filter(s => s.layerId === sandboxState.active), [sandboxState]);
+
+  const updateSandbox = useCallback((mutator) => {
+    setState(prev => {
+      const current = normalizeSandbox(prev.sandbox);
+      const mutated = mutator(deepClone(current));
+      return { ...prev, sandbox: normalizeSandbox(mutated) };
+    });
+  }, [setState]);
+
+  const sandboxWorkerRef = useRef(null);
+  const [sandboxRuntime, setSandboxRuntime] = useState({ jobs: {} });
+
+  useEffect(() => {
+    if (typeof Worker === 'undefined') return () => {};
+    const worker = new Worker(new URL('./workers/optimizer.js', import.meta.url), { type:'module' });
+    sandboxWorkerRef.current = worker;
+    worker.onmessage = (event) => {
+      const { data } = event;
+      if (!data || typeof data !== 'object') return;
+      if (data.type === 'result') {
+        const { layerId, result } = data;
+        setSandboxRuntime(prev => ({
+          ...prev,
+          jobs: { ...prev.jobs, [layerId]: { status:'ok', completedAt: Date.now(), changes: result?.changes?.length || 0, jobId: data.jobId || null } }
+        }));
+        setState(prev => {
+          const next = deepClone(prev);
+          const sandbox = normalizeSandbox(next.sandbox);
+          const idx = sandbox.layers.findIndex(l => l.id === layerId);
+          if (idx !== -1) {
+            sandbox.layers[idx] = {
+              ...sandbox.layers[idx],
+              assignments: cloneAssignmentsMap(result?.assignments || {}),
+              metrics: result?.metrics || null,
+              lastOptimizedAt: new Date().toISOString(),
+              lastChanges: Array.isArray(result?.changes) ? result.changes.length : 0
+            };
+          }
+          next.sandbox = sandbox;
+          return next;
+        });
+      } else if (data.type === 'error') {
+        setSandboxRuntime(prev => ({
+          ...prev,
+          jobs: { ...prev.jobs, [data.layerId]: { status:'error', message: data.error || 'Error en optimización', completedAt: Date.now(), jobId: data.jobId || null } }
+        }));
+      }
+    };
+    return () => {
+      worker.terminate();
+      sandboxWorkerRef.current = null;
+    };
+  }, [setState]);
+
+  const sandboxCreateFromReal = useCallback((name) => {
+    const layerAssignments = cloneAssignmentsMap(ASS);
+    updateSandbox(current => {
+      const next = deepClone(current);
+      const layerName = (name && name.trim()) || `Capa ${next.layers.length + 1}`;
+      const layer = {
+        id: `layer-${Date.now()}`,
+        name: layerName,
+        createdAt: new Date().toISOString(),
+        assignments: layerAssignments,
+        metrics: null,
+        lastOptimizedAt: null
+      };
+      next.layers = [...next.layers, layer];
+      next.active = layer.id;
+      return next;
+    });
+  }, [ASS, updateSandbox]);
+
+  const sandboxActivate = useCallback((layerId) => {
+    if (!layerId) return;
+    updateSandbox(current => {
+      const next = deepClone(current);
+      if (next.layers.some(l => l.id === layerId)) next.active = layerId;
+      return next;
+    });
+  }, [updateSandbox]);
+
+  const sandboxDuplicate = useCallback((layerId) => {
+    updateSandbox(current => {
+      const next = deepClone(current);
+      const idx = next.layers.findIndex(l => l.id === layerId);
+      if (idx === -1) return next;
+      const source = next.layers[idx];
+      const copy = {
+        ...source,
+        id: `layer-${Date.now()}`,
+        name: `${source.name} (copia)`
+      };
+      copy.assignments = cloneAssignmentsMap(source.assignments || {});
+      next.layers = [...next.layers.slice(0, idx + 1), copy, ...next.layers.slice(idx + 1)];
+      next.active = copy.id;
+      return next;
+    });
+  }, [updateSandbox]);
+
+  const sandboxDelete = useCallback((layerId) => {
+    updateSandbox(current => {
+      const next = deepClone(current);
+      next.layers = next.layers.filter(l => l.id !== layerId);
+      if (next.active === layerId) next.active = next.layers[0]?.id || null;
+      next.snapshots = next.snapshots.filter(s => s.layerId !== layerId);
+      next.appliedBatches = next.appliedBatches.filter(b => b.layerId !== layerId);
+      return next;
+    });
+  }, [updateSandbox]);
+
+  const sandboxSaveSnapshot = useCallback((layerId, label) => {
+    updateSandbox(current => {
+      const next = deepClone(current);
+      const layer = next.layers.find(l => l.id === layerId);
+      if (!layer) return next;
+      const snap = {
+        id: `snap-${Date.now()}`,
+        layerId: layer.id,
+        label: (label && label.trim()) || `Snapshot ${next.snapshots.filter(s => s.layerId === layer.id).length + 1}`,
+        createdAt: new Date().toISOString(),
+        assignments: cloneAssignmentsMap(layer.assignments || {})
+      };
+      next.snapshots = [...next.snapshots, snap];
+      return next;
+    });
+  }, [updateSandbox]);
+
+  const sandboxRestoreSnapshot = useCallback((snapshotId) => {
+    updateSandbox(current => {
+      const next = deepClone(current);
+      const snapshot = next.snapshots.find(s => s.id === snapshotId);
+      if (!snapshot) return next;
+      const layerIdx = next.layers.findIndex(l => l.id === snapshot.layerId);
+      if (layerIdx === -1) return next;
+      next.layers[layerIdx] = {
+        ...next.layers[layerIdx],
+        assignments: cloneAssignmentsMap(snapshot.assignments || {}),
+        lastOptimizedAt: null
+      };
+      next.active = snapshot.layerId;
+      return next;
+    });
+  }, [updateSandbox]);
+
+  const sandboxExportJSON = useCallback((layerId) => {
+    const layer = sandboxState.layers.find(l => l.id === layerId);
+    if (!layer) return;
+    const payload = { ...layer, assignments: layer.assignments };
+    downloadBlob(`${layer.name.replace(/\s+/g,'_')}.json`, JSON.stringify(payload, null, 2));
+  }, [sandboxState.layers]);
+
+  const sandboxExportCSV = useCallback((layerId) => {
+    const layer = sandboxState.layers.find(l => l.id === layerId);
+    if (!layer) return;
+    const csv = assignmentsToCSV(layer.assignments);
+    downloadBlob(`${layer.name.replace(/\s+/g,'_')}.csv`, csv, 'text/csv');
+  }, [sandboxState.layers]);
+
+  const setSandboxObjectives = useCallback((patch) => {
+    updateSandbox(current => {
+      const next = deepClone(current);
+      next.objectives = { ...next.objectives };
+      for (const [k, v] of Object.entries(patch || {})){
+        next.objectives[k] = Number(v);
+      }
+      return next;
+    });
+  }, [updateSandbox]);
+
+  const runOptimization = useCallback((layerId, objectivesOverride) => {
+    const worker = sandboxWorkerRef.current;
+    const layer = sandboxState.layers.find(l => l.id === layerId);
+    if (!worker || !layer) {
+      setSandboxRuntime(prev => ({
+        ...prev,
+        jobs: { ...prev.jobs, [layerId]: { status:'error', message: 'Optimización no disponible', completedAt: Date.now() } }
+      }));
+      return;
+    }
+    const jobId = `job-${Date.now()}-${cryptoRandom()}`;
+    setSandboxRuntime(prev => ({
+      ...prev,
+      jobs: { ...prev.jobs, [layerId]: { status:'running', startedAt: Date.now(), jobId } }
+    }));
+    const timeOffDates = buildTimeOffDateIndex(state.timeOffs);
+    const closedDates = [];
+    for (const dateStr of Object.keys(layer.assignments || {})){
+      if (isClosedBusinessDay2(dateStr, state.province, state.closeOnHolidays, state.closedExtraDates, state.customHolidaysByYear)){
+        closedDates.push(dateStr);
+      }
+    }
+    worker.postMessage({
+      type:'run',
+      jobId,
+      layerId,
+      payload: {
+        layer: { id: layer.id, assignments: layer.assignments },
+        context: {
+          rules: state.rules,
+          timeOffDates,
+          closedDates,
+          workingHolidays: state.workingHolidays,
+          peopleIds: state.people.map(p => p.id),
+          realAssignments: ASS
+        },
+        objectives: objectivesOverride || sandboxState.objectives
+      }
+    });
+  }, [sandboxState.layers, sandboxState.objectives, state.rules, state.timeOffs, state.province, state.closeOnHolidays, state.closedExtraDates, state.customHolidaysByYear, state.workingHolidays, state.people, ASS]);
+
+  const applySandboxLayer = useCallback((layerId) => {
+    const layer = sandboxState.layers.find(l => l.id === layerId);
+    if (!layer) { showToast('Capa no encontrada'); return; }
+    const diffs = diffAssignments(ASS, layer.assignments);
+    if (!diffs.length) { showToast('No hay diferencias respecto al cuadrante actual'); return; }
+    setState(prev => {
+      const next = deepClone(prev);
+      const overrides = deepClone(prev.overrides || {});
+      const sandbox = normalizeSandbox(next.sandbox);
+      const batchId = `sandbox-${layerId}-${Date.now()}`;
+      const changes = [];
+      for (const diff of diffs){
+        const baseCell = (ASS[diff.dateStr] || []);
+        const layerCell = (layer.assignments?.[diff.dateStr] || []);
+        const slot = layerCell[diff.slotIndex] || baseCell[diff.slotIndex];
+        if (!slot || !slot.shift) continue;
+        const key = shiftKeyForSlot(slot, diff.slotIndex);
+        const prevValue = overrides?.[diff.dateStr]?.[key] ?? null;
+        overrides[diff.dateStr] = overrides[diff.dateStr] || {};
+        if (diff.toPerson === null || typeof diff.toPerson === 'undefined') {
+          overrides[diff.dateStr][key] = '__EMPTY__';
+        } else {
+          overrides[diff.dateStr][key] = diff.toPerson;
+        }
+        changes.push({ dateStr: diff.dateStr, key, prevValue, nextValue: overrides[diff.dateStr][key] });
+      }
+      if (!changes.length) {
+        return prev;
+      }
+      sandbox.appliedBatches = [...(sandbox.appliedBatches || []), { batchId, layerId, createdAt: new Date().toISOString(), changes }];
+      next.overrides = overrides;
+      next.sandbox = sandbox;
+      return next;
+    });
+    showToast(`Capa aplicada (${diffs.length} cambios)`);
+  }, [ASS, sandboxState.layers, setState, showToast]);
+
+  const rollbackSandboxBatch = useCallback((batchId) => {
+    if (!batchId) return;
+    let restored = false;
+    setState(prev => {
+      const next = deepClone(prev);
+      const sandbox = normalizeSandbox(next.sandbox);
+      const idx = sandbox.appliedBatches.findIndex(b => b.batchId === batchId);
+      if (idx === -1) return prev;
+      const batch = sandbox.appliedBatches[idx];
+      const overrides = deepClone(prev.overrides || {});
+      for (const change of batch.changes || []){
+        if (!overrides[change.dateStr]) overrides[change.dateStr] = {};
+        if (change.prevValue === null || typeof change.prevValue === 'undefined'){
+          delete overrides[change.dateStr][change.key];
+          if (!Object.keys(overrides[change.dateStr]).length) delete overrides[change.dateStr];
+        } else {
+          overrides[change.dateStr][change.key] = change.prevValue;
+        }
+      }
+      sandbox.appliedBatches = sandbox.appliedBatches.filter(b => b.batchId !== batchId);
+      next.overrides = overrides;
+      next.sandbox = sandbox;
+      restored = true;
+      return next;
+    });
+    if (restored) showToast(`Batch ${batchId.slice(-6)} revertido`);
+    else showToast('Batch no encontrado');
+  }, [setState, showToast]);
+
+  const sandboxComparison = useMemo(() => {
+    if (!activeSandboxLayer) return { perPerson: [], diffDates: [], totalChanges: 0 };
+    const perPerson = compareAssignments(ASS, activeSandboxLayer.assignments);
+    const diffs = diffAssignments(ASS, activeSandboxLayer.assignments);
+    const map = new Map();
+    for (const diff of diffs){
+      map.set(diff.dateStr, (map.get(diff.dateStr) || 0) + 1);
+    }
+    const diffDates = Array.from(map.entries()).map(([dateStr, changes]) => ({ dateStr, changes })).sort((a,b)=>a.dateStr.localeCompare(b.dateStr));
+    return { perPerson, diffDates, totalChanges: diffs.length };
+  }, [ASS, activeSandboxLayer]);
 
   // ---------- Hooks que deben ejecutarse SIEMPRE ----------
   const [payroll,setPayroll]=useState({ from: state.startDate, to: toDateValue(addDays(startDate, state.weeks*7-1)) });
@@ -1579,6 +2045,23 @@ return (
   upPerson={upPerson}
   forceAssign={forceAssign}
   validateCanAssign={validateCanAssign}
+  sandboxState={sandboxState}
+  activeSandboxLayer={activeSandboxLayer}
+  activeSnapshots={activeSnapshots}
+  sandboxRuntime={sandboxRuntime}
+  sandboxCreateFromReal={sandboxCreateFromReal}
+  sandboxActivate={sandboxActivate}
+  sandboxDuplicate={sandboxDuplicate}
+  sandboxDelete={sandboxDelete}
+  sandboxSaveSnapshot={sandboxSaveSnapshot}
+  sandboxRestoreSnapshot={sandboxRestoreSnapshot}
+  sandboxExportJSON={sandboxExportJSON}
+  sandboxExportCSV={sandboxExportCSV}
+  runOptimization={runOptimization}
+  applySandboxLayer={applySandboxLayer}
+  rollbackSandboxBatch={rollbackSandboxBatch}
+  sandboxComparison={sandboxComparison}
+  setSandboxObjectives={setSandboxObjectives}
 />
 );
 }
@@ -1614,6 +2097,212 @@ function ConfigBasica({ state, up }){
             />
             Aplicar mejorador de conciliación
           </label>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function SandboxPanel({ sandboxState, activeLayer, activeSnapshots, runtime, onCreate, onActivate, onDuplicate, onDelete, onSaveSnapshot, onRestoreSnapshot, onExportJSON, onExportCSV, onRunOptimization, onApply, onRollback }){
+  const [newName, setNewName] = useState("");
+  const [snapshotLabel, setSnapshotLabel] = useState("");
+  const jobs = runtime?.jobs || {};
+  return (
+    <Card title="Sandbox de cuadrantes">
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-end gap-3">
+          <div>
+            <label className="text-xs block mb-1">Nombre de nueva capa</label>
+            <input
+              className="px-3 py-2 rounded-lg border text-sm"
+              placeholder="Ej. Ajuste Q1"
+              value={newName}
+              onChange={e=>setNewName(e.target.value)}
+            />
+          </div>
+          <button
+            type="button"
+            className="px-3 py-2 rounded-lg border text-sm"
+            onClick={() => { onCreate(newName); setNewName(""); }}
+          >Crear desde cuadrante real</button>
+        </div>
+        <div className="space-y-2">
+          {sandboxState.layers.length === 0 && (
+            <p className="text-sm text-slate-500">No hay capas sandbox creadas todavía.</p>
+          )}
+          {sandboxState.layers.map(layer => {
+            const job = jobs[layer.id];
+            const isActive = activeLayer && activeLayer.id === layer.id;
+            return (
+              <div key={layer.id} className={`border rounded-xl px-4 py-3 text-sm ${isActive ? 'border-indigo-300 bg-indigo-50' : 'border-slate-200'}`}>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <div className="font-medium">{layer.name}</div>
+                    <div className="text-xs text-slate-500">Creada {new Date(layer.createdAt).toLocaleString()} · {layer.assignments ? Object.keys(layer.assignments).length : 0} días</div>
+                    {layer.metrics && (
+                      <div className="text-xs text-slate-600 mt-1">Horas medias: {(layer.metrics.meanMinutes/60).toFixed(1)}h · σ: {(layer.metrics.stdDev/60).toFixed(1)}h</div>
+                    )}
+                    {job && job.status === 'running' && (
+                      <div className="text-xs text-amber-600 mt-1">Optimización en curso…</div>
+                    )}
+                    {job && job.status === 'error' && (
+                      <div className="text-xs text-rose-600 mt-1">Error: {job.message}</div>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-2 justify-end">
+                    {!isActive && (
+                      <button className="px-2 py-1 rounded border text-xs" onClick={()=>onActivate(layer.id)}>Activar</button>
+                    )}
+                    <button className="px-2 py-1 rounded border text-xs" onClick={()=>onRunOptimization(layer.id, sandboxState.objectives)}>Optimizar</button>
+                    <button className="px-2 py-1 rounded border text-xs" onClick={()=>{ if (window.confirm('¿Aplicar esta capa sobre el cuadrante actual?')) onApply(layer.id); }}>Aplicar</button>
+                    <button className="px-2 py-1 rounded border text-xs" onClick={()=>onDuplicate(layer.id)}>Duplicar</button>
+                    <button className="px-2 py-1 rounded border text-xs" onClick={()=>onExportJSON(layer.id)}>Export JSON</button>
+                    <button className="px-2 py-1 rounded border text-xs" onClick={()=>onExportCSV(layer.id)}>Export CSV</button>
+                    <button className="px-2 py-1 rounded border text-xs text-rose-600" onClick={()=>{ if (window.confirm('¿Eliminar la capa y sus snapshots?')) onDelete(layer.id); }}>Eliminar</button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        {activeLayer && (
+          <div className="space-y-2">
+            <div className="flex flex-wrap items-end gap-3">
+              <div>
+                <label className="text-xs block mb-1">Guardar snapshot de {activeLayer.name}</label>
+                <input
+                  className="px-3 py-2 rounded-lg border text-sm"
+                  placeholder="Nombre del snapshot"
+                  value={snapshotLabel}
+                  onChange={e=>setSnapshotLabel(e.target.value)}
+                />
+              </div>
+              <button
+                type="button"
+                className="px-3 py-2 rounded-lg border text-sm"
+                onClick={() => { onSaveSnapshot(activeLayer.id, snapshotLabel); setSnapshotLabel(""); }}
+              >Guardar snapshot</button>
+            </div>
+            <div className="space-y-1">
+              {activeSnapshots.length === 0 && <p className="text-xs text-slate-500">Sin snapshots para esta capa.</p>}
+              {activeSnapshots.map(snap => (
+                <div key={snap.id} className="flex items-center justify-between gap-2 border rounded-lg px-3 py-2 text-xs">
+                  <div>
+                    <div className="font-medium">{snap.label}</div>
+                    <div className="text-[11px] text-slate-500">{new Date(snap.createdAt).toLocaleString()}</div>
+                  </div>
+                  <div className="flex gap-2">
+                    <button className="px-2 py-1 rounded border" onClick={()=>onRestoreSnapshot(snap.id)}>Restaurar</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        {sandboxState.appliedBatches && sandboxState.appliedBatches.length > 0 && (
+          <div>
+            <h3 className="text-sm font-semibold mb-2">Batches aplicados</h3>
+            <div className="space-y-1">
+              {sandboxState.appliedBatches.slice().reverse().map(batch => (
+                <div key={batch.batchId} className="flex items-center justify-between gap-2 border rounded-lg px-3 py-2 text-xs">
+                  <div>
+                    <div className="font-medium">{batch.batchId}</div>
+                    <div className="text-[11px] text-slate-500">{new Date(batch.createdAt).toLocaleString()} · {batch.changes?.length || 0} cambios · capa {batch.layerId}</div>
+                  </div>
+                  <button className="px-2 py-1 rounded border text-rose-600" onClick={()=>{ if (window.confirm('¿Revertir este batch?')) onRollback(batch.batchId); }}>Rollback</button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+function SandboxObjectivesCard({ objectives, onChange }){
+  const entries = [
+    { key:'fairness', label:'Equilibrio de horas' },
+    { key:'conciliacion', label:'Penalizaciones conciliación' },
+    { key:'priority', label:'Respeto prioridades' },
+    { key:'minChanges', label:'Minimizar cambios' }
+  ];
+  return (
+    <Card title="Objetivos de optimización">
+      <div className="grid grid-cols-2 gap-3 text-sm">
+        {entries.map(entry => (
+          <label key={entry.key} className="flex flex-col gap-1">
+            <span className="text-xs text-slate-600">{entry.label}</span>
+            <input
+              type="number"
+              min={0}
+              step="0.1"
+              className="px-3 py-2 rounded-lg border"
+              value={Number(objectives?.[entry.key] ?? 0)}
+              onChange={e=>onChange({ [entry.key]: Number(e.target.value) })}
+            />
+          </label>
+        ))}
+      </div>
+      <p className="text-xs text-slate-500 mt-3">Los objetivos se guardan junto al resto del estado y se aplican al lanzar la optimización en cualquier capa.</p>
+    </Card>
+  );
+}
+
+function SandboxComparatorCard({ activeLayer, comparison }){
+  const rows = comparison?.perPerson || [];
+  const diffDates = comparison?.diffDates || [];
+  return (
+    <Card title={`Comparador sandbox · ${activeLayer?.name || ''}`}>
+      <div className="text-sm text-slate-600 mb-3">Cambios totales respecto al cuadrante real: {comparison?.totalChanges || 0}</div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <h3 className="text-xs font-semibold mb-2 uppercase tracking-wide text-slate-500">Por persona</h3>
+          <table className="w-full text-xs border">
+            <thead>
+              <tr className="bg-slate-100 text-left">
+                <th className="px-2 py-1 border">Persona</th>
+                <th className="px-2 py-1 border">Δ horas</th>
+                <th className="px-2 py-1 border">Δ días</th>
+                <th className="px-2 py-1 border">Δ findes</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.length === 0 && (
+                <tr><td className="px-2 py-2 text-center text-slate-500" colSpan={4}>Sin diferencias</td></tr>
+              )}
+              {rows.map(row => (
+                <tr key={row.personId}>
+                  <td className="px-2 py-1 border">{row.personId}</td>
+                  <td className={`px-2 py-1 border ${row.diffMinutes>0?'text-emerald-600':row.diffMinutes<0?'text-rose-600':''}`}>{(row.diffMinutes/60).toFixed(1)}h</td>
+                  <td className="px-2 py-1 border">{row.diffDays >= 0 ? `+${row.diffDays}` : row.diffDays}</td>
+                  <td className="px-2 py-1 border">{row.diffWeekends >= 0 ? `+${row.diffWeekends}` : row.diffWeekends}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div>
+          <h3 className="text-xs font-semibold mb-2 uppercase tracking-wide text-slate-500">Cambios por fecha</h3>
+          <div className="max-h-48 overflow-auto border rounded-lg">
+            <table className="w-full text-xs">
+              <thead className="bg-slate-100 text-left">
+                <tr>
+                  <th className="px-2 py-1 border">Fecha</th>
+                  <th className="px-2 py-1 border">Cambios</th>
+                </tr>
+              </thead>
+              <tbody>
+                {diffDates.length === 0 && (<tr><td className="px-2 py-2 text-center text-slate-500" colSpan={2}>Sin cambios</td></tr>)}
+                {diffDates.map(item => (
+                  <tr key={item.dateStr}>
+                    <td className="px-2 py-1 border">{item.dateStr}</td>
+                    <td className="px-2 py-1 border">{item.changes}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     </Card>
@@ -3596,7 +4285,11 @@ function AuthenticatedApp(props){
           ASS, controls,
           exportCSV, exportJSON, importJSON, exportICS, exportPayroll,
           up, upPerson, forceAssign, pillClass, density, setDensity,
-          personFilter, setPersonFilter, clearVisibleOverrides, duplicateVisibleToNextWeek, undoLastOverride, onQuickAssign, validateCanAssign } = props;
+          personFilter, setPersonFilter, clearVisibleOverrides, duplicateVisibleToNextWeek, undoLastOverride, onQuickAssign, validateCanAssign,
+          sandboxState, activeSandboxLayer, activeSnapshots, sandboxRuntime,
+          sandboxCreateFromReal, sandboxActivate, sandboxDuplicate, sandboxDelete,
+          sandboxSaveSnapshot, sandboxRestoreSnapshot, sandboxExportJSON, sandboxExportCSV,
+          runOptimization, applySandboxLayer, rollbackSandboxBatch, sandboxComparison, setSandboxObjectives } = props;
 
   // === AUDITORÍA DE PRESENCIA (online) ===
   const [online, setOnline] = useState({ users: [], at: null });
@@ -3727,27 +4420,6 @@ useEffect(() => {
     return () => clearInterval(id);
   }, [auth?.user, auth?.token]);
 
-  // === Export CSV de auditoría (últimos 100) ===
-const exportAuditCsv = React.useCallback(() => {
-  const audits = (state.audit || []).slice(-100).reverse();
-  const rows = [["ts","actor","action","dateStr"].join(",")];
-
-  audits.forEach(e => {
-    const r = [
-      e?.ts || "",
-      e?.actor || "sys",
-      e?.action || "",
-      e?.dateStr || ""
-    ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(",");
-    rows.push(r);
-  });
-
-  const blob = new Blob([rows.join("\n")], { type: "text/csv;charset=utf-8;" });
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = `audit_${new Date().toISOString().slice(0,10)}.csv`;
-  a.click();
-}, [state.audit]);
 
   // --- scope admin (robusto tras refactor) ---
   // Aliases seguros para modal del día (local o via props)
@@ -4061,11 +4733,11 @@ if (cmd.type === 'removeExtraSlot') {
 {isAdmin && <AdminSessionsAuditCard auth={auth} showToast={showToast} />}
 
 
-<Card title="Auditoría (últimos 100)">
-    {typeof exportAuditCsv === "function" && (
-      <button onClick={exportAuditCsv} className="mb-2 px-2 py-0.5 border rounded text-xs">Export CSV</button>
-     )}
-      <div className="max-h-40 overflow-auto text-xs">
+          <Card title="Auditoría (últimos 100)">
+            {typeof exportAuditCsv === "function" && (
+              <button onClick={exportAuditCsv} className="mb-2 px-2 py-0.5 border rounded text-xs">Export CSV</button>
+            )}
+            <div className="max-h-40 overflow-auto text-xs">
     {((state.audit||[]).slice(-100).reverse()).map((e,i)=>(
       <div key={i} className="py-0.5 border-b last:border-0">
         <span className="text-slate-500">{(e.ts||"").replace("T"," ").replace("Z","")} · </span>
@@ -4207,6 +4879,37 @@ if (cmd.type === 'removeExtraSlot') {
             }annualTarget={state.annualTargetHours}
           />
             )}
+          {isAdmin && (
+            <SandboxPanel
+              sandboxState={sandboxState}
+              activeLayer={activeSandboxLayer}
+              activeSnapshots={activeSnapshots}
+              runtime={sandboxRuntime}
+              onCreate={sandboxCreateFromReal}
+              onActivate={sandboxActivate}
+              onDuplicate={sandboxDuplicate}
+              onDelete={sandboxDelete}
+              onSaveSnapshot={sandboxSaveSnapshot}
+              onRestoreSnapshot={sandboxRestoreSnapshot}
+              onExportJSON={sandboxExportJSON}
+              onExportCSV={sandboxExportCSV}
+              onRunOptimization={runOptimization}
+              onApply={applySandboxLayer}
+              onRollback={rollbackSandboxBatch}
+            />
+          )}
+          {isAdmin && (
+            <SandboxObjectivesCard
+              objectives={sandboxState.objectives}
+              onChange={setSandboxObjectives}
+            />
+          )}
+          {isAdmin && activeSandboxLayer && (
+            <SandboxComparatorCard
+              activeLayer={activeSandboxLayer}
+              comparison={sandboxComparison}
+            />
+          )}
             {(isAdmin && (state?.debug?.weekendAudit===true)) && (
               <Card title="Weekend audit (Admin)">
                 <WeekendAuditPanel
