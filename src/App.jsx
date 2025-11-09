@@ -1303,57 +1303,73 @@ if (!auth.user || !auth.token) {
     setState(prev => ({ ...prev, overrides: next }));
     showToast("Overrides del rango visible eliminados");
   }
-
-function duplicateVisibleToNextWeek(){
+  
+function duplicateVisibleToNextWeek() {
   const from = weeklyStart;
-  const to   = addDays(weeklyStart, userWeeks*7 - 1);
-  const periodEnd = addDays(startDate, state.weeks*7 - 1);
+  const to   = addDays(weeklyStart, userWeeks * 7 - 1);
+  const periodEnd = addDays(startDate, state.weeks * 7 - 1);
 
   const out = structuredClone(state.overrides || {});
-  let copiados = 0, saltados = 0, saltadosConflicto = 0;
-  const appliedPerPerson = new Map();
-  const skippedPerPerson = new Map();
+  let copiados = 0, saltados = 0;
+  const copiedBy  = new Map(); // pid -> count
+  const skippedBy = new Map(); // pid -> count
+  const personName = new Map((state.people || []).map(p => [p.id, p.name]));
 
+  const inc = (map, pid) => { if (!pid) return; map.set(pid, (map.get(pid) || 0) + 1); };
+
+  // Recorre los días visibles
   for (let d = new Date(from); d <= to; d = addDays(d, 1)) {
     const srcDs = toDateValue(d);
     const tgtDs = toDateValue(addDays(d, 7));
-    if (parseDateValue(tgtDs) > periodEnd) { saltados++; continue; }
 
-    const cell = (ASS[srcDs] || []);
-    if (!cell.length) { continue; }
+    // Si el destino se sale del rango de semanas configuradas, todo lo de hoy cuenta como "saltado"
+    if (parseDateValue(tgtDs) > periodEnd) {
+      for (const a of (ASS[srcDs] || [])) {
+        if (!a?.personId) continue;
+        saltados++;
+        inc(skippedBy, a.personId);
+      }
+      continue;
+    }
+
+    const cell = ASS[srcDs] || [];
+    if (!cell.length) continue;
 
     for (let i = 0; i < cell.length; i++) {
       const a = cell[i];
-      if (!a.personId) continue; // no copiar vacíos
+      if (!a?.personId) continue; // no copiar vacíos
+
       const key = `${a.shift.start}-${a.shift.end}-${a.shift.label || `T${i+1}`}`;
       out[tgtDs] = out[tgtDs] || {};
-      if (out[tgtDs][key] != null) { // ya había override → no pisar
+
+      // Si ya hay override en destino para esa clave, no lo pisamos → saltado
+      if (out[tgtDs][key] != null) {
         saltados++;
-        saltadosConflicto++;
-        skippedPerPerson.set(a.personId, (skippedPerPerson.get(a.personId) || 0) + 1);
+        inc(skippedBy, a.personId);
         continue;
       }
+
+      // Copiamos como override
       out[tgtDs][key] = a.personId;
       copiados++;
-      appliedPerPerson.set(a.personId, (appliedPerPerson.get(a.personId) || 0) + 1);
+      inc(copiedBy, a.personId);
     }
   }
 
   setState(prev => ({ ...prev, overrides: out }));
-  const nameOf = (pid) => (state.people.find(p => p.id === pid)?.name || pid);
-  const formatMap = (map) => {
-    return Array.from(map.entries())
-      .sort((a, b) => b[1] - a[1])
-      .map(([pid, count]) => `${nameOf(pid)}:${count}`)
-      .join(", ");
+
+  // Construye resumen por persona
+  const fmt = (map) => {
+    const arr = Array.from(map.entries());
+    if (!arr.length) return '—';
+    return arr
+      .sort((a, b) => (personName.get(a[0]) || a[0]).localeCompare(personName.get(b[0]) || b[0]))
+      .map(([pid, n]) => `${personName.get(pid) || pid}: ${n}`)
+      .join(', ');
   };
-  const appliedList = formatMap(appliedPerPerson);
-  const skippedList = formatMap(skippedPerPerson);
-  const msgParts = [
-    `Duplicadas ${copiados} asign.${appliedList ? ` (${appliedList})` : ""}`,
-    `Saltadas ${saltados}${skippedList && saltadosConflicto ? ` (${skippedList})` : ""}`
-  ];
-  showToast(msgParts.join(" · "));
+
+  // Texto con la forma que luego grepeamos: "Duplicadas ... · Saltadas ..."
+  showToast(`Duplicadas ${copiados} asign. (${fmt(copiedBy)}) · Saltadas ${saltados} (${fmt(skippedBy)})`);
 }
 
 function undoLastOverride(){
