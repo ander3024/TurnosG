@@ -1,21 +1,20 @@
-# Checklist rápida de regresión visual
+# Checklist rápida para detectar regresiones de UI
 
-Esta guía sirve para validar que un PR no modifica el aspecto del calendario semanal ni del calendario diario.
+1. **Vista semanal (WeeklyView)**
+   - Abre la aplicación con datos reales.
+   - Captura la tabla completa (cmd/ctrl+shift+S) asegurándote de que se ven los badges `{asignadas}/{totales}`.
+   - Verifica que las clases `text-[10px]`, `px-1.5`, `rounded` y la malla `table-auto` permanecen sin cambios.
 
-## Antes del cambio
-1. Ejecuta `npm run build` para asegurarte de que el bundle compila.
-2. Lanza `npm run dev` y abre la aplicación en `http://localhost:5173`.
-3. Haz capturas de:
-   - Vista semanal (`Card` "Vista semanal por persona") con una semana visible.
-   - Calendario diario (panel "Calendario diario (admin)") mostrando al menos dos tarjetas con menú 👤.
+2. **Calendario diario (admin)**
+   - Inicia sesión como admin y abre el panel "Calendario diario (admin)".
+   - Captura al menos un día con varios turnos asignados y uno bloqueado (`🔒`).
+   - Confirma que los botones 👤 mantienen la distribución compacta (`w-[320px]`, `space-y-3`).
 
-Guarda las capturas con el sufijo `before` (por ejemplo `weekly-before.png`, `calendar-before.png`).
+3. **Comparación manual**
+   - Coloca las capturas “antes” y “después” lado a lado.
+   - Revisa paddings (`px-2`, `py-0.5`), bordes (`rounded-xl`, `border-slate-200`) y badges (`bg-transparent`).
 
-## Después del cambio
-1. Aplica los cambios del PR y vuelve a ejecutar `npm run build`.
-2. Repite las capturas anteriores (`weekly-after.png`, `calendar-after.png`).
-3. Compara visualmente ambos pares de imágenes; si hay diferencias, revisa que formen parte del alcance aprobado del PR.
+4. **Consejo opcional**
+   - Usa una herramienta de diff visual (p. ej. `pixelmatch`) para resaltar cambios accidentales.
 
-## Notas
-- No es necesario automatizar las capturas, pero si usas Playwright u otra herramienta, documenta el comando en el PR.
-- Si la UI cambia por requisitos explícitos, adjunta las capturas "before/after" en la descripción del PR para facilitar la revisión.
+> Si alguno de estos elementos varía, revisa el diff antes de enviar el PR.

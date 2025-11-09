@@ -1,11 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
-
-const IDLE_MS = 15 * 60 * 1000; // 15 minutos
-const DEFAULT_TOAST_MS = 2000;
-
-const ENV_API_BASE = (typeof import.meta !== "undefined" && import.meta?.env?.VITE_API_BASE)
-  ? String(import.meta.env.VITE_API_BASE).replace(/\/$/, "")
-  : "";
+import React, { useEffect, useMemo, useState, useRef, useCallback } from "react";
 
 import WeekendAuditPanel from "./components/WeekendAuditPanel";
 
@@ -53,15 +46,17 @@ const PUBLIC_SPACE = { id: "turnos-2025", readToken: "READ-2025" };
 
 // ===================== Config API (proxy Apache → Flask) =====================
 const API_BASE = "/api";
+const DEFAULT_TOAST_MS = 2000;
 
-function resolveApiUrl(path = "") {
+function resolveApiUrl(path) {
   if (typeof path !== "string" || !path) return API_BASE;
   if (/^https?:\/\//i.test(path)) return path;
-  if (path.startsWith("/")) {
-    const prefix = ENV_API_BASE || API_BASE;
-    return `${prefix}${path}`;
-  }
-  return `${API_BASE}/${path}`;
+  const envBase = (typeof import.meta !== "undefined" && import.meta?.env?.VITE_API_BASE)
+    ? String(import.meta.env.VITE_API_BASE).replace(/\/$/, "")
+    : "";
+  const base = envBase ? `${envBase}${API_BASE}` : API_BASE;
+  if (path.startsWith("/")) return `${base}${path}`;
+  return `${base}/${path}`;
 }
 
 // ===================== Helper fetch con/ sin JWT =====================
@@ -917,7 +912,18 @@ export default function App(){
   // --- ui feedback (banner + toast) ---
   const [ui, setUI] = useState({ sync:null, toast:null });
   const toastTimeoutRef = useRef(null);
-  const idleTimeoutRef = useRef(null);
+
+  // Modal día (compartido)
+  const [modalDay, setModalDay] = useState(null);
+  const showToast = useCallback((message, duration = DEFAULT_TOAST_MS) => {
+    const ms = Number.isFinite(duration) && duration > 0 ? duration : DEFAULT_TOAST_MS;
+    setUI(prev => ({ ...prev, toast: message }));
+    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+    toastTimeoutRef.current = setTimeout(() => {
+      setUI(prev => ({ ...prev, toast: null }));
+      toastTimeoutRef.current = null;
+    }, ms);
+  }, [setUI]);
 
   useEffect(() => () => {
     if (toastTimeoutRef.current) {
@@ -926,60 +932,9 @@ export default function App(){
     }
   }, []);
 
-  const showToast = React.useCallback((message, duration = DEFAULT_TOAST_MS) => {
-    const safeDuration = Number.isFinite(duration) && duration > 0 ? duration : DEFAULT_TOAST_MS;
 
-    if (toastTimeoutRef.current) {
-      clearTimeout(toastTimeoutRef.current);
-      toastTimeoutRef.current = null;
-    }
 
-    if (!message) {
-      setUI(prev => ({ ...prev, toast: null }));
-      return;
-    }
 
-    setUI(prev => ({ ...prev, toast: message }));
-    toastTimeoutRef.current = setTimeout(() => {
-      setUI(prev => ({ ...prev, toast: null }));
-      toastTimeoutRef.current = null;
-    }, safeDuration);
-  }, [setUI]);
-
-  // Modal día (compartido)
-  const [modalDay, setModalDay] = useState(null);
-
-  useEffect(() => {
-    if (!auth?.token) {
-      if (idleTimeoutRef.current) {
-        clearTimeout(idleTimeoutRef.current);
-        idleTimeoutRef.current = null;
-      }
-      return;
-    }
-
-    const resetIdle = () => {
-      if (idleTimeoutRef.current) {
-        clearTimeout(idleTimeoutRef.current);
-      }
-      idleTimeoutRef.current = setTimeout(() => {
-        showToast("Sesión expirada por inactividad");
-        doLogout();
-      }, IDLE_MS);
-    };
-
-    const events = ["click", "keydown", "mousemove", "touchstart", "visibilitychange"];
-    events.forEach(evt => window.addEventListener(evt, resetIdle));
-    resetIdle();
-
-    return () => {
-      if (idleTimeoutRef.current) {
-        clearTimeout(idleTimeoutRef.current);
-        idleTimeoutRef.current = null;
-      }
-      events.forEach(evt => window.removeEventListener(evt, resetIdle));
-    };
-  }, [auth?.token, doLogout, showToast]);
   // --- permisos UI ---
   const isAdmin = auth.user?.role === 'admin';
 
@@ -1068,13 +1023,14 @@ function forceAssign(dateStr, assignmentIndex, personId){
   const [cloud, setCloud] = useState({ spaceId:"turnos-2025", readToken:"READ-2025", writeToken:"WRT-1234", apiKey:"" });
   async function cloudLoad(options = {}) {
     const silent = options?.silent === true;
-    if (!silent) {
-      setUI(prev => ({ ...prev, sync: "loading" }));
-    }
+    if (!silent) setUI(prev=>({...prev, sync:"loading"}));
+    // (no-admin) intentamos cargar aunque no haya readToken; el backend decidirá
+// // No cortamos a no-admin por falta de readToken; el backend decidirá.
+// if (!isAdmin && !cloud.readToken) { showToast("Falta ReadToken"); setUI(prev=>({...prev, sync:"error"})); return; }
     try{
       const extra={}; if(cloud.apiKey) extra["X-API-Key"]=cloud.apiKey; if(cloud.readToken) extra["X-Read-Token"]=cloud.readToken;
       const data = await api(`/state/${encodeURIComponent(cloud.spaceId)}`, { method:"GET" }, auth.token, extra);
-      if(!data.payload){ if (!silent) alert("No hay datos guardados para ese Space ID"); return; }
+      if(!data.payload){ alert("No hay datos guardados para ese Space ID"); return; }
       const payload = { ...data.payload };
       payload.conciliacion = safeConciliacion(payload.conciliacion || {});
 if (!payload.conciliacion) payload.conciliacion = safeConciliacion();
@@ -1092,15 +1048,14 @@ if (!payload.conciliacion) payload.conciliacion = safeConciliacion();
       }
       if (typeof window !== "undefined") window.__OFF_POLICY__ = payload.offPolicy || {};
       setState(prev=>({ ...prev, ...payload }));
-      if (!silent) {
-        setUI(prev=>({...prev, sync:"ok"}));
-        showToast("Cargado de nube");
-      }
+      if (!silent) { setUI(prev=>({...prev, sync:"ok"})); showToast("Cargado de nube"); }
+      return { ok:true };
     }catch(e){
       if (!silent) {
         setUI(prev=>({...prev, sync:"error"}));
-        showToast((String(e.message||"")).startsWith("403")?"403: ReadToken inválido o sin permisos":"Error al cargar: "+e.message);
-        return;
+        const raw = String(e?.message || "");
+        const msg = raw.startsWith("403") ? "403: ReadToken inválido o sin permisos" : `Error al cargar: ${raw}`;
+        showToast(msg);
       }
       throw e;
     }
@@ -1110,47 +1065,15 @@ if (!payload.conciliacion) payload.conciliacion = safeConciliacion();
       const headers={ "Content-Type":"application/json", "X-Write-Token": cloud.writeToken };
       if(cloud.apiKey) headers["X-API-Key"]=cloud.apiKey;
       const payload = state; // si quieres excluir PINs: const { security, ...payload } = state;
-      const out = await api(`/state/${encodeURIComponent(cloud.spaceId)}`, { method:"PUT", headers, body: JSON.stringify({ payload, read_token: cloud.readToken || null }) }, auth.token);
+      await api(`/state/${encodeURIComponent(cloud.spaceId)}`, { method:"PUT", headers, body: JSON.stringify({ payload, read_token: cloud.readToken || null }) }, auth.token);
       setUI(prev=>({...prev, sync:"ok"})); showToast("Guardado en nube");
     }catch(e){
       setUI(prev=>({...prev, sync:"error"}));
-      const msg = String(e?.message || "");
-      if (msg.startsWith("403")) {
-        showToast("403: ReadToken inválido o sin permisos");
-      } else {
-        showToast(`Error al guardar: ${msg}`);
-      }
+      const raw = String(e?.message || "");
+      const msg = raw.startsWith("403") ? "403: ReadToken inválido o sin permisos" : `Error al guardar: ${raw}`;
+      showToast(msg);
     }
   }
-
-  useEffect(() => {
-    if (isAdmin || !auth?.token) {
-      return;
-    }
-    let cancelled = false;
-    let timerId = null;
-
-    const schedule = () => {
-      if (cancelled) return;
-      timerId = setTimeout(async () => {
-        try {
-          await cloudLoad({ silent: true });
-        } catch (e) {
-          // Silenciado en modo silent.
-        }
-        schedule();
-      }, 60000);
-    };
-
-    schedule();
-
-    return () => {
-      cancelled = true;
-      if (timerId) {
-        clearTimeout(timerId);
-      }
-    };
-  }, [auth?.token, cloudLoad, isAdmin]);
 
   // ---------- Utilidades de estado ----------
   // deep-set seguro (crea objetos intermedios)
@@ -1348,8 +1271,27 @@ if (!auth.user || !auth.token) {
     a.click();
   }
 
-function clearVisibleOverrides(){
-  if (!confirm('¿Eliminar los overrides visibles?')) return;
+  function exportAuditCsv(){
+    const entries = (state.audit || []).slice(-100).reverse();
+    if (!entries.length) { showToast('Sin eventos para exportar'); return; }
+    const header = ['ts','actor','action','dateStr'];
+    const rows = [header.join(',')];
+    for (const e of entries) {
+      rows.push([
+        (e.ts || '').replace('T',' ').replace('Z',''),
+        e.actor || 'sys',
+        e.action || '',
+        e.dateStr || ''
+      ].join(','));
+    }
+    const blob = new Blob([rows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `audit_${toDateValue(new Date())}.csv`;
+    a.click();
+  }
+
+  function clearVisibleOverrides(){
   const from = weeklyStart;
   const to   = addDays(weeklyStart, userWeeks*7 - 1);
   const next = structuredClone(state.overrides || {});
@@ -1368,27 +1310,14 @@ function duplicateVisibleToNextWeek(){
   const periodEnd = addDays(startDate, state.weeks*7 - 1);
 
   const out = structuredClone(state.overrides || {});
-  let copiados = 0, saltados = 0;
-  const copiedBy = new Map();
-  const skippedBy = new Map();
-  const personName = new Map((state.people||[]).map(p => [p.id, p.name]));
-
-  const inc = (map, personId) => {
-    if (!personId) return;
-    map.set(personId, (map.get(personId) || 0) + 1);
-  };
+  let copiados = 0, saltados = 0, saltadosConflicto = 0;
+  const appliedPerPerson = new Map();
+  const skippedPerPerson = new Map();
 
   for (let d = new Date(from); d <= to; d = addDays(d, 1)) {
     const srcDs = toDateValue(d);
     const tgtDs = toDateValue(addDays(d, 7));
-    if (parseDateValue(tgtDs) > periodEnd) {
-      for (const a of (ASS[srcDs] || [])) {
-        if (!a?.personId) continue;
-        saltados++;
-        inc(skippedBy, a.personId);
-      }
-      continue;
-    }
+    if (parseDateValue(tgtDs) > periodEnd) { saltados++; continue; }
 
     const cell = (ASS[srcDs] || []);
     if (!cell.length) { continue; }
@@ -1400,25 +1329,31 @@ function duplicateVisibleToNextWeek(){
       out[tgtDs] = out[tgtDs] || {};
       if (out[tgtDs][key] != null) { // ya había override → no pisar
         saltados++;
-        inc(skippedBy, a.personId);
+        saltadosConflicto++;
+        skippedPerPerson.set(a.personId, (skippedPerPerson.get(a.personId) || 0) + 1);
         continue;
       }
       out[tgtDs][key] = a.personId;
       copiados++;
-      inc(copiedBy, a.personId);
+      appliedPerPerson.set(a.personId, (appliedPerPerson.get(a.personId) || 0) + 1);
     }
   }
 
   setState(prev => ({ ...prev, overrides: out }));
-  const fmt = map => {
-    const entries = Array.from(map.entries());
-    if (!entries.length) return '—';
-    return entries
-      .sort((a,b)=> (personName.get(a[0])||a[0]).localeCompare(personName.get(b[0])||b[0]))
-      .map(([pid, count]) => `${personName.get(pid) || pid}: ${count}`)
-      .join(', ');
+  const nameOf = (pid) => (state.people.find(p => p.id === pid)?.name || pid);
+  const formatMap = (map) => {
+    return Array.from(map.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([pid, count]) => `${nameOf(pid)}:${count}`)
+      .join(", ");
   };
-  showToast(`Duplicadas ${copiados} asign. (${fmt(copiedBy)}) · Saltadas ${saltados} (${fmt(skippedBy)})`);
+  const appliedList = formatMap(appliedPerPerson);
+  const skippedList = formatMap(skippedPerPerson);
+  const msgParts = [
+    `Duplicadas ${copiados} asign.${appliedList ? ` (${appliedList})` : ""}`,
+    `Saltadas ${saltados}${skippedList && saltadosConflicto ? ` (${skippedList})` : ""}`
+  ];
+  showToast(msgParts.join(" · "));
 }
 
 function undoLastOverride(){
@@ -2108,62 +2043,48 @@ function WorkingHolidaysPanel({ state, up }){
   );
 }
 
-function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmin, onQuickAssign, province, closeOnHolidays, closedExtraDates, customHolidaysByYear, pillClass, forceAssign, workingHolidays=[] }){
+function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmin, onQuickAssign, province, closeOnHolidays, closedExtraDates, customHolidaysByYear, pillClass, workingHolidays=[] }){
   const days=[]; for(let w=0;w<weeks;w++) for(let d=0;d<7;d++) days.push(addDays(startDate, w*7+d));
   const personMap=new Map(people.map(p=>[p.id,p]));
   const todayStr = toDateValue(new Date());
   const workingSet = new Set(workingHolidays||[]);
-  const [pendingMap, setPendingMap] = React.useState({});
-  const [lastErrors, setLastErrors] = React.useState({});
+  const [menuState, setMenuState] = useState({});
 
-  const makeKey = React.useCallback((dateStr, idx) => `${dateStr}#${idx}`, []);
-
-  const setPendingFor = React.useCallback((key, value) => {
-    setPendingMap(prev => {
-      if (!key) return prev;
-      if (value) return { ...prev, [key]: true };
-      if (!prev[key]) return prev;
-      const next = { ...prev };
-      delete next[key];
-      return next;
-    });
+  const closeMenus = useCallback(() => {
+    setTimeout(()=>document.querySelectorAll('details[open]').forEach(d=>{ d.open = false; }), 0);
   }, []);
 
-  const setErrorFor = React.useCallback((key, value) => {
-    setLastErrors(prev => {
-      if (!key) return prev;
-      if (value) return { ...prev, [key]: value };
-      if (!(key in prev)) return prev;
-      const next = { ...prev };
-      delete next[key];
-      return next;
-    });
-  }, []);
-
-  const runCommand = React.useCallback(async (command, key) => {
-    if (!onQuickAssign) return { ok:false, msg:"Acción no disponible" };
-    if (key) {
-      setPendingFor(key, true);
-      setErrorFor(key, "");
-    }
+  const runCommand = useCallback(async (slotKey, payload, opts = {}) => {
+    if (typeof onQuickAssign !== 'function') return { ok:false, msg:'Acción no disponible' };
+    setMenuState(prev => ({
+      ...prev,
+      [slotKey]: { ...(prev[slotKey] || {}), pending: true, error: '' }
+    }));
     try {
-      const res = await onQuickAssign(command);
-      const result = (res && typeof res === 'object') ? res : { ok: true };
-      if (key) {
-        if (result.ok === false && result.msg) {
-          setErrorFor(key, result.msg);
-        } else {
-          setErrorFor(key, "");
-        }
-      }
-      return result;
+      const result = onQuickAssign(payload);
+      const resolved = (result && typeof result.then === 'function') ? await result : result;
+      const success = !resolved || resolved.ok !== false;
+      setMenuState(prev => ({
+        ...prev,
+        [slotKey]: { ...(prev[slotKey] || {}), pending: false, error: success ? '' : (resolved?.msg || '') }
+      }));
+      if (success && opts.closeOnSuccess) closeMenus();
+      return resolved;
     } catch (err) {
-      if (key) setErrorFor(key, err?.message || 'Error inesperado');
-      return { ok:false, msg: err?.message || 'Error inesperado' };
-    } finally {
-      if (key) setPendingFor(key, false);
+      setMenuState(prev => ({
+        ...prev,
+        [slotKey]: { ...(prev[slotKey] || {}), pending: false, error: err?.message || 'Error inesperado' }
+      }));
+      throw err;
     }
-  }, [onQuickAssign, setErrorFor, setPendingFor]);
+  }, [onQuickAssign, closeMenus]);
+
+  const clearError = useCallback((slotKey) => {
+    setMenuState(prev => ({
+      ...prev,
+      [slotKey]: { ...(prev[slotKey] || {}), error: '' }
+    }));
+  }, []);
 
   return (
     <div className="overflow-x-auto">
@@ -2207,9 +2128,10 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
                     const dur  = effectiveMinutes(c.shift)/60;
                     const lbl  = (c.shift.label || (isWE ? 'Finde' : `T${i+1}`));
                     const emblem = /mañana/i.test(lbl)? '☀️' : /tarde/i.test(lbl)? '🌙' : isWE? '🗓️' : '➕';
-                    const cardKey = makeKey(dateStr, assignmentIndex);
-                    const pending = !!pendingMap[cardKey];
-                    const lastError = lastErrors[cardKey] || '';
+                    const slotKey = `${dateStr}-${assignmentIndex}`;
+                    const slotState = menuState[slotKey] || {};
+                    const pending = !!slotState.pending;
+                    const lastError = slotState.error || '';
                     return (
                     <div
                       key={`${dateStr}-${assignmentIndex}`}
@@ -2254,16 +2176,13 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
                                 value={c.personId || ''}
                                 disabled={pending}
                                 onChange={async e => {
-                                  const value = e.target.value || '';
-                                  const res = await runCommand({
+                                  clearError(slotKey);
+                                  await runCommand(slotKey, {
                                     type: 'assign',
                                     dateStr,
                                     shiftIndex: assignmentIndex,
-                                    personId: value || null
-                                  }, cardKey);
-                                  if (res?.ok !== false) {
-                                    setErrorFor(cardKey, "");
-                                  }
+                                    personId: e.target.value || null
+                                  });
                                 }}
                                 title="Asignar persona a este turno"
                               >
@@ -2272,9 +2191,7 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
                                   <option key={pp.id} value={pp.id}>{pp.name}</option>
                                 ))}
                               </select>
-                              {lastError && (
-                                <div className="text-[11px] text-rose-700 mt-1">{lastError}</div>
-                              )}
+                              {lastError && <div className="text-[11px] text-rose-700 mt-1">{lastError}</div>}
                             </div>
                               {/* Mover a otro turno del mismo día */}
                               <div className="space-y-1 border-t pt-2">
@@ -2305,18 +2222,17 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
                                   className="px-2 py-0.5 border rounded text-[11px]"
                                   disabled={pending}
                                   onClick={async ()=>{
-                                    if (pending) return;
                                     const sel = document.getElementById(`mv-${dateStr}-${assignmentIndex}`);
                                     const chk = document.getElementById(`mv-empty-${dateStr}-${assignmentIndex}`);
                                     const target = Number(sel?.value ?? assignmentIndex);
-                                    await runCommand({
+                                    await runCommand(slotKey, {
                                       type:'move',
                                       dateStr,
                                       fromShiftIndex: assignmentIndex,
                                       shiftIndex: target,
                                       personId: c.personId,
                                       leaveEmpty: !!chk?.checked
-                                    }, cardKey);
+                                    }, { closeOnSuccess: true });
                                   }}
                                 >
                                   Mover
@@ -2331,28 +2247,24 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
                                     type="button"
                                     className="px-2 py-0.5 border rounded text-[11px]"
                                     disabled={pending}
-                                    onClick={async ()=>{
-                                      if (pending) return;
-                                      await runCommand({ type:'clear', dateStr, shiftIndex: assignmentIndex }, cardKey);
+                                    onClick={()=>{
+                                      runCommand(slotKey, { type:'clear', dateStr, shiftIndex: assignmentIndex }, { closeOnSuccess: true });
                                     }}
                                   >Liberar</button>
                                   <button
                                     type="button"
                                     className="px-2 py-0.5 border rounded text-[11px] text-rose-600"
                                     disabled={pending}
-                                    onClick={async ()=>{
-                                      if (pending) return;
-                                      await runCommand({ type:'clear', dateStr, shiftIndex: assignmentIndex, forceEmpty:true }, cardKey);
+                                    onClick={()=>{
+                                      runCommand(slotKey, { type:'clear', dateStr, shiftIndex: assignmentIndex, forceEmpty: true }, { closeOnSuccess: true });
                                     }}
                                   >Bloquear</button>
                                   <button
                                     type="button"
                                     className="px-2 py-0.5 border rounded text-[11px] text-slate-600"
                                     disabled={pending}
-                                    onClick={async ()=>{
-                                      if (pending) return;
-                                      if (!confirm('¿Eliminar un refuerzo de este día?')) return;
-                                      await runCommand({ type:'removeExtraSlot', dateStr, shiftIndex: assignmentIndex }, cardKey);
+                                    onClick={()=>{
+                                      runCommand(slotKey, { type:'removeExtraSlot', dateStr, shiftIndex: assignmentIndex }, { closeOnSuccess: true });
                                     }}
                                   >
                                     Eliminar un refuerzo de este día
@@ -2366,18 +2278,17 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
                                   title="Ignorar reglas (solo admin)"
                                   disabled={pending}
                                   onClick={async () => {
-                                    if (pending) return;
                                     const sel = document.getElementById(`assign-${dateStr}-${assignmentIndex}`);
                                     const pid = (sel?.value || '').trim();
                                     if (!pid) { alert('Elige persona'); return; }
                                     if (confirm('Forzar asignación e ignorar reglas?')) {
-                                      await runCommand({
+                                      await runCommand(slotKey, {
                                         type: 'assign',
                                         dateStr,
-                                        shiftIndex: assignmentIndex,
-                                        personId: pid,
+                                        shiftIndex: assignmentIndex,   // ← índice real del slot
+                                        personId: pid,                 // ← la persona elegida en el combo
                                         force: true
-                                      }, cardKey);
+                                      });
                                     }
                                   }}
                                 >
@@ -2411,18 +2322,17 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
                                     type="button"
                                     className="px-2 py-0.5 border rounded text-[11px]"
                                     disabled={pending}
-                                    onClick={async()=>{
-                                      if (pending) return;
+                                    onClick={async ()=>{
                                     const s = document.getElementById(`addslot-shift-${dateStr}-${assignmentIndex}`)?.value || 'auto';
                                     const p = document.getElementById(`addslot-person-${dateStr}-${assignmentIndex}`)?.value || '';
                                       if (!p) { alert('Elige persona'); return; }
-                                      await runCommand({
+                                      await runCommand(slotKey, {
                                         type: 'addSlotAssign',
                                         dateStr,
                                         shiftIndex: assignmentIndex,
                                         personId: p,
                                         weekdayRefuerzo: s      // 'auto' | 'mañana' | 'tarde'
-                                      }, cardKey);
+                                      }, { closeOnSuccess: true });
                                     }}
                                   >
                                     Crear y asignar
@@ -2889,7 +2799,6 @@ function PropuestaCierre({ state, startDate, weeks, people, assignments, onApply
   }
 
   function eliminar(){
-    if (!confirm('¿Eliminar los refuerzos de conciliación generados?')) return;
     onApply([], 'replace', null);
     alert('Refuerzos de conciliación eliminados.');
   }
@@ -3677,74 +3586,55 @@ function AuthenticatedApp(props){
 
   // === AUDITORÍA DE PRESENCIA (online) ===
   const [online, setOnline] = useState({ users: [], at: null });
+  const IDLE_MS = 15 * 60 * 1000;
 
-  const exportAuditCsv = React.useCallback(() => {
-    const audits = (state.audit || []).slice(-100).reverse();
-    if (!audits.length) return;
-    const rows = ["ts,actor,action,dateStr" ];
-    audits.forEach((e, idx) => {
-      const cols = [
-        e?.ts || '',
-        e?.actor || 'sys',
-        e?.action || '',
-        e?.dateStr || ''
-      ].map(v => `"${String(v ?? '').replace(/"/g,'""')}"`);
-      rows.push(cols.join(','));
-    });
-    const blob = new Blob([rows.join('\n')], { type: 'text/csv;charset=utf-8;' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `audit_${new Date().toISOString().slice(0,10)}.csv`;
-    a.click();
-  }, [state.audit]);
-
-// Heartbeat robusto
+// Heartbeat con reintentos silenciosos
 useEffect(() => {
   if (!auth?.user || !auth?.token) return;
 
-  const url = resolveApiUrl('/auth/heartbeat');
-  const NORMAL_INTERVAL = 25_000;
   let stop = false;
-  let timerId = null;
-  let retryDelay = 5_000;
+  let timer = null;
+  let retryMs = 5_000;
+  const envBase = (typeof import.meta !== "undefined" && import.meta?.env?.VITE_API_BASE)
+    ? String(import.meta.env.VITE_API_BASE).replace(/\/$/, '')
+    : '';
+  const heartbeatUrl = envBase ? `${envBase}/auth/heartbeat` : '/auth/heartbeat';
 
   const schedule = (ms) => {
     if (stop) return;
-    if (timerId) clearTimeout(timerId);
-    timerId = setTimeout(run, ms);
+    timer = setTimeout(beat, ms);
   };
 
-  const run = async () => {
+  const beat = async () => {
     if (stop) return;
     try {
-      await fetch(url, {
+      await fetch(heartbeatUrl, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${auth.token}` },
         keepalive: true,
       });
-      retryDelay = 5_000;
-      schedule(NORMAL_INTERVAL);
+      retryMs = 5_000;
+      schedule(25_000);
     } catch {
-      schedule(retryDelay);
-      retryDelay = Math.min(retryDelay * 2, NORMAL_INTERVAL);
+      retryMs = Math.min(retryMs * 2, 60_000);
+      schedule(retryMs);
     }
   };
 
   schedule(0);
 
-  const kick = () => {
-    if (stop) return;
-    retryDelay = 5_000;
-    schedule(0);
+  const onVis = () => {
+    if (document.visibilityState === 'visible') {
+      retryMs = 5_000;
+      beat();
+    }
   };
-
-  const onVis = () => { if (document.visibilityState === 'visible') kick(); };
   document.addEventListener('visibilitychange', onVis);
 
   const onUnload = () => {
     try {
       const blob = new Blob([], { type: 'application/octet-stream' });
-      navigator.sendBeacon(url, blob);
+      navigator.sendBeacon(heartbeatUrl, blob);
     } catch {}
   };
   window.addEventListener('pagehide', onUnload);
@@ -3752,7 +3642,7 @@ useEffect(() => {
 
   return () => {
     stop = true;
-    if (timerId) clearTimeout(timerId);
+    if (timer) clearTimeout(timer);
     document.removeEventListener('visibilitychange', onVis);
     window.removeEventListener('pagehide', onUnload);
     window.removeEventListener('beforeunload', onUnload);
@@ -3861,20 +3751,17 @@ useEffect(() => {
   }, [auth.user, isAdmin, autoCloudLoaded]);
 
 function handleCalendarCommand(cmd){
-  if (!isAdmin || !cmd) return;
-   const { dateStr, shiftIndex } = cmd;
-  if (!dateStr) return;
-  // Para 'assign' y 'move' sí exigimos índice numérico
-  if ((cmd.type === 'assign' || cmd.type === 'move') && typeof shiftIndex !== 'number') return;
-
-  const closeMenus = () => setTimeout(()=>document.querySelectorAll('details[open]').forEach(d=>d.open=false), 0);
-
-  const fail = (msg) => ({ ok:false, msg });
+  if (!isAdmin || !cmd) return { ok:false, msg:'No autorizado' };
+  const { dateStr, shiftIndex } = cmd;
+  if (!dateStr) return { ok:false, msg:'Fecha no válida' };
+  if ((cmd.type === 'assign' || cmd.type === 'move') && typeof shiftIndex !== 'number') {
+    return { ok:false, msg:'Turno no válido' };
+  }
 
   // Quitar o bloquear
   if (cmd.type === 'clear') {
     forceAssign(dateStr, shiftIndex, cmd.forceEmpty ? '__EMPTY__' : null);
-    closeMenus();
+    setTimeout(()=>document.querySelectorAll('details[open]').forEach(d=>d.open=false), 0);
     return { ok:true };
   }
 
@@ -3883,24 +3770,24 @@ if (cmd.type === 'assign' && typeof shiftIndex === 'number') {
   // 0) slot y estado actual
   const cell  = ASS[dateStr] || [];
   const slot  = cell[shiftIndex];
-  if (!slot || !slot.shift) { showToast('Turno no encontrado'); return; }
+  if (!slot || !slot.shift) { showToast('Turno no encontrado'); return { ok:false, msg:'Turno no encontrado' }; }
 
   // si eliges lo mismo, no cambiamos nada (pero avisamos)
   const target  = String(cmd.personId || '');
   const current = String(slot.personId || '');
-  if (!target) { showToast('Sin cambios'); return fail('Sin cambios'); }
-  if (target === current) { showToast('Sin cambios'); return fail('Sin cambios'); }
+  if (!target) { showToast('Sin cambios'); return { ok:false, msg:'Sin cambios' }; }
+  if (target === current) { showToast('Sin cambios'); return { ok:false, msg:'Sin cambios' }; }
 
   // 1) validación "dura"
   const v = validateCanAssign({ dateStr, shift: slot.shift, personId: target });
-  if (!v.ok && !cmd.force) { showToast(v.msg); return fail(v.msg); } // deja el panel abierto
+  if (!v.ok && !cmd.force) { showToast(v.msg); return { ok:false, msg:v.msg }; }
 
   // 2) aplicar (normal o forzado)
   forceAssign(dateStr, shiftIndex, target);
   showToast(cmd.force ? 'Asignado (forzado)' : 'Asignado');
 
   // cerramos el panel solo si se aplicó
-  closeMenus();
+  setTimeout(()=>document.querySelectorAll('details[open]').forEach(d=>d.open=false), 0);
   return { ok:true };
 }
 
@@ -3909,16 +3796,16 @@ if (cmd.type === 'move' && typeof cmd.fromShiftIndex === 'number' && cmd.personI
   if (samePerson){
     forceAssign(dateStr, cmd.fromShiftIndex, cmd.leaveEmpty ? '__EMPTY__' : null);
     forceAssign(dateStr, cmd.shiftIndex, cmd.personId);
-    closeMenus();
+    setTimeout(()=>document.querySelectorAll('details[open]').forEach(d=>d.open=false), 0);
     return { ok:true };
   }
   const shift = ASS[dateStr]?.[cmd.shiftIndex]?.shift;
-  if (!shift) { showToast('Destino no encontrado'); return fail('Destino no encontrado'); }
+  if (!shift) { showToast('Destino no encontrado'); return { ok:false, msg:'Destino no encontrado' }; }
   const v = validateCanAssign({ dateStr, shift, personId: cmd.personId });
-  if (!v.ok) { showToast(v.msg); return fail(v.msg); }
+  if (!v.ok) { showToast(v.msg); return { ok:false, msg:v.msg }; }
   forceAssign(dateStr, cmd.shiftIndex, cmd.personId);
   forceAssign(dateStr, cmd.fromShiftIndex, cmd.leaveEmpty ? '__EMPTY__' : null);
-  closeMenus();
+  setTimeout(()=>document.querySelectorAll('details[open]').forEach(d=>d.open=false), 0);
   return { ok:true };
 }
 
@@ -3940,7 +3827,7 @@ if (cmd.type === 'addSlotAssign' && cmd.personId) {
   setState(prev => ({ ...prev, events: [ ...(prev.events||[]), ev ] }));
   showToast('Refuerzo creado y asignado');
   // ⬅️ cierra el panel 👤 tras la acción
-  closeMenus();
+  setTimeout(()=>document.querySelectorAll('details[open]').forEach(d=>d.open=false), 0);
   return { ok:true };
 }
 
@@ -3952,56 +3839,56 @@ if (cmd.type === 'removeExtraSlot') {
   // No elimines si sólo queda el turno base
   const baseCount = isWE ? 1 : (state.weekdayShifts?.length || 1);
   const slotsHoy = (ASS[dateStr] || []).length;
-  if (slotsHoy <= baseCount) { showToast('No hay refuerzos que eliminar'); return fail('No hay refuerzos que eliminar'); }
+  if (slotsHoy <= baseCount) { showToast('No hay refuerzos que eliminar'); return { ok:false, msg:'No hay refuerzos que eliminar' }; }
 
   let removed = false;
-  let lastMsg = '';
+  let message = 'Refuerzo eliminado';
   setState(prev => {
     const next = structuredClone(prev);
     const list = next.events || [];
 
-    // Prioriza eventos de 1 día y etiqueta "Refuerzo manual"
     let idx = list.findIndex(e =>
       e.label==='Refuerzo manual' &&
       e.start===e.end && e.start===dateStr &&
       (isWE ? (e.weekendExtraSlots||0) : (e.weekdaysExtraSlots||0)) > 0
     );
     if (idx < 0) {
-      // fallback: cualquier evento que cubra el día con extra>0
       idx = list.findIndex(e =>
         parseDateValue(e.start) <= d && d <= parseDateValue(e.end) &&
         (isWE ? (e.weekendExtraSlots||0) : (e.weekdaysExtraSlots||0)) > 0
       );
     }
-    if (idx < 0) { showToast('No hay refuerzos para eliminar en este día'); lastMsg = 'No hay refuerzos para eliminar en este día'; return next; }
+    if (idx < 0) {
+      message = 'No hay refuerzos para eliminar en este día';
+      return prev;
+    }
 
     const ev = {...list[idx]};
     if (isWE) ev.weekendExtraSlots = Math.max(0,(ev.weekendExtraSlots||0)-1);
     else      ev.weekdaysExtraSlots= Math.max(0,(ev.weekdaysExtraSlots||0)-1);
 
-    // Si el evento queda a cero y sólo era de 1 día, elimínalo
     if ((ev.weekendExtraSlots||0)===0 && (ev.weekdaysExtraSlots||0)===0 && ev.start===ev.end) {
       list.splice(idx,1);
     } else {
       list[idx] = ev;
     }
     next.events = list;
-    showToast('Refuerzo eliminado');
     removed = true;
     return next;
   });
 
-  // ⬅️ cierra el panel 👤
-  if (removed) {
-    closeMenus();
-    return { ok:true };
+  showToast(message);
+
+  if (!removed) {
+    return { ok:false, msg: message };
   }
-  return fail(lastMsg || 'No hay refuerzos para eliminar en este día');
+
+  setTimeout(()=>document.querySelectorAll('details[open]').forEach(d=>d.open=false), 0);
+  return { ok:true };
 
  }
 
-  return fail('Acción no reconocida');
-
+ return { ok:false };
 }
 
 // ---------- Render principal ----------
@@ -4140,17 +4027,7 @@ if (cmd.type === 'removeExtraSlot') {
 
 
           <Card title="Auditoría (últimos 100)">
-  <div className="flex items-center justify-between mb-2 text-xs text-slate-600">
-    <span>Últimas acciones</span>
-    <button
-      type="button"
-      className={`px-2 py-0.5 border rounded ${state.audit && state.audit.length ? '' : 'opacity-50 cursor-not-allowed'}`}
-      onClick={exportAuditCsv}
-      disabled={!(state.audit && state.audit.length)}
-    >
-      Export CSV
-    </button>
-  </div>
+  <button onClick={exportAuditCsv} className="mb-2 px-2 py-0.5 border rounded text-xs">Export CSV</button>
   <div className="max-h-40 overflow-auto text-xs">
     {((state.audit||[]).slice(-100).reverse()).map((e,i)=>(
       <div key={i} className="py-0.5 border-b last:border-0">
@@ -4241,13 +4118,12 @@ if (cmd.type === 'removeExtraSlot') {
   <Card title="Calendario diario (admin)">
     <CalendarView
       startDate={weeklyStart}
-      weeks={userWeeks} 
+      weeks={userWeeks}
       assignments={ASS}
       people={state.people}
       isAdmin={isAdmin}
       onOpenDay={(ds)=>setModalDayProp(ds)}
       onQuickAssign={handleCalendarCommand}
-      forceAssign={forceAssign}   // ← aquí va el handler nuevo
       province={state.province}
       closeOnHolidays={state.closeOnHolidays}
       closedExtraDates={state.closedExtraDates}
