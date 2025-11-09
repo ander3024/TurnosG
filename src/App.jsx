@@ -2238,13 +2238,8 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
                                     type="button"
                                     className="px-2 py-0.5 border rounded text-[11px] text-slate-600"
                                     onClick={()=>{
-<<<<<<< HEAD
-                                      onQuickAssign({ type:'removeExtraSlot', dateStr, shiftIndex: assignmentIndex });
-                                      setTimeout(()=>document.querySelectorAll('details[open]').forEach(d=>d.open=false), 0);
-=======
                                       if (!confirm('¿Eliminar un refuerzo extra de este día?')) return;
                                       runCommand(slotKey, { type:'removeExtraSlot', dateStr, shiftIndex: assignmentIndex }, { closeOnSuccess: true });
->>>>>>> codex-verify
                                     }}
                                   >
                                     Eliminar un refuerzo de este día
