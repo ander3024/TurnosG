@@ -3727,29 +3727,6 @@ useEffect(() => {
     return () => clearInterval(id);
   }, [auth?.user, auth?.token]);
 
-  // === Export CSV de auditoría (últimos 100) ===
-const exportAuditCsv = React.useCallback(() => {
-  const audits = (state.audit || []).slice(-100).reverse();
-  const rows = [["ts","actor","action","dateStr"].join(",")];
-
-  audits.forEach(e => {
-    const r = [
-      e?.ts || "",
-      e?.actor || "sys",
-      e?.action || "",
-      e?.dateStr || ""
-    ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(",");
-    rows.push(r);
-  });
-
-  const blob = new Blob([rows.join("\n")], { type: "text/csv;charset=utf-8;" });
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = `audit_${new Date().toISOString().slice(0,10)}.csv`;
-  a.click();
-}, [state.audit]);
-
-
 
   // --- scope admin (robusto tras refactor) ---
   // Aliases seguros para modal del día (local o via props)
@@ -4063,13 +4040,11 @@ if (cmd.type === 'removeExtraSlot') {
 {isAdmin && <AdminSessionsAuditCard auth={auth} showToast={showToast} />}
 
 
-<Card title="Auditoría (últimos 100)">
-  {typeof exportAuditCsv === "function" && (
-    <button onClick={exportAuditCsv} className="mb-2 px-2 py-0.5 border rounded text-xs">
-      Export CSV
-    </button>
-  )}
-  <div className="max-h-40 overflow-auto text-xs">
+          <Card title="Auditoría (últimos 100)">
+            {typeof exportAuditCsv === "function" && (
+              <button onClick={exportAuditCsv} className="mb-2 px-2 py-0.5 border rounded text-xs">Export CSV</button>
+            )}
+            <div className="max-h-40 overflow-auto text-xs">
     {((state.audit||[]).slice(-100).reverse()).map((e,i)=>(
       <div key={i} className="py-0.5 border-b last:border-0">
         <span className="text-slate-500">{(e.ts||"").replace("T"," ").replace("Z","")} · </span>
@@ -4079,7 +4054,7 @@ if (cmd.type === 'removeExtraSlot') {
       </div>
     ))}
     {!(state.audit&&state.audit.length) && <div className="text-slate-500">Sin eventos aún.</div>}
-  </div>
+            </div>
 </Card>
 
 <PersonasPanel state={state} upPerson={upPerson} />
