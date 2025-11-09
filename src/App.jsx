@@ -1881,9 +1881,7 @@ const assignmentsImproved = useMemo(()=> improveConciliation({
     };
   }, [
     ASS,
-    activeSandboxLayer,
-    pName,
-    state.timeOffs,
+    activeSandboxLayer,state.timeOffs,
     state.people,
     state.vacationDaysNatural,
     state.province,
@@ -2345,6 +2343,8 @@ return (
   rollbackSandboxBatch={rollbackSandboxBatch}
   sandboxComparison={sandboxComparison}
   setSandboxObjectives={setSandboxObjectives}
+  pName={pName}
+  pColor={pColor}
 />
 );
 }
@@ -4704,7 +4704,7 @@ function AuthenticatedApp(props){
           sandboxState, activeSandboxLayer, activeSnapshots, sandboxRuntime,
           sandboxCreateFromReal, sandboxActivate, sandboxDuplicate, sandboxDelete,
           sandboxSaveSnapshot, sandboxRestoreSnapshot, sandboxExportJSON, sandboxExportCSV,
-          runOptimization, applySandboxLayer, rollbackSandboxBatch, sandboxComparison, setSandboxObjectives } = props;
+          runOptimization, applySandboxLayer, rollbackSandboxBatch, sandboxComparison, setSandboxObjectives, pName, pColor } = props;
 
   // === AUDITORÍA DE PRESENCIA (online) ===
   const [online, setOnline] = useState({ users: [], at: null });
