@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 
 const IDLE_MS = 15 * 60 * 1000; // 15 minutos
 const DEFAULT_TOAST_MS = 2000;
@@ -916,8 +916,8 @@ export default function App(){
   
   // --- ui feedback (banner + toast) ---
   const [ui, setUI] = useState({ sync:null, toast:null });
-  const toastTimeoutRef = React.useRef(null);
-  const idleTimeoutRef = React.useRef(null);
+  const toastTimeoutRef = useRef(null);
+  const idleTimeoutRef = useRef(null);
 
   useEffect(() => () => {
     if (toastTimeoutRef.current) {
