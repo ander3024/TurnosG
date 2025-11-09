@@ -1633,10 +1633,14 @@ const assignmentsImproved = useMemo(()=> improveConciliation({
   const sandboxComparison = useMemo(() => {
     if (!activeSandboxLayer) return { perPerson: [], diffsByDate: [], totalChanges: 0 };
     const perPerson = compareAssignments(ASS, activeSandboxLayer.assignments);
+
+    // resolver nombres SIN depender de pName
+    const nameOfLocal = (id) => (id ? (personById.get(id)?.name || String(id)) : "Vacío");
+
     const diffs = diffAssignments(ASS, activeSandboxLayer.assignments).map(diff => ({
       ...diff,
-      fromName: pName(diff.fromPerson),
-      toName: pName(diff.toPerson)
+      fromName: nameOfLocal(diff.fromPerson),
+      toName:   nameOfLocal(diff.toPerson)
     }));
     diffs.sort((a,b) => {
       const dateCompare = (a.dateStr || "").localeCompare(b.dateStr || "");
@@ -1647,7 +1651,7 @@ const assignmentsImproved = useMemo(()=> improveConciliation({
       return (a.slotIndex ?? 0) - (b.slotIndex ?? 0);
     });
     return { perPerson, diffsByDate: diffs, totalChanges: diffs.length };
-  }, [ASS, activeSandboxLayer, pName]);
+  }, [ASS, activeSandboxLayer, personById]);
 
   // ---------- Hooks que deben ejecutarse SIEMPRE ----------
   const [payroll,setPayroll]=useState({ from: state.startDate, to: toDateValue(addDays(startDate, state.weeks*7-1)) });
@@ -2100,6 +2104,8 @@ return (
   rollbackSandboxBatch={rollbackSandboxBatch}
   sandboxComparison={sandboxComparison}
   setSandboxObjectives={setSandboxObjectives}
+  pName={pName}
+  pColor={pColor}
 />
 );
 }
@@ -4392,7 +4398,7 @@ function AuthenticatedApp(props){
           sandboxState, activeSandboxLayer, activeSnapshots, sandboxRuntime,
           sandboxCreateFromReal, sandboxActivate, sandboxDuplicate, sandboxDelete,
           sandboxSaveSnapshot, sandboxRestoreSnapshot, sandboxExportJSON, sandboxExportCSV,
-          runOptimization, applySandboxLayer, rollbackSandboxBatch, sandboxComparison, setSandboxObjectives } = props;
+          runOptimization, applySandboxLayer, rollbackSandboxBatch, sandboxComparison, setSandboxObjectives, pName, pColor } = props;
 
   // === AUDITORÍA DE PRESENCIA (online) ===
   const [online, setOnline] = useState({ users: [], at: null });
@@ -4793,11 +4799,10 @@ if (cmd.type === 'removeExtraSlot') {
         <section className="lg:col-span-1 space-y-6">
           {isAdmin && (<><ConfigBasica state={state} up={up} />
           <ReglasPanel state={state} up={up} isAdmin={isAdmin} />
-          
           <OffPolicyPanel state={state} up={up} />
           <VacationPolicyPanel state={state} up={up} />
           <RefuerzoPolicyPanel state={state} up={up} />
-<ConciliacionPanel state={state} up={up} />
+          <ConciliacionPanel state={state} up={up} />
           <Card title="Debug">
             <div className="space-y-2 text-sm">
               <label className="flex items-center gap-2">
