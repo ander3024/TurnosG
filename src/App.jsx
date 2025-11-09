@@ -2051,6 +2051,7 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
   const todayStr = toDateValue(new Date());
   const workingSet = new Set(workingHolidays||[]);
   const [menuState, setMenuState] = useState({});
+  const menuPendingRef = useRef(new Set());
 
   const closeMenus = useCallback(() => {
     setTimeout(()=>document.querySelectorAll('details[open]').forEach(d=>{ d.open = false; }), 0);
@@ -2059,22 +2060,15 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
   const runCommand = useCallback(async (slotKey, payload, opts = {}) => {
     if (typeof onQuickAssign !== 'function') return { ok:false, msg:'Acción no disponible' };
 
-    let shouldAbort = false;
-    setMenuState(prev => {
-      const slot = prev[slotKey];
-      if (slot?.pending) {
-        shouldAbort = true;
-        return prev;
-      }
-      return {
-        ...prev,
-        [slotKey]: { ...(slot || {}), pending: true, error: '' }
-      };
-    });
-
-    if (shouldAbort) {
+    if (menuPendingRef.current.has(slotKey)) {
       return { ok:false, msg:'Acción en curso' };
     }
+
+    menuPendingRef.current.add(slotKey);
+    setMenuState(prev => ({
+      ...prev,
+      [slotKey]: { ...(prev[slotKey] || {}), pending: true, error: '' }
+    }));
 
     try {
       const result = onQuickAssign(payload);
@@ -2092,6 +2086,8 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
         [slotKey]: { ...(prev[slotKey] || {}), pending: false, error: err?.message || 'Error inesperado' }
       }));
       throw err;
+    } finally {
+      menuPendingRef.current.delete(slotKey);
     }
   }, [onQuickAssign, closeMenus]);
 
