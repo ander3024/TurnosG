@@ -337,6 +337,138 @@ function countVacationDaysConsideringHolidays(s, e, province, consume){
   }
   return total;
 }
+
+function shouldCountVacationDayForLedger(dateStr, opts){
+  if (!dateStr) return false;
+  const {
+    workingHolidaySet = new Set(),
+    consumeVacationOnHoliday = true,
+    province = 'Madrid',
+    closeOnHolidays = true,
+    closedExtraDates = [],
+    customHolidaysByYear = {}
+  } = opts || {};
+  const dow = parseDateValue(dateStr).getDay();
+  if (dow === 0 || dow === 6) return false; // sólo L–V
+  if (workingHolidaySet.has(dateStr)) return true;
+  const isHoliday = isClosedBusinessDay2(dateStr, province, closeOnHolidays, closedExtraDates, customHolidaysByYear);
+  if (!consumeVacationOnHoliday && isHoliday) return false;
+  return true;
+}
+
+function buildVacationLedger({
+  timeOffs = [],
+  people = [],
+  vacationDaysNatural = 0,
+  province = 'Madrid',
+  closeOnHolidays = true,
+  closedExtraDates = [],
+  customHolidaysByYear = {},
+  consumeVacationOnHoliday = true,
+  workingHolidays = []
+}){
+  const workingHolidaySet = new Set(workingHolidays || []);
+  const personMap = new Map((people || []).filter(p => p && p.id).map(p => [p.id, p]));
+  const defaultAllowance = Number(vacationDaysNatural) || 0;
+  const ledger = new Map();
+
+  const ensureEntry = (personId) => {
+    if (!personId) return null;
+    if (!ledger.has(personId)){
+      const person = personMap.get(personId);
+      const personalAllowance = person && Number.isFinite(Number(person.vacationDaysNatural))
+        ? Number(person.vacationDaysNatural)
+        : defaultAllowance;
+      ledger.set(personId, {
+        allowance: personalAllowance,
+        used: 0,
+        remaining: personalAllowance
+      });
+    }
+    return ledger.get(personId);
+  };
+
+  for (const pid of personMap.keys()){
+    ensureEntry(pid);
+  }
+
+  const countOpts = {
+    workingHolidaySet,
+    consumeVacationOnHoliday,
+    province,
+    closeOnHolidays,
+    closedExtraDates,
+    customHolidaysByYear
+  };
+
+  for (const to of timeOffs || []){
+    if (!to || to.type !== 'vacaciones' || to.status !== 'aprobada') continue;
+    const entry = ensureEntry(to.personId);
+    if (!entry) continue;
+    const dates = expandRange(to.start, to.end);
+    let consumed = 0;
+    for (const dateStr of dates){
+      if (shouldCountVacationDayForLedger(dateStr, countOpts)){
+        consumed += 1;
+      }
+    }
+    entry.used += consumed;
+  }
+
+  for (const entry of ledger.values()){
+    entry.remaining = entry.allowance - entry.used;
+  }
+
+  return { ledger, defaultAllowance };
+}
+
+function findVacationConflicts(assignments, timeOffs, opts){
+  const result = [];
+  if (!assignments) assignments = {};
+  const countOpts = {
+    workingHolidaySet: opts?.workingHolidaySet || new Set(),
+    consumeVacationOnHoliday: opts?.consumeVacationOnHoliday,
+    province: opts?.province,
+    closeOnHolidays: opts?.closeOnHolidays,
+    closedExtraDates: opts?.closedExtraDates,
+    customHolidaysByYear: opts?.customHolidaysByYear
+  };
+
+  for (const to of timeOffs || []){
+    if (!to || to.type !== 'vacaciones' || to.status !== 'aprobada') continue;
+    const personId = to.personId;
+    if (!personId) continue;
+    const dates = expandRange(to.start, to.end);
+    for (const dateStr of dates){
+      if (!shouldCountVacationDayForLedger(dateStr, countOpts)) continue;
+      const cell = assignments?.[dateStr] || [];
+      const slots = [];
+      cell.forEach((slot, idx) => {
+        if (slot?.personId === personId){
+          const shift = slot?.shift || {};
+          const start = shift?.start || '';
+          const end = shift?.end || '';
+          const label = shift?.label || `Slot ${idx+1}`;
+          slots.push({ label, start, end });
+        }
+      });
+      if (slots.length){
+        result.push({ dateStr, personId, slots });
+      }
+    }
+  }
+
+  result.sort((a,b) => {
+    const cmpDate = (a.dateStr || '').localeCompare(b.dateStr || '');
+    if (cmpDate !== 0) return cmpDate;
+    const nameA = a.personId || '';
+    const nameB = b.personId || '';
+    if (nameA !== nameB) return String(nameA).localeCompare(String(nameB));
+    return a.slots.length - b.slots.length;
+  });
+
+  return result;
+}
 function indexTimeOff(timeOffs, opts){
   const map=new Map();
   const province = opts?.province || 'Madrid';
@@ -1631,16 +1763,94 @@ const assignmentsImproved = useMemo(()=> improveConciliation({
   }, [personById]);
 
   const sandboxComparison = useMemo(() => {
-    if (!activeSandboxLayer) return { perPerson: [], diffsByDate: [], totalChanges: 0 };
-    const perPerson = compareAssignments(ASS, activeSandboxLayer.assignments);
+    const ledgerResult = buildVacationLedger({
+      timeOffs: state.timeOffs,
+      people: state.people,
+      vacationDaysNatural: state.vacationDaysNatural,
+      province: state.province,
+      closeOnHolidays: state.closeOnHolidays,
+      closedExtraDates: state.closedExtraDates,
+      customHolidaysByYear: state.customHolidaysByYear,
+      consumeVacationOnHoliday: state.consumeVacationOnHoliday,
+      workingHolidays: state.workingHolidays
+    });
 
-    // resolver nombres SIN depender de pName
-    const nameOfLocal = (id) => (id ? (personById.get(id)?.name || String(id)) : "Vacío");
+    const baseRows = Array.from(ledgerResult.ledger.entries()).map(([personId, entry]) => ({
+      personId,
+      diffMinutes: 0,
+      diffDays: 0,
+      diffWeekends: 0,
+      baseMinutes: 0,
+      candidateMinutes: 0,
+      vacationUsed: entry.used,
+      vacationRemaining: entry.remaining,
+      vacationAllowance: entry.allowance
+    }));
+
+    if (!activeSandboxLayer) {
+      return {
+        perPerson: baseRows,
+        diffsByDate: [],
+        totalChanges: 0,
+        vacationLedger: ledgerResult.ledger,
+        vacationDefaultAllowance: ledgerResult.defaultAllowance,
+        vacationConflicts: []
+      };
+    }
+
+    const diffRows = compareAssignments(ASS, activeSandboxLayer.assignments);
+    const rowMap = new Map(baseRows.map(row => [row.personId, { ...row }]));
+    const ensureRow = (personId) => {
+      if (!personId) return null;
+      if (!rowMap.has(personId)) {
+        rowMap.set(personId, {
+          personId,
+          diffMinutes: 0,
+          diffDays: 0,
+          diffWeekends: 0,
+          baseMinutes: 0,
+          candidateMinutes: 0,
+          vacationUsed: 0,
+          vacationRemaining: ledgerResult.defaultAllowance,
+          vacationAllowance: ledgerResult.defaultAllowance
+        });
+      }
+      return rowMap.get(personId);
+    };
+
+    diffRows.forEach(row => {
+      const target = ensureRow(row.personId);
+      if (!target) return;
+      target.diffMinutes = row.diffMinutes;
+      target.diffDays = row.diffDays;
+      target.diffWeekends = row.diffWeekends;
+      target.baseMinutes = row.baseMinutes;
+      target.candidateMinutes = row.candidateMinutes;
+    });
+
+    for (const [personId, entry] of ledgerResult.ledger.entries()){
+      const target = ensureRow(personId);
+      if (!target) continue;
+      target.vacationUsed = entry.used;
+      target.vacationRemaining = entry.remaining;
+      target.vacationAllowance = entry.allowance;
+    }
+
+    for (const row of rowMap.values()){
+      if (typeof row.vacationUsed !== 'number') row.vacationUsed = 0;
+      if (typeof row.vacationRemaining !== 'number'){
+        const allowance = typeof row.vacationAllowance === 'number' ? row.vacationAllowance : ledgerResult.defaultAllowance;
+        row.vacationRemaining = allowance - row.vacationUsed;
+      }
+    }
+
+    const perPerson = Array.from(rowMap.values());
+    perPerson.sort((a,b) => Math.abs(b.diffMinutes) - Math.abs(a.diffMinutes));
 
     const diffs = diffAssignments(ASS, activeSandboxLayer.assignments).map(diff => ({
       ...diff,
-      fromName: nameOfLocal(diff.fromPerson),
-      toName:   nameOfLocal(diff.toPerson)
+      fromName: pName(diff.fromPerson),
+      toName: pName(diff.toPerson)
     }));
     diffs.sort((a,b) => {
       const dateCompare = (a.dateStr || "").localeCompare(b.dateStr || "");
@@ -1650,8 +1860,39 @@ const assignmentsImproved = useMemo(()=> improveConciliation({
       if (startA !== startB) return startA.localeCompare(startB);
       return (a.slotIndex ?? 0) - (b.slotIndex ?? 0);
     });
-    return { perPerson, diffsByDate: diffs, totalChanges: diffs.length };
-  }, [ASS, activeSandboxLayer, personById]);
+
+    const conflictOpts = {
+      workingHolidaySet: new Set(state.workingHolidays || []),
+      consumeVacationOnHoliday: state.consumeVacationOnHoliday,
+      province: state.province,
+      closeOnHolidays: state.closeOnHolidays,
+      closedExtraDates: state.closedExtraDates,
+      customHolidaysByYear: state.customHolidaysByYear
+    };
+    const vacationConflicts = findVacationConflicts(activeSandboxLayer.assignments, state.timeOffs, conflictOpts);
+
+    return {
+      perPerson,
+      diffsByDate: diffs,
+      totalChanges: diffs.length,
+      vacationLedger: ledgerResult.ledger,
+      vacationDefaultAllowance: ledgerResult.defaultAllowance,
+      vacationConflicts
+    };
+  }, [
+    ASS,
+    activeSandboxLayer,
+    pName,
+    state.timeOffs,
+    state.people,
+    state.vacationDaysNatural,
+    state.province,
+    state.consumeVacationOnHoliday,
+    state.closeOnHolidays,
+    state.closedExtraDates,
+    state.customHolidaysByYear,
+    state.workingHolidays
+  ]);
 
   // ---------- Hooks que deben ejecutarse SIEMPRE ----------
   const [payroll,setPayroll]=useState({ from: state.startDate, to: toDateValue(addDays(startDate, state.weeks*7-1)) });
@@ -2104,8 +2345,6 @@ return (
   rollbackSandboxBatch={rollbackSandboxBatch}
   sandboxComparison={sandboxComparison}
   setSandboxObjectives={setSandboxObjectives}
-  pName={pName}
-  pColor={pColor}
 />
 );
 }
@@ -2296,9 +2535,19 @@ function SandboxObjectivesCard({ objectives, onChange }){
 function SandboxComparatorCard({ activeLayer, comparison, pName, pColor, onExportDiffs }){
   const rows = comparison?.perPerson || [];
   const diffsByDate = comparison?.diffsByDate || [];
+  const ledger = comparison?.vacationLedger;
+  const defaultAllowance = comparison?.vacationDefaultAllowance ?? 0;
+  const vacationConflicts = comparison?.vacationConflicts || [];
 
   const nameOf = typeof pName === "function" ? pName : (id => (id ? String(id) : "Vacío"));
   const colorOf = typeof pColor === "function" ? pColor : (() => "#64748b");
+
+  const ledgerEntryFor = (personId) => {
+    if (!personId) return null;
+    if (ledger instanceof Map) return ledger.get(personId) || null;
+    if (ledger && typeof ledger === "object") return ledger[personId] || null;
+    return null;
+  };
 
   const renderPerson = (personId) => {
     if (!personId) {
@@ -2346,6 +2595,48 @@ function SandboxComparatorCard({ activeLayer, comparison, pName, pColor, onExpor
           </button>
         )}
       </div>
+      <div className="mb-4 text-xs text-slate-600 flex flex-wrap items-center gap-2">
+        <span className="font-semibold text-slate-700">Delta vacaciones:</span>
+        {vacationConflicts.length > 0 ? (
+          <span className="text-rose-600 font-semibold">{vacationConflicts.length} conflicto(s)</span>
+        ) : (
+          <span className="text-emerald-600 font-semibold">Sin conflictos</span>
+        )}
+      </div>
+      {vacationConflicts.length > 0 && (
+        <div className="mb-4 border rounded-lg overflow-hidden">
+          <table className="w-full text-xs">
+            <thead className="bg-rose-50 text-rose-700 text-left">
+              <tr>
+                <th className="px-2 py-1 border">Fecha</th>
+                <th className="px-2 py-1 border">Persona</th>
+                <th className="px-2 py-1 border">Turnos en conflicto</th>
+              </tr>
+            </thead>
+            <tbody>
+              {vacationConflicts.map((item, idx) => (
+                <tr key={`${item.dateStr}_${item.personId}_${idx}`}>
+                  <td className="px-2 py-1 border whitespace-nowrap">{item.dateStr}</td>
+                  <td className="px-2 py-1 border">{renderPerson(item.personId)}</td>
+                  <td className="px-2 py-1 border">
+                    <ul className="list-disc list-inside space-y-0.5">
+                      {item.slots.map((slot, sIdx) => {
+                        const range = slot.start && slot.end ? `${slot.start}–${slot.end}` : (slot.start || slot.end || '');
+                        return (
+                          <li key={sIdx}>
+                            {slot.label}
+                            {range ? ` · ${range}` : ''}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
           <h3 className="text-xs font-semibold mb-2 uppercase tracking-wide text-slate-500">Por persona</h3>
@@ -2356,11 +2647,13 @@ function SandboxComparatorCard({ activeLayer, comparison, pName, pColor, onExpor
                 <th className="px-2 py-1 border">Δ horas</th>
                 <th className="px-2 py-1 border">Δ días</th>
                 <th className="px-2 py-1 border">Δ findes</th>
+                <th className="px-2 py-1 border">Vacaciones disfrutadas</th>
+                <th className="px-2 py-1 border">Vacaciones restantes</th>
               </tr>
             </thead>
             <tbody>
               {rows.length === 0 && (
-                <tr><td className="px-2 py-2 text-center text-slate-500" colSpan={4}>Sin diferencias</td></tr>
+                <tr><td className="px-2 py-2 text-center text-slate-500" colSpan={6}>Sin diferencias</td></tr>
               )}
               {rows.map(row => (
                 <tr key={row.personId}>
@@ -2375,6 +2668,19 @@ function SandboxComparatorCard({ activeLayer, comparison, pName, pColor, onExpor
                   </td>
                   <td className="px-2 py-1 border">{row.diffDays >= 0 ? `+${row.diffDays}` : row.diffDays}</td>
                   <td className="px-2 py-1 border">{row.diffWeekends >= 0 ? `+${row.diffWeekends}` : row.diffWeekends}</td>
+                  {(() => {
+                    const entry = ledgerEntryFor(row.personId);
+                    const used = entry?.used ?? row.vacationUsed ?? 0;
+                    const remainingBase = entry?.remaining ?? row.vacationRemaining;
+                    const allowance = entry?.allowance ?? row.vacationAllowance ?? defaultAllowance;
+                    const remaining = typeof remainingBase === 'number' ? remainingBase : (allowance - used);
+                    return (
+                      <>
+                        <td className="px-2 py-1 border">{Number(used || 0).toFixed(1)}</td>
+                        <td className="px-2 py-1 border">{Number(remaining).toFixed(1)}</td>
+                      </>
+                    );
+                  })()}
                 </tr>
               ))}
             </tbody>
@@ -4398,7 +4704,7 @@ function AuthenticatedApp(props){
           sandboxState, activeSandboxLayer, activeSnapshots, sandboxRuntime,
           sandboxCreateFromReal, sandboxActivate, sandboxDuplicate, sandboxDelete,
           sandboxSaveSnapshot, sandboxRestoreSnapshot, sandboxExportJSON, sandboxExportCSV,
-          runOptimization, applySandboxLayer, rollbackSandboxBatch, sandboxComparison, setSandboxObjectives, pName, pColor } = props;
+          runOptimization, applySandboxLayer, rollbackSandboxBatch, sandboxComparison, setSandboxObjectives } = props;
 
   // === AUDITORÍA DE PRESENCIA (online) ===
   const [online, setOnline] = useState({ users: [], at: null });
@@ -4799,10 +5105,11 @@ if (cmd.type === 'removeExtraSlot') {
         <section className="lg:col-span-1 space-y-6">
           {isAdmin && (<><ConfigBasica state={state} up={up} />
           <ReglasPanel state={state} up={up} isAdmin={isAdmin} />
+          
           <OffPolicyPanel state={state} up={up} />
           <VacationPolicyPanel state={state} up={up} />
           <RefuerzoPolicyPanel state={state} up={up} />
-          <ConciliacionPanel state={state} up={up} />
+<ConciliacionPanel state={state} up={up} />
           <Card title="Debug">
             <div className="space-y-2 text-sm">
               <label className="flex items-center gap-2">
