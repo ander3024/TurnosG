@@ -1063,7 +1063,6 @@ function forceAssign(dateStr, assignmentIndex, personId){
       if(!data.payload){ if (!silent) alert("No hay datos guardados para ese Space ID"); return; }
       const payload = { ...data.payload };
       payload.conciliacion = safeConciliacion(payload.conciliacion || {});
-if (!payload.conciliacion) payload.conciliacion = safeConciliacion();
       if (typeof payload.applyConciliation === 'undefined') payload.applyConciliation = true;
       if (!payload.refuerzoMorningShift)  payload.refuerzoMorningShift  = { start:"10:00", end:"14:00", label:"Refuerzo Mañana",  lunchMinutes:0 };
       if (!payload.refuerzoAfternoonShift)payload.refuerzoAfternoonShift= { start:"16:00", end:"20:00", label:"Refuerzo Tarde",   lunchMinutes:0 };
@@ -1327,16 +1326,17 @@ if (!auth.user || !auth.token) {
   }
 
   function clearVisibleOverrides(){
-  const from = weeklyStart;
-  const to   = addDays(weeklyStart, userWeeks*7 - 1);
-  const next = structuredClone(state.overrides || {});
-  const keys = Object.keys(next);
-  for (const ds of keys){
-    const d = parseDateValue(ds);
-    if (d >= from && d <= to) delete next[ds];
-  }
-  setState(prev => ({ ...prev, overrides: next }));
-  showToast("Overrides del rango visible eliminados");
+    if (!confirm('¿Eliminar los overrides del rango visible?')) return;
+    const from = weeklyStart;
+    const to   = addDays(weeklyStart, userWeeks*7 - 1);
+    const next = structuredClone(state.overrides || {});
+    const keys = Object.keys(next);
+    for (const ds of keys){
+      const d = parseDateValue(ds);
+      if (d >= from && d <= to) delete next[ds];
+    }
+    setState(prev => ({ ...prev, overrides: next }));
+    showToast("Overrides del rango visible eliminados");
   }
 
 function duplicateVisibleToNextWeek(){
@@ -1395,23 +1395,24 @@ function undoLastOverride(){
 // - Si shiftIndex !== null => override en ese slot.
 // - Si shiftIndex === null  => crea un refuerzo ese día y lo asigna.
 function quickAssign(dateStr, shiftIndex, personId){
-  if (!personId) return;
+  if (!personId) {
+    return { ok:false, msg:'Persona no válida' };
+  }
 
-  
- // Barreras: no asignar si la persona no está disponible o ya trabaja ese día
-    const indexTO = indexTimeOff(state.timeOffs, {
-      province: state.province,
-      consumeVacationOnHoliday: state.consumeVacationOnHoliday,
-      customHolidaysByYear: state.customHolidaysByYear
-    });
-    if (indexTO.get(personId)?.has(dateStr)) {
-      showToast('No disponible: vacaciones/libranza/viaje');
-      return;
-    }
-    if ((ASS[dateStr]||[]).some(a => a.personId === personId)) {
-      showToast('Ya tiene turno ese día');
-      return;
-    }
+  // Barreras: no asignar si la persona no está disponible o ya trabaja ese día
+  const indexTO = indexTimeOff(state.timeOffs, {
+    province: state.province,
+    consumeVacationOnHoliday: state.consumeVacationOnHoliday,
+    customHolidaysByYear: state.customHolidaysByYear
+  });
+  if (indexTO.get(personId)?.has(dateStr)) {
+    showToast('No disponible: vacaciones/libranza/viaje');
+    return { ok:false, msg:'No disponible: vacaciones/libranza/viaje' };
+  }
+  if ((ASS[dateStr]||[]).some(a => a.personId === personId)) {
+    showToast('Ya tiene turno ese día');
+    return { ok:false, msg:'Ya tiene turno ese día' };
+  }
 
   // 1) Si hay slot → override directo
   if (shiftIndex !== null) {
@@ -1421,7 +1422,7 @@ function quickAssign(dateStr, shiftIndex, personId){
     const cell = ASS[dateStr] || [];
     const a = cell[shiftIndex];
     if (a?.shift) checkHoursAndNotify({ date, personId, shift: a.shift });
-    return;
+    return { ok:true };
   }
 
   // 2) Si no hay slot → crear refuerzo + forzar asignación
@@ -1443,6 +1444,7 @@ function quickAssign(dateStr, shiftIndex, personId){
   // Intento de aviso de horas con el turno de refuerzo por defecto
   const shift = isWE ? state.weekendShift : state.refuerzoWeekdayShift;
   checkHoursAndNotify({ date: d, personId, shift });
+  return { ok:true };
 }
 
 // Cálculo y avisos de horas diarias/semanales y balance "rápido".
@@ -2236,8 +2238,13 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
                                     type="button"
                                     className="px-2 py-0.5 border rounded text-[11px] text-slate-600"
                                     onClick={()=>{
+<<<<<<< HEAD
                                       onQuickAssign({ type:'removeExtraSlot', dateStr, shiftIndex: assignmentIndex });
                                       setTimeout(()=>document.querySelectorAll('details[open]').forEach(d=>d.open=false), 0);
+=======
+                                      if (!confirm('¿Eliminar un refuerzo extra de este día?')) return;
+                                      runCommand(slotKey, { type:'removeExtraSlot', dateStr, shiftIndex: assignmentIndex }, { closeOnSuccess: true });
+>>>>>>> codex-verify
                                     }}
                                   >
                                     Eliminar un refuerzo de este día
@@ -2770,6 +2777,7 @@ function PropuestaCierre({ state, startDate, weeks, people, assignments, onApply
   }
 
   function eliminar(){
+    if (!confirm('¿Eliminar los refuerzos de conciliación generados?')) return;
     onApply([], 'replace', null);
     alert('Refuerzos de conciliación eliminados.');
   }
