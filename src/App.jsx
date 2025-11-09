@@ -2291,14 +2291,17 @@ function SandboxComparatorCard({ activeLayer, comparison, pName, pColor, onExpor
   const rows = comparison?.perPerson || [];
   const diffsByDate = comparison?.diffsByDate || [];
 
+  const nameOf = typeof pName === "function" ? pName : (id => (id ? String(id) : "Vacío"));
+  const colorOf = typeof pColor === "function" ? pColor : (() => "#64748b");
+
   const renderPerson = (personId) => {
     if (!personId) {
-      return <span className="text-slate-400">Vacío</span>;
+      return <span className="text-slate-400">{nameOf(personId)}</span>;
     }
     return (
       <span className="inline-flex items-center gap-2">
-        <span className="inline-block w-3 h-3 rounded-full" style={{ backgroundColor: pColor(personId) }} />
-        <span>{pName(personId)}</span>
+        <span className="inline-block w-3 h-3 rounded-full" style={{ backgroundColor: colorOf(personId) }} />
+        <span>{nameOf(personId)}</span>
       </span>
     );
   };
@@ -2315,8 +2318,8 @@ function SandboxComparatorCard({ activeLayer, comparison, pName, pColor, onExpor
       item.shiftLabel || "",
       item.start || "",
       item.end || "",
-      pName(item.fromPerson),
-      pName(item.toPerson)
+      nameOf(item.fromPerson),
+      nameOf(item.toPerson)
     ]);
     const csv = [header, ...csvRows].map(line => line.map(value => {
       if (value == null) return "";
@@ -2357,8 +2360,8 @@ function SandboxComparatorCard({ activeLayer, comparison, pName, pColor, onExpor
                 <tr key={row.personId}>
                   <td className="px-2 py-1 border">
                     <div className="flex items-center gap-2">
-                      <span className="inline-block w-3 h-3 rounded-full" style={{ backgroundColor: pColor(row.personId) }} />
-                      <span>{pName(row.personId)}</span>
+                      <span className="inline-block w-3 h-3 rounded-full" style={{ backgroundColor: colorOf(row.personId) }} />
+                      <span>{nameOf(row.personId)}</span>
                     </div>
                   </td>
                   <td className={`px-2 py-1 border ${row.diffMinutes>0?'text-emerald-600':row.diffMinutes<0?'text-rose-600':''}`}>
