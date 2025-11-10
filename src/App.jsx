@@ -148,6 +148,19 @@ function diffAssignments(base, candidate){
   return diffs;
 }
 
+function diffKeyForChange(diff){
+  if (!diff) return "";
+  const dateStr = diff.dateStr || "";
+  const start = diff.start || "";
+  const end = diff.end || "";
+  const slotIndex = Number.isFinite(diff.slotIndex) ? diff.slotIndex : 0;
+  const fromId = diff.fromPerson ?? diff.personId ?? "";
+  const toId = diff.toPerson ?? "";
+  const label = diff.shiftLabel || "";
+  const resolution = diff.resolution || "";
+  return [dateStr, `${start}-${end}`, label, slotIndex, `${fromId}->${toId}`, resolution].join("|");
+}
+
 function assignmentsToCSV(assignments){
   const rows = [["date","slot","label","start","end","personId"]];
   const dates = Object.keys(assignments||{}).sort();
@@ -449,7 +462,7 @@ function findVacationConflicts(assignments, timeOffs, opts){
           const start = shift?.start || '';
           const end = shift?.end || '';
           const label = shift?.label || `Slot ${idx+1}`;
-          slots.push({ label, start, end });
+          slots.push({ label, start, end, slotIndex: idx });
         }
       });
       if (slots.length){
@@ -1476,7 +1489,21 @@ const assignmentsImproved = useMemo(()=> improveConciliation({
   }, [setState]);
 
   const sandboxWorkerRef = useRef(null);
-  const [sandboxRuntime, setSandboxRuntime] = useState({ jobs: {} });
+  const [sandboxRuntime, setSandboxRuntime] = useState({ jobs: {}, conflicts: { status:'idle', jobId:null } });
+  const [selectedDiffs, setSelectedDiffs] = useState(() => new Set());
+  const [diffFilters, setDiffFilters] = useState({ personId:'', from:'', to:'' });
+  const [diffApplyPending, setDiffApplyPending] = useState(false);
+  const [lastSelectionBatchId, setLastSelectionBatchId] = useState(null);
+  const [conflictSolver, setConflictSolver] = useState({
+    status:'idle',
+    proposals: [],
+    selected: new Set(),
+    layerId: null,
+    jobId: null,
+    lastBatchId: null,
+    error: null
+  });
+  const [conflictApplyPending, setConflictApplyPending] = useState(false);
 
   useEffect(() => {
     if (typeof Worker === 'undefined') return () => {};
@@ -1511,6 +1538,41 @@ const assignmentsImproved = useMemo(()=> improveConciliation({
         setSandboxRuntime(prev => ({
           ...prev,
           jobs: { ...prev.jobs, [data.layerId]: { status:'error', message: data.error || 'Error en optimización', completedAt: Date.now(), jobId: data.jobId || null } }
+        }));
+      } else if (data.type === 'conflict-result') {
+        setSandboxRuntime(prev => ({
+          ...prev,
+          conflicts: { status:'ok', jobId: data.jobId || null, completedAt: Date.now() }
+        }));
+        setConflictSolver(prev => {
+          if (prev.jobId && data.jobId && prev.jobId !== data.jobId) return prev;
+          const raw = Array.isArray(data.result?.proposals) ? data.result.proposals : [];
+          const proposals = raw.map(item => ({
+            ...item,
+            key: item.key || diffKeyForChange(item)
+          }));
+          const autoSelected = new Set();
+          proposals.forEach(p => { if (p.resolution !== 'unresolved') autoSelected.add(p.key); });
+          return {
+            ...prev,
+            status: 'ready',
+            proposals,
+            selected: autoSelected,
+            jobId: null,
+            error: null,
+            layerId: data.layerId || prev.layerId
+          };
+        });
+      } else if (data.type === 'conflict-error') {
+        setSandboxRuntime(prev => ({
+          ...prev,
+          conflicts: { status:'error', jobId: data.jobId || null, message: data.error || 'Error al resolver conflictos', completedAt: Date.now() }
+        }));
+        setConflictSolver(prev => ({
+          ...prev,
+          status: 'error',
+          error: data.error || 'Error al resolver conflictos',
+          jobId: null
         }));
       }
     };
@@ -1714,6 +1776,55 @@ const assignmentsImproved = useMemo(()=> improveConciliation({
     showToast(`Capa aplicada (${diffs.length} cambios)`);
   }, [ASS, sandboxState.layers, setState, showToast]);
 
+  const applySelectedDiffs = useCallback((layerId) => {
+    if (!layerId) { showToast('Selecciona una capa activa'); return null; }
+    const layer = sandboxState.layers.find(l => l.id === layerId);
+    if (!layer) { showToast('Capa no encontrada'); return null; }
+    const diffs = diffAssignments(ASS, layer.assignments);
+    const selectedList = diffs.filter(diff => selectedDiffs.has(diff.key || diffKeyForChange(diff)));
+    if (!selectedList.length) { showToast('Selecciona cambios a aplicar'); return null; }
+    setDiffApplyPending(true);
+    const batchId = `sandbox-selection-${layerId}-${Date.now()}`;
+    const actor = auth.user?.email || auth.user?.name || 'unknown';
+    const result = { applied: 0 };
+    setState(prev => {
+      const next = deepClone(prev);
+      const overrides = deepClone(prev.overrides || {});
+      const sandbox = normalizeSandbox(next.sandbox);
+      const changes = [];
+      for (const diff of selectedList){
+        const baseCell = ASS[diff.dateStr] || [];
+        const layerCell = layer.assignments?.[diff.dateStr] || [];
+        const slot = layerCell[diff.slotIndex] || baseCell[diff.slotIndex];
+        if (!slot || !slot.shift) continue;
+        const key = shiftKeyForSlot(slot, diff.slotIndex);
+        const prevValue = overrides?.[diff.dateStr]?.[key] ?? null;
+        overrides[diff.dateStr] = overrides[diff.dateStr] || {};
+        const toValue = (diff.toPerson === null || typeof diff.toPerson === 'undefined') ? '__EMPTY__' : diff.toPerson;
+        overrides[diff.dateStr][key] = toValue;
+        changes.push({ dateStr: diff.dateStr, key, prevValue, nextValue: overrides[diff.dateStr][key] });
+      }
+      if (!changes.length) {
+        return prev;
+      }
+      sandbox.appliedBatches = [...(sandbox.appliedBatches || []), { batchId, layerId, createdAt: new Date().toISOString(), changes }];
+      next.overrides = overrides;
+      next.sandbox = sandbox;
+      const auditEntry = { ts: new Date().toISOString(), actor, action: 'apply-selected-diffs', layerId, batchId, applied: changes.length };
+      next.audit = Array.isArray(prev.audit) ? [...prev.audit, auditEntry] : [auditEntry];
+      result.applied = changes.length;
+      return next;
+    });
+    setDiffApplyPending(false);
+    if (!result.applied) {
+      return null;
+    }
+    setSelectedDiffs(() => new Set());
+    setLastSelectionBatchId(batchId);
+    showToast(`Selección aplicada (${result.applied} cambios)`);
+    return { batchId, applied: result.applied };
+  }, [ASS, sandboxState.layers, selectedDiffs, setState, showToast, auth.user]);
+
   const rollbackSandboxBatch = useCallback((batchId) => {
     if (!batchId) return;
     let restored = false;
@@ -1743,6 +1854,177 @@ const assignmentsImproved = useMemo(()=> improveConciliation({
     else showToast('Batch no encontrado');
   }, [setState, showToast]);
 
+  const toggleConflictProposal = useCallback((key) => {
+    if (!key) return;
+    setConflictSolver(prev => {
+      const nextSelected = new Set(prev.selected);
+      if (nextSelected.has(key)) nextSelected.delete(key); else nextSelected.add(key);
+      return { ...prev, selected: nextSelected };
+    });
+  }, []);
+
+  const clearConflictSelection = useCallback(() => {
+    setConflictSolver(prev => ({ ...prev, selected: new Set() }));
+  }, []);
+
+  const selectAllConflictProposals = useCallback(() => {
+    setConflictSolver(prev => {
+      const nextSelected = new Set();
+      (prev.proposals || []).forEach(p => { if (p.resolution !== 'unresolved') nextSelected.add(p.key || diffKeyForChange(p)); });
+      return { ...prev, selected: nextSelected };
+    });
+  }, []);
+
+  const generateConflictProposals = useCallback((layerId) => {
+    const conflictSlots = sandboxComparison?.vacationConflictSlots || [];
+    if (!layerId) {
+      setConflictSolver(prev => ({ ...prev, status:'error', error:'Selecciona una capa activa' }));
+      return;
+    }
+    const worker = sandboxWorkerRef.current;
+    const layer = sandboxState.layers.find(l => l.id === layerId);
+    if (!worker) {
+      setConflictSolver(prev => ({ ...prev, status:'error', error:'Optimizador no disponible' }));
+      return;
+    }
+    if (!layer) {
+      setConflictSolver(prev => ({ ...prev, status:'error', error:'Capa no encontrada' }));
+      return;
+    }
+    if (!conflictSlots.length) {
+      setConflictSolver(prev => ({ ...prev, status:'ready', error:null, proposals: [], selected: new Set(), layerId }));
+      return;
+    }
+    const jobId = `conf-${Date.now()}-${cryptoRandom()}`;
+    setConflictSolver(prev => ({ ...prev, status:'running', jobId, layerId, error: null }));
+    setSandboxRuntime(prev => ({ ...prev, conflicts: { status:'running', jobId, startedAt: Date.now() } }));
+    const timeOffDates = buildTimeOffDateIndex(state.timeOffs);
+    const closedDates = [];
+    for (const dateStr of Object.keys(layer.assignments || {})){
+      if (isClosedBusinessDay2(dateStr, state.province, state.closeOnHolidays, state.closedExtraDates, state.customHolidaysByYear)){
+        closedDates.push(dateStr);
+      }
+    }
+    worker.postMessage({
+      type: 'solve-conflicts',
+      jobId,
+      layerId,
+      payload: {
+        layer: { id: layer.id, assignments: layer.assignments },
+        conflicts: conflictSlots.map(item => ({
+          dateStr: item.dateStr,
+          slotIndex: item.slotIndex,
+          personId: item.personId,
+          shiftLabel: item.shiftLabel,
+          start: item.start,
+          end: item.end
+        })),
+        context: {
+          rules: state.rules,
+          timeOffDates,
+          closedDates,
+          workingHolidays: state.workingHolidays,
+          peopleIds: state.people.map(p => p.id),
+          realAssignments: ASS
+        }
+      }
+    });
+  }, [
+    ASS,
+    sandboxComparison?.vacationConflictSlots?.length || 0,
+    sandboxState.layers,
+    setSandboxRuntime,
+    state.rules,
+    state.timeOffs,
+    state.province,
+    state.closeOnHolidays,
+    state.closedExtraDates,
+    state.customHolidaysByYear,
+    state.workingHolidays,
+    state.people
+  ]);
+
+  const applyConflictProposals = useCallback((layerId) => {
+    const conflictSlots = sandboxComparison?.vacationConflictSlots || [];
+    if (!layerId) {
+      setConflictSolver(prev => ({ ...prev, status:'error', error:'Selecciona una capa activa' }));
+      return null;
+    }
+    const layer = sandboxState.layers.find(l => l.id === layerId);
+    if (!layer) {
+      setConflictSolver(prev => ({ ...prev, status:'error', error:'Capa no encontrada' }));
+      return null;
+    }
+    const selectedKeys = conflictSolver.selected;
+    if (!selectedKeys || !selectedKeys.size) {
+      setConflictSolver(prev => ({ ...prev, error:'Selecciona propuestas a aplicar' }));
+      return null;
+    }
+    const applicable = (conflictSolver.proposals || []).filter(p => selectedKeys.has(p.key) && p.resolution !== 'unresolved');
+    if (!applicable.length) {
+      setConflictSolver(prev => ({ ...prev, error:'No hay propuestas aplicables en la selección' }));
+      return null;
+    }
+    setConflictApplyPending(true);
+    const batchId = `sandbox-conflicts-${layerId}-${Date.now()}`;
+    const actor = auth.user?.email || auth.user?.name || 'unknown';
+    const totalConflicts = conflictSlots.length;
+    const counters = { applied: 0 };
+    setState(prev => {
+      const next = deepClone(prev);
+      const sandbox = normalizeSandbox(next.sandbox);
+      const layerIdx = sandbox.layers.findIndex(l => l.id === layerId);
+      if (layerIdx === -1) return prev;
+      const workingLayer = sandbox.layers[layerIdx];
+      const layerAssignments = cloneAssignmentsMap(workingLayer.assignments || {});
+      const overrides = deepClone(prev.overrides || {});
+      const changes = [];
+      for (const proposal of applicable){
+        const dateStr = proposal.dateStr;
+        const slotIndex = proposal.slotIndex;
+        if (typeof slotIndex !== 'number') continue;
+        const cell = layerAssignments[dateStr] || [];
+        const slot = cell[slotIndex];
+        if (!slot || !slot.shift) continue;
+        const key = shiftKeyForSlot(slot, slotIndex);
+        const prevValue = overrides?.[dateStr]?.[key] ?? null;
+        overrides[dateStr] = overrides[dateStr] || {};
+        const nextValue = (proposal.resolution === 'forceEmpty' || proposal.toPerson === null || typeof proposal.toPerson === 'undefined')
+          ? '__EMPTY__'
+          : proposal.toPerson;
+        overrides[dateStr][key] = nextValue;
+        layerAssignments[dateStr][slotIndex] = { ...slot, personId: proposal.toPerson || null };
+        changes.push({ dateStr, key, prevValue, nextValue });
+      }
+      if (!changes.length) return prev;
+      sandbox.layers[layerIdx] = { ...workingLayer, assignments: layerAssignments };
+      sandbox.appliedBatches = [...(sandbox.appliedBatches || []), { batchId, layerId, createdAt: new Date().toISOString(), changes }];
+      next.overrides = overrides;
+      next.sandbox = sandbox;
+      const resolved = changes.length;
+      const unresolved = Math.max(0, totalConflicts - resolved);
+      const auditEntry = { ts: new Date().toISOString(), actor, action: 'solve-vacation-conflicts', layerId, batchId, resolved, unresolved };
+      next.audit = Array.isArray(prev.audit) ? [...prev.audit, auditEntry] : [auditEntry];
+      counters.applied = resolved;
+      return next;
+    });
+    setConflictApplyPending(false);
+    if (!counters.applied) {
+      return null;
+    }
+    setConflictSolver(prev => ({ ...prev, lastBatchId: batchId, selected: new Set(), status: 'ready' }));
+    showToast(`Propuestas aplicadas (${counters.applied})`);
+    return { batchId, applied: counters.applied };
+  }, [
+    ASS,
+    auth.user,
+    sandboxComparison?.vacationConflictSlots?.length || 0,
+    conflictSolver,
+    sandboxState.layers,
+    setState,
+    showToast
+  ]);
+
   const personById = useMemo(() => {
     const m = new Map();
     (state.people || []).forEach(person => {
@@ -1763,6 +2045,11 @@ const assignmentsImproved = useMemo(()=> improveConciliation({
   }, [personById]);
 
   const sandboxComparison = useMemo(() => {
+    const nameOf = (pid) => {
+      if (!pid) return "Vacío";
+      return personById.get(pid)?.name || pid || "Vacío";
+    };
+
     const ledgerResult = buildVacationLedger({
       timeOffs: state.timeOffs,
       people: state.people,
@@ -1849,8 +2136,9 @@ const assignmentsImproved = useMemo(()=> improveConciliation({
 
     const diffs = diffAssignments(ASS, activeSandboxLayer.assignments).map(diff => ({
       ...diff,
-      fromName: pName(diff.fromPerson),
-      toName: pName(diff.toPerson)
+      key: diffKeyForChange(diff),
+      fromName: nameOf(diff.fromPerson),
+      toName: nameOf(diff.toPerson)
     }));
     diffs.sort((a,b) => {
       const dateCompare = (a.dateStr || "").localeCompare(b.dateStr || "");
@@ -1869,7 +2157,23 @@ const assignmentsImproved = useMemo(()=> improveConciliation({
       closedExtraDates: state.closedExtraDates,
       customHolidaysByYear: state.customHolidaysByYear
     };
-    const vacationConflicts = findVacationConflicts(activeSandboxLayer.assignments, state.timeOffs, conflictOpts);
+    const rawConflicts = findVacationConflicts(activeSandboxLayer.assignments, state.timeOffs, conflictOpts);
+    const conflictSlots = [];
+    const vacationConflicts = rawConflicts.map(item => ({
+      ...item,
+      slots: (item.slots || []).map(slot => {
+        const slotIndex = Number.isFinite(slot.slotIndex) ? slot.slotIndex : 0;
+        conflictSlots.push({
+          dateStr: item.dateStr,
+          personId: item.personId,
+          slotIndex,
+          shiftLabel: slot.label,
+          start: slot.start,
+          end: slot.end
+        });
+        return { ...slot, slotIndex };
+      })
+    }));
 
     return {
       perPerson,
@@ -1877,11 +2181,14 @@ const assignmentsImproved = useMemo(()=> improveConciliation({
       totalChanges: diffs.length,
       vacationLedger: ledgerResult.ledger,
       vacationDefaultAllowance: ledgerResult.defaultAllowance,
-      vacationConflicts
+      vacationConflicts,
+      vacationConflictSlots: conflictSlots
     };
   }, [
     ASS,
-    activeSandboxLayer,state.timeOffs,
+    activeSandboxLayer,
+    personById,
+    state.timeOffs,
     state.people,
     state.vacationDaysNatural,
     state.province,
@@ -1891,6 +2198,100 @@ const assignmentsImproved = useMemo(()=> improveConciliation({
     state.customHolidaysByYear,
     state.workingHolidays
   ]);
+
+  const diffMatchesFilters = useCallback((diff, filters) => {
+    if (!diff) return false;
+    const f = filters || {};
+    if (f.personId) {
+      const pid = f.personId;
+      if (diff.fromPerson !== pid && diff.toPerson !== pid) return false;
+    }
+    if (f.from && (diff.dateStr || '') < f.from) return false;
+    if (f.to && (diff.dateStr || '') > f.to) return false;
+    return true;
+  }, []);
+
+  const filteredDiffs = useMemo(() => {
+    const diffs = sandboxComparison?.diffsByDate || [];
+    if (!diffFilters.personId && !diffFilters.from && !diffFilters.to) return diffs;
+    return diffs.filter(diff => diffMatchesFilters(diff, diffFilters));
+  }, [sandboxComparison, diffFilters, diffMatchesFilters]);
+
+  const selectedDiffSummary = useMemo(() => {
+    if (!selectedDiffs.size) {
+      return { count: 0, personIds: [], dates: [], keys: new Set() };
+    }
+    const diffs = sandboxComparison?.diffsByDate || [];
+    const persons = new Set();
+    const dates = new Set();
+    const keys = new Set();
+    let count = 0;
+    for (const diff of diffs){
+      const key = diff.key || diffKeyForChange(diff);
+      if (!selectedDiffs.has(key)) continue;
+      count += 1;
+      keys.add(key);
+      if (diff.fromPerson) persons.add(diff.fromPerson);
+      if (diff.toPerson) persons.add(diff.toPerson);
+      if (diff.dateStr) dates.add(diff.dateStr);
+    }
+    return {
+      count,
+      personIds: Array.from(persons),
+      dates: Array.from(dates).sort(),
+      keys
+    };
+  }, [sandboxComparison, selectedDiffs]);
+
+  useEffect(() => {
+    const available = new Set((sandboxComparison?.diffsByDate || []).map(diff => diff.key || diffKeyForChange(diff)));
+    setSelectedDiffs(prev => {
+      if (!prev.size) return prev;
+      let changed = false;
+      const next = new Set();
+      prev.forEach(key => {
+        if (available.has(key)) next.add(key);
+        else changed = true;
+      });
+      return changed ? next : prev;
+    });
+  }, [sandboxComparison]);
+
+  useEffect(() => {
+    setSelectedDiffs(() => new Set());
+    setDiffFilters({ personId:'', from:'', to:'' });
+    setLastSelectionBatchId(null);
+    setConflictSolver({ status:'idle', proposals: [], selected: new Set(), layerId: null, jobId: null, lastBatchId: null, error: null });
+  }, [activeSandboxLayer?.id]);
+
+  const toggleDiffSelected = useCallback((key) => {
+    if (!key) return;
+    setSelectedDiffs(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  }, []);
+
+  const clearSelectedDiffs = useCallback(() => {
+    setSelectedDiffs(() => new Set());
+  }, []);
+
+  const selectAllDiffs = useCallback((filters) => {
+    const activeFilters = filters || diffFilters;
+    const diffs = sandboxComparison?.diffsByDate || [];
+    const next = new Set();
+    diffs.forEach(diff => {
+      if (diffMatchesFilters(diff, activeFilters)) {
+        next.add(diff.key || diffKeyForChange(diff));
+      }
+    });
+    setSelectedDiffs(next);
+  }, [sandboxComparison, diffFilters, diffMatchesFilters]);
+
+  const handleDiffFiltersChange = useCallback((patch) => {
+    setDiffFilters(prev => ({ ...prev, ...(patch || {}) }));
+  }, []);
 
   // ---------- Hooks que deben ejecutarse SIEMPRE ----------
   const [payroll,setPayroll]=useState({ from: state.startDate, to: toDateValue(addDays(startDate, state.weeks*7-1)) });
@@ -2343,8 +2744,6 @@ return (
   rollbackSandboxBatch={rollbackSandboxBatch}
   sandboxComparison={sandboxComparison}
   setSandboxObjectives={setSandboxObjectives}
-  pName={pName}
-  pColor={pColor}
 />
 );
 }
@@ -2532,69 +2931,156 @@ function SandboxObjectivesCard({ objectives, onChange }){
   );
 }
 
-function SandboxComparatorCard({ activeLayer, comparison, pName, pColor, onExportDiffs }){
+function SandboxComparatorCard({
+  activeLayer,
+  comparison,
+  pName,
+  pColor,
+  onExportDiffs,
+  diffFilters,
+  onDiffFiltersChange,
+  filteredDiffs,
+  selectedDiffs,
+  onToggleDiff,
+  onSelectAllDiffs,
+  onClearDiffs,
+  selectionSummary,
+  onApplySelection,
+  selectionPending,
+  lastSelectionBatchId,
+  onRollbackSelectionBatch,
+  conflictState,
+  onGenerateConflictProposals,
+  onToggleConflictProposal,
+  onSelectAllConflictProposals,
+  onClearConflictSelection,
+  onApplyConflictProposals,
+  conflictPending,
+  onRollbackConflictBatch
+}){
   const rows = comparison?.perPerson || [];
-  const diffsByDate = comparison?.diffsByDate || [];
-  const ledger = comparison?.vacationLedger;
-  const defaultAllowance = comparison?.vacationDefaultAllowance ?? 0;
+  const diffsTotal = comparison?.diffsByDate?.length || 0;
+  const visibleDiffs = filteredDiffs && Array.isArray(filteredDiffs) ? filteredDiffs : (comparison?.diffsByDate || []);
   const vacationConflicts = comparison?.vacationConflicts || [];
-
-  const nameOf = typeof pName === "function" ? pName : (id => (id ? String(id) : "Vacío"));
-  const colorOf = typeof pColor === "function" ? pColor : (() => "#64748b");
-
-  const ledgerEntryFor = (personId) => {
-    if (!personId) return null;
-    if (ledger instanceof Map) return ledger.get(personId) || null;
-    if (ledger && typeof ledger === "object") return ledger[personId] || null;
-    return null;
-  };
-
-  const renderPerson = (personId) => {
-    if (!personId) {
-      return <span className="text-slate-400">{nameOf(personId)}</span>;
-    }
-    return (
-      <span className="inline-flex items-center gap-2">
-        <span className="inline-block w-3 h-3 rounded-full" style={{ backgroundColor: colorOf(personId) }} />
-        <span>{nameOf(personId)}</span>
-      </span>
-    );
-  };
+  const defaultAllowance = comparison?.vacationDefaultAllowance || 0;
+  const diffSelectedSet = selectedDiffs instanceof Set ? selectedDiffs : new Set(selectedDiffs || []);
+  const selectionCount = selectionSummary?.count || 0;
+  const personIdsSelected = selectionSummary?.personIds || [];
+  const datesSelected = selectionSummary?.dates || [];
+  const conflictSummary = conflictState || { status:'idle', proposals: [], selected: new Set(), error: null, lastBatchId: null };
+  const proposals = Array.isArray(conflictSummary.proposals) ? conflictSummary.proposals : [];
+  const proposalSelectedSet = conflictSummary.selected instanceof Set ? conflictSummary.selected : new Set(conflictSummary.selected || []);
+  const proposalSelectedCount = proposalSelectedSet.size;
+  const conflictStatus = conflictSummary.status || 'idle';
+  const conflictError = conflictSummary.error || null;
+  const conflictLastBatchId = conflictSummary.lastBatchId || null;
 
   const handleExportDiffs = () => {
-    if (!diffsByDate.length) return;
-    if (typeof onExportDiffs === "function") {
-      onExportDiffs(diffsByDate);
-      return;
-    }
-    const header = ["fecha","turno","inicio","fin","de","a"];
-    const csvRows = diffsByDate.map(item => [
-      item.dateStr || "",
-      item.shiftLabel || "",
-      item.start || "",
-      item.end || "",
-      nameOf(item.fromPerson),
-      nameOf(item.toPerson)
-    ]);
-    const csv = [header, ...csvRows].map(line => line.map(value => {
-      if (value == null) return "";
-      const str = String(value);
-      return /[",\n]/.test(str) ? `"${str.replace(/"/g,'""')}"` : str;
-    }).join(",")).join("\n");
-    const layerName = activeLayer?.name ? activeLayer.name.replace(/\s+/g, '_') : 'sandbox';
-    downloadBlob(`sandbox_diffs_${layerName}.csv`, csv, "text/csv;charset=utf-8");
+    if (typeof onExportDiffs === 'function') onExportDiffs();
   };
+
+  const nameOf = React.useCallback((id)=>{
+    if (typeof pName === 'function') return pName(id);
+    if (!id) return 'Vacío';
+    return id;
+  },[pName]);
+
+  const colorOf = React.useCallback((id)=>{
+    if (typeof pColor === 'function') return pColor(id);
+    return '#64748b';
+  },[pColor]);
+
+  const ledgerEntryFor = React.useCallback((personId) => {
+    return comparison?.vacationLedger?.get?.(personId) || null;
+  }, [comparison]);
+
+  const renderPerson = React.useCallback((personId) => {
+    if (!personId) return <span className="text-slate-400">Vacío</span>;
+    return (
+      <div className="flex items-center gap-2">
+        <span className="inline-block w-3 h-3 rounded-full" style={{ backgroundColor: colorOf(personId) }} />
+        <span>{nameOf(personId)}</span>
+      </div>
+    );
+  }, [colorOf, nameOf]);
+
+  const personOptions = React.useMemo(() => {
+    const ids = new Set();
+    rows.forEach(row => { if (row.personId) ids.add(row.personId); });
+    (comparison?.diffsByDate || []).forEach(diff => {
+      if (diff.fromPerson) ids.add(diff.fromPerson);
+      if (diff.toPerson) ids.add(diff.toPerson);
+    });
+    return Array.from(ids);
+  }, [rows, comparison]);
+
+  const handleFilterChange = (field, value) => {
+    if (typeof onDiffFiltersChange === 'function') {
+      onDiffFiltersChange({ [field]: value });
+    }
+  };
+
+  const selectionLabel = selectionCount
+    ? `${selectionCount} cambio(s) · ${personIdsSelected.length} persona(s) · ${datesSelected.length} día(s)`
+    : 'Sin selección';
 
   return (
     <Card title={`Comparador sandbox · ${activeLayer?.name || ''}`}>
       <div className="flex items-center justify-between gap-3 mb-3 text-sm text-slate-600">
         <span>Cambios totales respecto al cuadrante real: {comparison?.totalChanges || 0}</span>
-        {diffsByDate.length > 0 && (
+        {diffsTotal > 0 && (
           <button type="button" className="px-2 py-1 rounded border text-xs" onClick={handleExportDiffs}>
             Exportar difs CSV
           </button>
         )}
       </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4 text-xs">
+        <label className="flex flex-col gap-1">
+          <span className="text-slate-500">Persona</span>
+          <select
+            className="border rounded px-2 py-1"
+            value={diffFilters?.personId || ''}
+            onChange={e => handleFilterChange('personId', e.target.value)}
+          >
+            <option value="">Todas</option>
+            {personOptions.map(pid => (
+              <option key={pid} value={pid}>{nameOf(pid)}</option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-slate-500">Desde</span>
+          <input
+            type="date"
+            className="border rounded px-2 py-1"
+            value={diffFilters?.from || ''}
+            onChange={e => handleFilterChange('from', e.target.value)}
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-slate-500">Hasta</span>
+          <input
+            type="date"
+            className="border rounded px-2 py-1"
+            value={diffFilters?.to || ''}
+            onChange={e => handleFilterChange('to', e.target.value)}
+          />
+        </label>
+        <div className="flex items-end gap-2">
+          <button
+            type="button"
+            className="px-2 py-1 border rounded"
+            onClick={() => onSelectAllDiffs?.(diffFilters)}
+          >Seleccionar visibles</button>
+          <button
+            type="button"
+            className="px-2 py-1 border rounded"
+            onClick={() => onClearDiffs?.()}
+          >Limpiar</button>
+        </div>
+      </div>
+
       <div className="mb-4 text-xs text-slate-600 flex flex-wrap items-center gap-2">
         <span className="font-semibold text-slate-700">Delta vacaciones:</span>
         {vacationConflicts.length > 0 ? (
@@ -2603,6 +3089,7 @@ function SandboxComparatorCard({ activeLayer, comparison, pName, pColor, onExpor
           <span className="text-emerald-600 font-semibold">Sin conflictos</span>
         )}
       </div>
+
       {vacationConflicts.length > 0 && (
         <div className="mb-4 border rounded-lg overflow-hidden">
           <table className="w-full text-xs">
@@ -2620,7 +3107,7 @@ function SandboxComparatorCard({ activeLayer, comparison, pName, pColor, onExpor
                   <td className="px-2 py-1 border">{renderPerson(item.personId)}</td>
                   <td className="px-2 py-1 border">
                     <ul className="list-disc list-inside space-y-0.5">
-                      {item.slots.map((slot, sIdx) => {
+                      {(item.slots || []).map((slot, sIdx) => {
                         const range = slot.start && slot.end ? `${slot.start}–${slot.end}` : (slot.start || slot.end || '');
                         return (
                           <li key={sIdx}>
@@ -2637,9 +3124,10 @@ function SandboxComparatorCard({ activeLayer, comparison, pName, pColor, onExpor
           </table>
         </div>
       )}
+
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div>
-          <h3 className="text-xs font-semibold mb-2 uppercase tracking-wide text-slate-500">Por persona</h3>
+        <div className="space-y-3">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Por persona</h3>
           <table className="w-full text-xs border">
             <thead>
               <tr className="bg-slate-100 text-left">
@@ -2685,13 +3173,50 @@ function SandboxComparatorCard({ activeLayer, comparison, pName, pColor, onExpor
               ))}
             </tbody>
           </table>
+
+          <div className="border rounded-lg p-3 text-xs bg-slate-50">
+            <div className="font-semibold text-slate-600 mb-1">Selección actual</div>
+            <div className="text-slate-600">{selectionLabel}</div>
+            {selectionCount > 0 && (
+              <ul className="mt-1 space-y-0.5 text-slate-500">
+                {personIdsSelected.map(pid => (
+                  <li key={pid}>{nameOf(pid)}</li>
+                ))}
+              </ul>
+            )}
+            <div className="flex flex-wrap gap-2 mt-3">
+              <button
+                type="button"
+                className="px-2 py-1 border rounded"
+                disabled={!selectionCount || selectionPending || !onApplySelection}
+                onClick={() => onApplySelection?.(activeLayer?.id)}
+              >Aplicar selección</button>
+              {lastSelectionBatchId && (
+                <button
+                  type="button"
+                  className="px-2 py-1 border rounded"
+                  onClick={() => onRollbackSelectionBatch?.(lastSelectionBatchId)}
+                >Rollback selección</button>
+              )}
+              {selectionPending && <span className="text-amber-600">Procesando…</span>}
+            </div>
+          </div>
         </div>
-        <div>
-          <h3 className="text-xs font-semibold mb-2 uppercase tracking-wide text-slate-500">Cambios por fecha</h3>
-          <div className="max-h-48 overflow-auto border rounded-lg">
+
+        <div className="space-y-3">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Cambios por fecha</h3>
+          <div className="max-h-56 overflow-auto border rounded-lg">
             <table className="w-full text-xs">
               <thead className="bg-slate-100 text-left">
                 <tr>
+                  <th className="px-2 py-1 border text-center">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4"
+                      onChange={e => e.target.checked ? onSelectAllDiffs?.(diffFilters) : onClearDiffs?.()}
+                      checked={selectionCount > 0 && selectionCount === visibleDiffs.length && visibleDiffs.length > 0}
+                    />
+                  </th>
                   <th className="px-2 py-1 border">Fecha</th>
                   <th className="px-2 py-1 border">Turno</th>
                   <th className="px-2 py-1 border">De</th>
@@ -2699,15 +3224,24 @@ function SandboxComparatorCard({ activeLayer, comparison, pName, pColor, onExpor
                 </tr>
               </thead>
               <tbody>
-                {diffsByDate.length === 0 && (
-                  <tr><td className="px-2 py-2 text-center text-slate-500" colSpan={4}>Sin cambios</td></tr>
+                {visibleDiffs.length === 0 && (
+                  <tr><td className="px-2 py-2 text-center text-slate-500" colSpan={5}>Sin cambios</td></tr>
                 )}
-                {diffsByDate.map(item => {
+                {visibleDiffs.map(item => {
                   const range = item.start && item.end ? `${item.start}–${item.end}` : item.start || item.end || '';
                   const turnLabel = range ? `${item.shiftLabel} · ${range}` : item.shiftLabel;
-                  const key = `${item.dateStr || 'fecha'}_${item.start || 'start'}_${item.slotIndex ?? 0}_${item.fromPerson || 'from'}_${item.toPerson || 'to'}`;
+                  const key = item.key || diffKeyForChange(item);
+                  const checked = diffSelectedSet.has(key);
                   return (
-                    <tr key={key}>
+                    <tr key={key} className={checked ? 'bg-indigo-50/40' : ''}>
+                      <td className="px-2 py-1 border text-center">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4"
+                          checked={checked}
+                          onChange={() => onToggleDiff?.(key)}
+                        />
+                      </td>
                       <td className="px-2 py-1 border whitespace-nowrap">{item.dateStr}</td>
                       <td className="px-2 py-1 border">{turnLabel}</td>
                       <td className="px-2 py-1 border">{renderPerson(item.fromPerson)}</td>
@@ -2717,6 +3251,98 @@ function SandboxComparatorCard({ activeLayer, comparison, pName, pColor, onExpor
                 })}
               </tbody>
             </table>
+          </div>
+
+          <div className="space-y-2 border rounded-lg p-3 text-xs bg-slate-50">
+            <div className="flex items-center justify-between">
+              <span className="font-semibold text-slate-600">Conflictos de vacaciones</span>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  className="px-2 py-1 border rounded"
+                  disabled={!activeLayer?.id || conflictPending || conflictStatus === 'running'}
+                  onClick={() => onGenerateConflictProposals?.(activeLayer?.id)}
+                >{conflictStatus === 'running' ? 'Calculando…' : 'Generar propuestas'}</button>
+                <button
+                  type="button"
+                  className="px-2 py-1 border rounded"
+                  disabled={!proposals.length}
+                  onClick={() => onSelectAllConflictProposals?.()}
+                >Seleccionar todo</button>
+                <button
+                  type="button"
+                  className="px-2 py-1 border rounded"
+                  disabled={!proposalSelectedCount}
+                  onClick={() => onClearConflictSelection?.()}
+                >Limpiar</button>
+              </div>
+            </div>
+            {conflictError && <div className="text-rose-600">{conflictError}</div>}
+            {proposals.length > 0 && (
+              <div className="border rounded overflow-auto">
+                <table className="w-full text-xs">
+                  <thead className="bg-slate-100 text-left">
+                    <tr>
+                      <th className="px-2 py-1 border text-center"></th>
+                      <th className="px-2 py-1 border">Fecha</th>
+                      <th className="px-2 py-1 border">Turno</th>
+                      <th className="px-2 py-1 border">Persona PTO</th>
+                      <th className="px-2 py-1 border">Propuesta</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {proposals.map((proposal, idx) => {
+                      const key = proposal.key || diffKeyForChange(proposal);
+                      const range = proposal.start && proposal.end ? `${proposal.start}–${proposal.end}` : (proposal.start || proposal.end || '');
+                      const turnLabel = range ? `${proposal.shiftLabel || ''} · ${range}` : (proposal.shiftLabel || '');
+                      const isDisabled = proposal.resolution === 'unresolved';
+                      const checked = proposalSelectedSet.has(key);
+                      const targetName = proposal.resolution === 'forceEmpty' ? 'Vacío' : nameOf(proposal.toPerson);
+                      return (
+                        <tr key={`${key}_${idx}`} className={checked ? 'bg-indigo-50/40' : ''}>
+                          <td className="px-2 py-1 border text-center">
+                            <input
+                              type="checkbox"
+                              className="h-4 w-4"
+                              disabled={isDisabled}
+                              checked={checked}
+                              onChange={() => onToggleConflictProposal?.(key)}
+                            />
+                          </td>
+                          <td className="px-2 py-1 border whitespace-nowrap">{proposal.dateStr}</td>
+                          <td className="px-2 py-1 border">{turnLabel}</td>
+                          <td className="px-2 py-1 border">{renderPerson(proposal.fromPerson || proposal.personId)}</td>
+                          <td className="px-2 py-1 border">
+                            {isDisabled ? (
+                              <span className="text-slate-400">Sin alternativa</span>
+                            ) : (
+                              <span>{nameOf(proposal.fromPerson || proposal.personId)} → {targetName}</span>
+                            )}
+                            {proposal.note && <div className="text-[10px] text-slate-500">{proposal.note}</div>}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="px-2 py-1 border rounded"
+                disabled={!proposalSelectedCount || conflictPending || conflictStatus === 'running'}
+                onClick={() => onApplyConflictProposals?.(activeLayer?.id)}
+              >Aceptar selección {proposalSelectedCount ? `(${proposalSelectedCount})` : ''}</button>
+              {conflictLastBatchId && (
+                <button
+                  type="button"
+                  className="px-2 py-1 border rounded"
+                  onClick={() => onRollbackConflictBatch?.(conflictLastBatchId)}
+                >Rollback resolver</button>
+              )}
+              {conflictPending && <span className="text-amber-600">Aplicando…</span>}
+            </div>
           </div>
         </div>
       </div>
@@ -4704,7 +5330,7 @@ function AuthenticatedApp(props){
           sandboxState, activeSandboxLayer, activeSnapshots, sandboxRuntime,
           sandboxCreateFromReal, sandboxActivate, sandboxDuplicate, sandboxDelete,
           sandboxSaveSnapshot, sandboxRestoreSnapshot, sandboxExportJSON, sandboxExportCSV,
-          runOptimization, applySandboxLayer, rollbackSandboxBatch, sandboxComparison, setSandboxObjectives, pName, pColor } = props;
+          runOptimization, applySandboxLayer, rollbackSandboxBatch, sandboxComparison, setSandboxObjectives } = props;
 
   // === AUDITORÍA DE PRESENCIA (online) ===
   const [online, setOnline] = useState({ users: [], at: null });
@@ -5325,6 +5951,26 @@ if (cmd.type === 'removeExtraSlot') {
               comparison={sandboxComparison}
               pName={pName}
               pColor={pColor}
+              diffFilters={diffFilters}
+              onDiffFiltersChange={handleDiffFiltersChange}
+              filteredDiffs={filteredDiffs}
+              selectedDiffs={selectedDiffs}
+              onToggleDiff={toggleDiffSelected}
+              onSelectAllDiffs={selectAllDiffs}
+              onClearDiffs={clearSelectedDiffs}
+              selectionSummary={selectedDiffSummary}
+              onApplySelection={applySelectedDiffs}
+              selectionPending={diffApplyPending}
+              lastSelectionBatchId={lastSelectionBatchId}
+              onRollbackSelectionBatch={rollbackSandboxBatch}
+              conflictState={conflictSolver}
+              onGenerateConflictProposals={generateConflictProposals}
+              onToggleConflictProposal={toggleConflictProposal}
+              onSelectAllConflictProposals={selectAllConflictProposals}
+              onClearConflictSelection={clearConflictSelection}
+              onApplyConflictProposals={applyConflictProposals}
+              conflictPending={conflictApplyPending}
+              onRollbackConflictBatch={rollbackSandboxBatch}
             />
           )}
             {(isAdmin && (state?.debug?.weekendAudit===true)) && (

@@ -196,6 +196,68 @@ function applyChange(assignments, stats, change, ctx){
   }
   return true;
 }
+
+function ensureStatsEntry(stats, pid){
+  if (!pid) return null;
+  if (!stats.has(pid)){
+    stats.set(pid, {
+      totalMinutes:0,
+      weeklyMinutes:new Map(),
+      weeklyDays:new Map(),
+      weekendKeys:new Set(),
+      assignmentsByDate:new Map()
+    });
+  }
+  return stats.get(pid);
+}
+
+function decrementStatsForSlot(stats, pid, dateStr, shift, ctx){
+  if (!pid) return;
+  const st = stats.get(pid);
+  if (!st) return;
+  const mins = effectiveMinutes(shift);
+  const wk = weekKey(dateStr);
+  st.totalMinutes = Math.max(0, st.totalMinutes - mins);
+  if (st.weeklyMinutes.has(wk)){
+    const next = Math.max(0, (st.weeklyMinutes.get(wk) || 0) - mins);
+    st.weeklyMinutes.set(wk, next);
+  }
+  if (st.weeklyDays.has(wk)){
+    const next = Math.max(0, (st.weeklyDays.get(wk) || 0) - 1);
+    if (next <= 0) st.weeklyDays.delete(wk); else st.weeklyDays.set(wk, next);
+  }
+  if (st.assignmentsByDate.has(dateStr)){
+    const next = Math.max(0, (st.assignmentsByDate.get(dateStr) || 0) - 1);
+    if (next <= 0) st.assignmentsByDate.delete(dateStr); else st.assignmentsByDate.set(dateStr, next);
+  }
+  const isWe = isWeekend(parseDateValue(dateStr)) || ctx.workingHolidaySet.has(dateStr);
+  if (isWe && st.weekendKeys.has(saturdayOfWeekend(dateStr))){
+    let still=false;
+    for (const [d,count] of st.assignmentsByDate.entries()){
+      if (!count) continue;
+      if ((isWeekend(parseDateValue(d)) || ctx.workingHolidaySet.has(d)) && saturdayOfWeekend(d)===saturdayOfWeekend(dateStr)){
+        still=true;
+        break;
+      }
+    }
+    if (!still) st.weekendKeys.delete(saturdayOfWeekend(dateStr));
+  }
+}
+
+function incrementStatsForSlot(stats, pid, dateStr, shift, ctx){
+  if (!pid) return;
+  const st = ensureStatsEntry(stats, pid);
+  if (!st) return;
+  const mins = effectiveMinutes(shift);
+  const wk = weekKey(dateStr);
+  st.totalMinutes += mins;
+  st.weeklyMinutes.set(wk,(st.weeklyMinutes.get(wk)||0)+mins);
+  st.weeklyDays.set(wk,(st.weeklyDays.get(wk)||0)+1);
+  st.assignmentsByDate.set(dateStr,(st.assignmentsByDate.get(dateStr)||0)+1);
+  if (isWeekend(parseDateValue(dateStr)) || ctx.workingHolidaySet.has(dateStr)){
+    st.weekendKeys.add(saturdayOfWeekend(dateStr));
+  }
+}
 function computeMetrics(stats, realStats){
   const perPerson=[];
   for (const [pid, st] of stats.entries()){
@@ -259,6 +321,94 @@ function optimizeLayer(payload){
   const metrics = computeMetrics(stats, realStats);
   return { assignments, metrics, changes };
 }
+
+function solveConflicts(payload){
+  const { layer, conflicts, context } = payload || {};
+  const assignments = cloneAssignments(layer?.assignments || {});
+  const ctx = {
+    rules: context?.rules || {},
+    timeOffIndex: buildTimeOffIndex(context?.timeOffDates || {}),
+    closedDates: buildClosedSet(context?.closedDates || []),
+    workingHolidaySet: buildWorkingHolidaySet(context?.workingHolidays || []),
+    peopleIds: context?.peopleIds || []
+  };
+  const stats = computeStats(assignments, ctx);
+  const proposals = [];
+  if (!Array.isArray(conflicts) || !conflicts.length){
+    return { proposals };
+  }
+
+  const conflictsSorted = [...conflicts].sort((a,b) => {
+    const dateA = a?.dateStr || '';
+    const dateB = b?.dateStr || '';
+    if (dateA !== dateB) return dateA.localeCompare(dateB);
+    const startA = a?.start || '';
+    const startB = b?.start || '';
+    if (startA !== startB) return startA.localeCompare(startB);
+    const idxA = Number.isFinite(a?.slotIndex) ? a.slotIndex : 0;
+    const idxB = Number.isFinite(b?.slotIndex) ? b.slotIndex : 0;
+    return idxA - idxB;
+  });
+
+  for (const conflict of conflictsSorted){
+    const dateStr = conflict?.dateStr;
+    const slotIndex = Number.isFinite(conflict?.slotIndex) ? conflict.slotIndex : 0;
+    const cell = assignments[dateStr] || [];
+    const slot = cell[slotIndex];
+    const shift = slot?.shift || null;
+    const fromPerson = slot?.personId || conflict?.personId || null;
+    const baseProposal = {
+      dateStr,
+      slotIndex,
+      shiftLabel: conflict?.shiftLabel || slot?.shift?.label || `Slot ${slotIndex+1}`,
+      start: conflict?.start || slot?.shift?.start || '',
+      end: conflict?.end || slot?.shift?.end || '',
+      fromPerson,
+      personId: conflict?.personId || fromPerson || null
+    };
+
+    if (!dateStr || !cell || !slot || !shift){
+      proposals.push({ ...baseProposal, resolution:'unresolved', note:'Turno no disponible' });
+      continue;
+    }
+
+    if (fromPerson){
+      decrementStatsForSlot(stats, fromPerson, dateStr, shift, ctx);
+      cell[slotIndex] = { ...slot, personId: null };
+    }
+
+    const viable = [];
+    for (const pid of ctx.peopleIds){
+      if (!pid || pid === fromPerson) continue;
+      if (!canAssign(ctx, stats, pid, dateStr, shift)) continue;
+      const st = stats.get(pid);
+      viable.push({ pid, load: st ? st.totalMinutes || 0 : 0 });
+    }
+
+    viable.sort((a,b) => a.load - b.load);
+    const best = viable.length ? viable[0].pid : null;
+
+    if (best){
+      cell[slotIndex] = { ...slot, personId: best };
+      incrementStatsForSlot(stats, best, dateStr, shift, ctx);
+      proposals.push({
+        ...baseProposal,
+        toPerson: best,
+        resolution: 'assign'
+      });
+    } else {
+      proposals.push({
+        ...baseProposal,
+        toPerson: null,
+        resolution: 'forceEmpty',
+        note: 'Sin alternativa disponible'
+      });
+    }
+  }
+
+  return { proposals };
+}
+
 self.onmessage = (event) => {
   const { data } = event;
   if (!data || typeof data !== 'object') return;
@@ -268,6 +418,13 @@ self.onmessage = (event) => {
       self.postMessage({ type:'result', jobId: data.jobId, layerId: data.layerId, result });
     } catch (err) {
       self.postMessage({ type:'error', jobId: data.jobId, layerId: data.layerId, error: err?.message || String(err) });
+    }
+  } else if (data.type === 'solve-conflicts') {
+    try {
+      const result = solveConflicts(data.payload);
+      self.postMessage({ type:'conflict-result', jobId: data.jobId, layerId: data.layerId, result });
+    } catch (err) {
+      self.postMessage({ type:'conflict-error', jobId: data.jobId, layerId: data.layerId, error: err?.message || String(err) });
     }
   }
 };
