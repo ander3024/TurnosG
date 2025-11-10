@@ -1505,6 +1505,180 @@ const assignmentsImproved = useMemo(()=> improveConciliation({
   });
   const [conflictApplyPending, setConflictApplyPending] = useState(false);
 
+   const personById = useMemo(() => {
+    const m = new Map();
+    (state.people || []).forEach(person => {
+      if (!person?.id) return;
+      m.set(person.id, person);
+    });
+    return m;
+  }, [state.people]);
+
+  const pName = useCallback((id) => {
+    if (!id) return "Vacío";
+    return personById.get(id)?.name || id || "—";
+  }, [personById]);
+
+  const pColor = useCallback((id) => {
+    if (!id) return "#94a3b8";
+    return personById.get(id)?.color || "#64748b";
+  }, [personById]);
+
+  const sandboxComparison = useMemo(() => {
+    const nameOf = (pid) => {
+      if (!pid) return "Vacío";
+      return personById.get(pid)?.name || pid || "Vacío";
+    };
+
+    const ledgerResult = buildVacationLedger({
+      timeOffs: state.timeOffs,
+      people: state.people,
+      vacationDaysNatural: state.vacationDaysNatural,
+      province: state.province,
+      closeOnHolidays: state.closeOnHolidays,
+      closedExtraDates: state.closedExtraDates,
+      customHolidaysByYear: state.customHolidaysByYear,
+      consumeVacationOnHoliday: state.consumeVacationOnHoliday,
+      workingHolidays: state.workingHolidays
+    });
+
+    const baseRows = Array.from(ledgerResult.ledger.entries()).map(([personId, entry]) => ({
+      personId,
+      diffMinutes: 0,
+      diffDays: 0,
+      diffWeekends: 0,
+      baseMinutes: 0,
+      candidateMinutes: 0,
+      vacationUsed: entry.used,
+      vacationRemaining: entry.remaining,
+      vacationAllowance: entry.allowance
+    }));
+
+    if (!activeSandboxLayer) {
+      return {
+        perPerson: baseRows,
+        diffsByDate: [],
+        totalChanges: 0,
+        vacationLedger: ledgerResult.ledger,
+        vacationDefaultAllowance: ledgerResult.defaultAllowance,
+        vacationConflicts: []
+      };
+    }
+
+    const diffRows = compareAssignments(ASS, activeSandboxLayer.assignments);
+    const rowMap = new Map(baseRows.map(row => [row.personId, { ...row }]));
+    const ensureRow = (personId) => {
+      if (!personId) return null;
+      if (!rowMap.has(personId)) {
+        rowMap.set(personId, {
+          personId,
+          diffMinutes: 0,
+          diffDays: 0,
+          diffWeekends: 0,
+          baseMinutes: 0,
+          candidateMinutes: 0,
+          vacationUsed: 0,
+          vacationRemaining: ledgerResult.defaultAllowance,
+          vacationAllowance: ledgerResult.defaultAllowance
+        });
+      }
+      return rowMap.get(personId);
+    };
+
+    diffRows.forEach(row => {
+      const target = ensureRow(row.personId);
+      if (!target) return;
+      target.diffMinutes = row.diffMinutes;
+      target.diffDays = row.diffDays;
+      target.diffWeekends = row.diffWeekends;
+      target.baseMinutes = row.baseMinutes;
+      target.candidateMinutes = row.candidateMinutes;
+    });
+
+    for (const [personId, entry] of ledgerResult.ledger.entries()){
+      const target = ensureRow(personId);
+      if (!target) continue;
+      target.vacationUsed = entry.used;
+      target.vacationRemaining = entry.remaining;
+      target.vacationAllowance = entry.allowance;
+    }
+
+    for (const row of rowMap.values()){
+      if (typeof row.vacationUsed !== 'number') row.vacationUsed = 0;
+      if (typeof row.vacationRemaining !== 'number'){
+        const allowance = typeof row.vacationAllowance === 'number' ? row.vacationAllowance : ledgerResult.defaultAllowance;
+        row.vacationRemaining = allowance - row.vacationUsed;
+      }
+    }
+
+    const perPerson = Array.from(rowMap.values());
+    perPerson.sort((a,b) => Math.abs(b.diffMinutes) - Math.abs(a.diffMinutes));
+
+    const diffs = diffAssignments(ASS, activeSandboxLayer.assignments).map(diff => ({
+      ...diff,
+      key: diffKeyForChange(diff),
+      fromName: nameOf(diff.fromPerson),
+      toName: nameOf(diff.toPerson)
+    }));
+    diffs.sort((a,b) => {
+      const dateCompare = (a.dateStr || "").localeCompare(b.dateStr || "");
+      if (dateCompare !== 0) return dateCompare;
+      const startA = a.start || "";
+      const startB = b.start || "";
+      if (startA !== startB) return startA.localeCompare(startB);
+      return (a.slotIndex ?? 0) - (b.slotIndex ?? 0);
+    });
+
+    const conflictOpts = {
+      workingHolidaySet: new Set(state.workingHolidays || []),
+      consumeVacationOnHoliday: state.consumeVacationOnHoliday,
+      province: state.province,
+      closeOnHolidays: state.closeOnHolidays,
+      closedExtraDates: state.closedExtraDates,
+      customHolidaysByYear: state.customHolidaysByYear
+    };
+    const rawConflicts = findVacationConflicts(activeSandboxLayer.assignments, state.timeOffs, conflictOpts);
+    const conflictSlots = [];
+    const vacationConflicts = rawConflicts.map(item => ({
+      ...item,
+      slots: (item.slots || []).map(slot => {
+        const slotIndex = Number.isFinite(slot.slotIndex) ? slot.slotIndex : 0;
+        conflictSlots.push({
+          dateStr: item.dateStr,
+          personId: item.personId,
+          slotIndex,
+          shiftLabel: slot.label,
+          start: slot.start,
+          end: slot.end
+        });
+        return { ...slot, slotIndex };
+      })
+    }));
+
+    return {
+      perPerson,
+      diffsByDate: diffs,
+      totalChanges: diffs.length,
+      vacationLedger: ledgerResult.ledger,
+      vacationDefaultAllowance: ledgerResult.defaultAllowance,
+      vacationConflicts,
+      vacationConflictSlots: conflictSlots
+    };
+  }, [
+    ASS,
+    activeSandboxLayer,
+    personById,
+    state.timeOffs,
+    state.people,
+    state.vacationDaysNatural,
+    state.province,
+    state.consumeVacationOnHoliday,
+    state.closeOnHolidays,
+    state.closedExtraDates,
+    state.customHolidaysByYear,
+    state.workingHolidays
+  ]);
+
   useEffect(() => {
     if (typeof Worker === 'undefined') return () => {};
     const worker = new Worker(new URL('./workers/optimizer.js', import.meta.url), { type:'module' });
@@ -2025,180 +2199,6 @@ const assignmentsImproved = useMemo(()=> improveConciliation({
     showToast
   ]);
 
-  const personById = useMemo(() => {
-    const m = new Map();
-    (state.people || []).forEach(person => {
-      if (!person?.id) return;
-      m.set(person.id, person);
-    });
-    return m;
-  }, [state.people]);
-
-  const pName = useCallback((id) => {
-    if (!id) return "Vacío";
-    return personById.get(id)?.name || id || "—";
-  }, [personById]);
-
-  const pColor = useCallback((id) => {
-    if (!id) return "#94a3b8";
-    return personById.get(id)?.color || "#64748b";
-  }, [personById]);
-
-  const sandboxComparison = useMemo(() => {
-    const nameOf = (pid) => {
-      if (!pid) return "Vacío";
-      return personById.get(pid)?.name || pid || "Vacío";
-    };
-
-    const ledgerResult = buildVacationLedger({
-      timeOffs: state.timeOffs,
-      people: state.people,
-      vacationDaysNatural: state.vacationDaysNatural,
-      province: state.province,
-      closeOnHolidays: state.closeOnHolidays,
-      closedExtraDates: state.closedExtraDates,
-      customHolidaysByYear: state.customHolidaysByYear,
-      consumeVacationOnHoliday: state.consumeVacationOnHoliday,
-      workingHolidays: state.workingHolidays
-    });
-
-    const baseRows = Array.from(ledgerResult.ledger.entries()).map(([personId, entry]) => ({
-      personId,
-      diffMinutes: 0,
-      diffDays: 0,
-      diffWeekends: 0,
-      baseMinutes: 0,
-      candidateMinutes: 0,
-      vacationUsed: entry.used,
-      vacationRemaining: entry.remaining,
-      vacationAllowance: entry.allowance
-    }));
-
-    if (!activeSandboxLayer) {
-      return {
-        perPerson: baseRows,
-        diffsByDate: [],
-        totalChanges: 0,
-        vacationLedger: ledgerResult.ledger,
-        vacationDefaultAllowance: ledgerResult.defaultAllowance,
-        vacationConflicts: []
-      };
-    }
-
-    const diffRows = compareAssignments(ASS, activeSandboxLayer.assignments);
-    const rowMap = new Map(baseRows.map(row => [row.personId, { ...row }]));
-    const ensureRow = (personId) => {
-      if (!personId) return null;
-      if (!rowMap.has(personId)) {
-        rowMap.set(personId, {
-          personId,
-          diffMinutes: 0,
-          diffDays: 0,
-          diffWeekends: 0,
-          baseMinutes: 0,
-          candidateMinutes: 0,
-          vacationUsed: 0,
-          vacationRemaining: ledgerResult.defaultAllowance,
-          vacationAllowance: ledgerResult.defaultAllowance
-        });
-      }
-      return rowMap.get(personId);
-    };
-
-    diffRows.forEach(row => {
-      const target = ensureRow(row.personId);
-      if (!target) return;
-      target.diffMinutes = row.diffMinutes;
-      target.diffDays = row.diffDays;
-      target.diffWeekends = row.diffWeekends;
-      target.baseMinutes = row.baseMinutes;
-      target.candidateMinutes = row.candidateMinutes;
-    });
-
-    for (const [personId, entry] of ledgerResult.ledger.entries()){
-      const target = ensureRow(personId);
-      if (!target) continue;
-      target.vacationUsed = entry.used;
-      target.vacationRemaining = entry.remaining;
-      target.vacationAllowance = entry.allowance;
-    }
-
-    for (const row of rowMap.values()){
-      if (typeof row.vacationUsed !== 'number') row.vacationUsed = 0;
-      if (typeof row.vacationRemaining !== 'number'){
-        const allowance = typeof row.vacationAllowance === 'number' ? row.vacationAllowance : ledgerResult.defaultAllowance;
-        row.vacationRemaining = allowance - row.vacationUsed;
-      }
-    }
-
-    const perPerson = Array.from(rowMap.values());
-    perPerson.sort((a,b) => Math.abs(b.diffMinutes) - Math.abs(a.diffMinutes));
-
-    const diffs = diffAssignments(ASS, activeSandboxLayer.assignments).map(diff => ({
-      ...diff,
-      key: diffKeyForChange(diff),
-      fromName: nameOf(diff.fromPerson),
-      toName: nameOf(diff.toPerson)
-    }));
-    diffs.sort((a,b) => {
-      const dateCompare = (a.dateStr || "").localeCompare(b.dateStr || "");
-      if (dateCompare !== 0) return dateCompare;
-      const startA = a.start || "";
-      const startB = b.start || "";
-      if (startA !== startB) return startA.localeCompare(startB);
-      return (a.slotIndex ?? 0) - (b.slotIndex ?? 0);
-    });
-
-    const conflictOpts = {
-      workingHolidaySet: new Set(state.workingHolidays || []),
-      consumeVacationOnHoliday: state.consumeVacationOnHoliday,
-      province: state.province,
-      closeOnHolidays: state.closeOnHolidays,
-      closedExtraDates: state.closedExtraDates,
-      customHolidaysByYear: state.customHolidaysByYear
-    };
-    const rawConflicts = findVacationConflicts(activeSandboxLayer.assignments, state.timeOffs, conflictOpts);
-    const conflictSlots = [];
-    const vacationConflicts = rawConflicts.map(item => ({
-      ...item,
-      slots: (item.slots || []).map(slot => {
-        const slotIndex = Number.isFinite(slot.slotIndex) ? slot.slotIndex : 0;
-        conflictSlots.push({
-          dateStr: item.dateStr,
-          personId: item.personId,
-          slotIndex,
-          shiftLabel: slot.label,
-          start: slot.start,
-          end: slot.end
-        });
-        return { ...slot, slotIndex };
-      })
-    }));
-
-    return {
-      perPerson,
-      diffsByDate: diffs,
-      totalChanges: diffs.length,
-      vacationLedger: ledgerResult.ledger,
-      vacationDefaultAllowance: ledgerResult.defaultAllowance,
-      vacationConflicts,
-      vacationConflictSlots: conflictSlots
-    };
-  }, [
-    ASS,
-    activeSandboxLayer,
-    personById,
-    state.timeOffs,
-    state.people,
-    state.vacationDaysNatural,
-    state.province,
-    state.consumeVacationOnHoliday,
-    state.closeOnHolidays,
-    state.closedExtraDates,
-    state.customHolidaysByYear,
-    state.workingHolidays
-  ]);
-
   const diffMatchesFilters = useCallback((diff, filters) => {
     if (!diff) return false;
     const f = filters || {};
@@ -2714,6 +2714,7 @@ return (
   importJSON={importJSON}
   exportICS={exportICS}
   exportPayroll={exportPayroll}
+  exportAuditCsv={exportAuditCsv}
   clearVisibleOverrides={clearVisibleOverrides}
   duplicateVisibleToNextWeek={duplicateVisibleToNextWeek}
   undoLastOverride={undoLastOverride}
@@ -2744,6 +2745,26 @@ return (
   rollbackSandboxBatch={rollbackSandboxBatch}
   sandboxComparison={sandboxComparison}
   setSandboxObjectives={setSandboxObjectives}
+  pName={pName}
+  pColor={pColor}
+  diffFilters={diffFilters}
+  handleDiffFiltersChange={handleDiffFiltersChange}
+  filteredDiffs={filteredDiffs}
+  selectedDiffs={selectedDiffs}
+  toggleDiffSelected={toggleDiffSelected}
+  selectAllDiffs={selectAllDiffs}
+  clearSelectedDiffs={clearSelectedDiffs}
+  selectedDiffSummary={selectedDiffSummary}
+  applySelectedDiffs={applySelectedDiffs}
+  diffApplyPending={diffApplyPending}
+  lastSelectionBatchId={lastSelectionBatchId}
+  conflictSolver={conflictSolver}
+  conflictApplyPending={conflictApplyPending}
+  generateConflictProposals={generateConflictProposals}
+  toggleConflictProposal={toggleConflictProposal}
+  selectAllConflictProposals={selectAllConflictProposals}
+  clearConflictSelection={clearConflictSelection}
+  applyConflictProposals={applyConflictProposals}
 />
 );
 }
@@ -5324,13 +5345,19 @@ function AuthenticatedApp(props){
           canPrev, canNext, canNextRange,
           payroll, setPayroll,
           ASS, controls,
-          exportCSV, exportJSON, importJSON, exportICS, exportPayroll,
+          exportCSV, exportJSON, importJSON, exportICS, exportPayroll, exportAuditCsv,
           up, upPerson, forceAssign, pillClass, density, setDensity,
           personFilter, setPersonFilter, clearVisibleOverrides, duplicateVisibleToNextWeek, undoLastOverride, onQuickAssign, validateCanAssign,
           sandboxState, activeSandboxLayer, activeSnapshots, sandboxRuntime,
           sandboxCreateFromReal, sandboxActivate, sandboxDuplicate, sandboxDelete,
           sandboxSaveSnapshot, sandboxRestoreSnapshot, sandboxExportJSON, sandboxExportCSV,
-          runOptimization, applySandboxLayer, rollbackSandboxBatch, sandboxComparison, setSandboxObjectives } = props;
+          runOptimization, applySandboxLayer, rollbackSandboxBatch, sandboxComparison, setSandboxObjectives,
+          pName, pColor, diffFilters, handleDiffFiltersChange, filteredDiffs,
+          selectedDiffs, toggleDiffSelected, selectAllDiffs, clearSelectedDiffs,
+          selectedDiffSummary, applySelectedDiffs, diffApplyPending, lastSelectionBatchId,
+          conflictSolver, conflictApplyPending, generateConflictProposals, toggleConflictProposal,
+          selectAllConflictProposals, clearConflictSelection,
+          applyConflictProposals } = props;
 
   // === AUDITORÍA DE PRESENCIA (online) ===
   const [online, setOnline] = useState({ users: [], at: null });
@@ -5773,9 +5800,8 @@ if (cmd.type === 'removeExtraSlot') {
 
 {isAdmin && <AdminSessionsAuditCard auth={auth} showToast={showToast} />}
 
-
           <Card title="Auditoría (últimos 100)">
-            {typeof exportAuditCsv === "function" && (
+            {typeof exportAuditCsv === 'function' && (
               <button onClick={exportAuditCsv} className="mb-2 px-2 py-0.5 border rounded text-xs">Export CSV</button>
             )}
             <div className="max-h-40 overflow-auto text-xs">
