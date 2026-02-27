@@ -2351,7 +2351,7 @@ function onAddExtraHours({ dateStr, personId, hours, comment }) {
     return next;
   });
   showToast('Horas adicionales añadidas');
-}
+  };
 
 function removeExtraHoursEntry(id){
   if (!id) return;
@@ -2366,7 +2366,7 @@ function removeExtraHoursEntry(id){
     return next;
   });
   showToast('Horas adicionales eliminadas');
-}
+  };
 
 function getExtraHoursFor(dateStr, personId){
   return (state.extraHours || []).filter(e => e?.dateStr === dateStr && e?.personId === personId);
@@ -6260,8 +6260,8 @@ if (cmd.type === 'removeExtraSlot') {
           isAdmin={isAdmin}
           onQuickAssign={onQuickAssign}
           extraHours={state.extraHours}
-          onAddExtraHours={onAddExtraHours}
-          onRemoveExtraHours={removeExtraHoursEntry}
+          onAddExtraHours={handleAddExtraHours}
+          onRemoveExtraHours={handleRemoveExtraHours}
           onClose={()=>setModalDayProp(null)}
         />
       )}
