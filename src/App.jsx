@@ -2368,6 +2368,9 @@ function removeExtraHoursEntry(id){
   showToast('Horas adicionales eliminadas');
   };
 
+  const handleAddExtraHours = onAddExtraHours;
+  const handleRemoveExtraHours = removeExtraHoursEntry;
+
 function getExtraHoursFor(dateStr, personId){
   return (state.extraHours || []).filter(e => e?.dateStr === dateStr && e?.personId === personId);
 }
