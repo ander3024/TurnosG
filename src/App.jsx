@@ -6260,8 +6260,8 @@ if (cmd.type === 'removeExtraSlot') {
           isAdmin={isAdmin}
           onQuickAssign={onQuickAssign}
           extraHours={state.extraHours}
-          onAddExtraHours={handleAddExtraHours}
-          onRemoveExtraHours={handleRemoveExtraHours}
+          onAddExtraHours={onAddExtraHours}
+          onRemoveExtraHours={removeExtraHoursEntry}
           onClose={()=>setModalDayProp(null)}
         />
       )}
