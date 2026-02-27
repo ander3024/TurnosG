@@ -1258,6 +1258,60 @@ export default function App(){
     }, ms);
   }, [setUI]);
 
+
+// ===== Horas adicionales (sueltas) =====
+const onAddExtraHours = useCallback(({ dateStr, personId, hours, comment }) => {
+  if (!dateStr || !personId) return;
+  const h = Number(hours);
+  if (!Number.isFinite(h) || h <= 0) { alert('Horas no válidas'); return; }
+
+  const id = (typeof crypto !== 'undefined' && crypto.randomUUID)
+    ? crypto.randomUUID()
+    : ('eh_' + Math.random().toString(16).slice(2));
+
+  const actor = auth.user?.email || auth.user?.name || 'unknown';
+
+  setState(prev => {
+    const next = structuredClone(prev);
+    const list = Array.isArray(next.extraHours) ? next.extraHours.slice() : [];
+    list.push({
+      id,
+      dateStr,
+      personId,
+      hours: Math.round(h * 100) / 100,
+      comment: (comment || '').trim(),
+      ts: new Date().toISOString(),
+      actor
+    });
+    next.extraHours = list;
+    next.audit = [
+      ...(next.audit || []),
+      { ts: new Date().toISOString(), actor, action: 'extraHours:add', personId, dateStr, hours: Math.round(h * 100) / 100 }
+    ];
+    return next;
+  });
+
+  showToast('Horas adicionales añadidas');
+}, [auth.user, showToast]);
+
+const removeExtraHoursEntry = useCallback((id) => {
+  if (!id) return;
+  const actor = auth.user?.email || auth.user?.name || 'unknown';
+
+  setState(prev => {
+    const next = structuredClone(prev);
+    next.extraHours = (next.extraHours || []).filter(e => e?.id !== id);
+    next.audit = [
+      ...(next.audit || []),
+      { ts: new Date().toISOString(), actor, action: 'extraHours:remove', extraId: id }
+    ];
+    return next;
+  });
+
+  showToast('Horas adicionales eliminadas');
+}, [auth.user, showToast]);
+
+
   useEffect(() => () => {
     if (toastTimeoutRef.current) {
       clearTimeout(toastTimeoutRef.current);
@@ -2324,52 +2378,6 @@ const assignmentsImproved = useMemo(()=> improveConciliation({
     : density==="spacious"
     ? "px-3 py-2 min-h-[56px] text-[13px]"
     : "px-2.5 py-1.5 min-h-[52px] text-[12px]";
-// ===== Horas adicionales (sueltas) =====
-function onAddExtraHours({ dateStr, personId, hours, comment }) {
-  if (!dateStr || !personId) return;
-  const h = Number(hours);
-  if (!Number.isFinite(h) || h <= 0) { alert('Horas no válidas'); return; }
-  const id = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : ('eh_' + Math.random().toString(16).slice(2));
-  const actor = auth.user?.email || auth.user?.name || "unknown";
-  setState(prev => {
-    const next = structuredClone(prev);
-    const list = Array.isArray(next.extraHours) ? next.extraHours.slice() : [];
-    list.push({
-      id,
-      dateStr,
-      personId,
-      hours: Math.round(h * 100) / 100,
-      comment: (comment || '').trim(),
-      ts: new Date().toISOString(),
-      actor
-    });
-    next.extraHours = list;
-    next.audit = [
-      ...(next.audit || []),
-      { ts: new Date().toISOString(), actor, action: 'extraHours:add', personId, dateStr, hours: Math.round(h*100)/100 }
-    ];
-    return next;
-  });
-  showToast('Horas adicionales añadidas');
-  };
-
-function removeExtraHoursEntry(id){
-  if (!id) return;
-  const actor = auth.user?.email || auth.user?.name || "unknown";
-  setState(prev => {
-    const next = structuredClone(prev);
-    next.extraHours = (next.extraHours || []).filter(e => e?.id !== id);
-    next.audit = [
-      ...(next.audit || []),
-      { ts: new Date().toISOString(), actor, action: 'extraHours:remove', extraId: id }
-    ];
-    return next;
-  });
-  showToast('Horas adicionales eliminadas');
-  };
-
-  const handleAddExtraHours = onAddExtraHours;
-  const handleRemoveExtraHours = removeExtraHoursEntry;
 
 function getExtraHoursFor(dateStr, personId){
   return (state.extraHours || []).filter(e => e?.dateStr === dateStr && e?.personId === personId);
