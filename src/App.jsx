@@ -5705,16 +5705,11 @@ useEffect(() => {
     }, 10_000);
     return () => clearInterval(id);
   }, [auth?.user, auth?.token]);
-
-
-  // --- scope admin (robusto tras refactor) ---
-  // Aliases seguros para modal del día (local o via props)
+  // --- admin scope ---
   const modalDayProp = modalDay;
-  const setModalDayProp = (typeof setModalDay !== 'undefined') ? setModalDay : props.setModalDay;
+  const setModalDayProp = setModalDay;
+  const isAdmin = auth?.user?.role === "admin";
 
-  const __ap_props = (typeof arguments !== "undefined" && arguments.length ? arguments[0] : {});
-  const __ap_auth = (typeof auth !== "undefined" && auth) ? auth : (__ap_props && (__ap_props.auth || __ap_props.Auth || null));
-  const isAdmin = !!(__ap_auth && __ap_auth.user && __ap_auth.user.role === "admin");
 
   // ---------- Exportaciones (CSV/ICS/Nómina) ----------
   
