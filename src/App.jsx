@@ -6271,7 +6271,7 @@ if (cmd.type === 'removeExtraSlot') {
           isAdmin={isAdmin}
           onQuickAssign={onQuickAssign}
           extraHours={state.extraHours}
-          onAddExtraHours={onAddExtraHours}
+          onAddExtraHours={(payload)=>onAddExtraHours(payload)}
           onRemoveExtraHours={removeExtraHoursEntry}
           onClose={()=>setModalDayProp(null)}
         />
