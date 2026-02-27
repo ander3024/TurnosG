@@ -5709,7 +5709,7 @@ useEffect(() => {
 
   // --- scope admin (robusto tras refactor) ---
   // Aliases seguros para modal del día (local o via props)
-  const modalDayProp = (typeof modalDay !== 'undefined') ? modalDay : (props.modalDay ?? null);
+  const modalDayProp = modalDay;
   const setModalDayProp = (typeof setModalDay !== 'undefined') ? setModalDay : props.setModalDay;
 
   const __ap_props = (typeof arguments !== "undefined" && arguments.length ? arguments[0] : {});
