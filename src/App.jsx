@@ -1230,6 +1230,7 @@ export default function App(){
     catch { return { token:"", user:null }; }
   });
   useEffect(()=>{ try{ localStorage.setItem("turnos_auth", JSON.stringify(auth)); }catch{} },[auth]);
+  const isAdmin = (auth?.user?.role === "admin");
   const [loginForm, setLoginForm] = useState({ email:"", password:"" });
   async function doLogin(e){ e?.preventDefault();
     const data = await api("/auth/login",{ method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(loginForm) });
@@ -5539,8 +5540,6 @@ useEffect(() => {
 
 
   // --- modal día (scope local) ---
-  const modalDayProp = modalDay;
-  const setModalDayProp = setModalDay;
 
 // ---------- Exportaciones (CSV/ICS/Nómina) ----------
   
@@ -5942,7 +5941,7 @@ if (cmd.type === 'removeExtraSlot') {
       assignments={ASS}
       people={state.people}
       isAdmin={isAdmin}
-      onOpenDay={(ds)=>setModalDayProp(ds)}
+      onOpenDay={(ds)=>setModalDay(ds)}
       onQuickAssign={handleCalendarCommand}
       province={state.province}
       closeOnHolidays={state.closeOnHolidays}
@@ -6093,7 +6092,7 @@ if (cmd.type === 'removeExtraSlot') {
           onOverride={forceAssign}
           isAdmin={isAdmin}
           onQuickAssign={onQuickAssign}
-          onClose={()=>setModalDayProp(null)}
+          onClose={()=>setModalDay(null)}
         />
       )}
     </div>
