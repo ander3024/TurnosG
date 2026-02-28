@@ -1,3 +1,4 @@
+const isAdmin = false;
 import React, { useEffect, useMemo, useState, useRef, useCallback } from "react";
 
 import WeekendAuditPanel from "./components/WeekendAuditPanel";
