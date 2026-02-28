@@ -1282,7 +1282,7 @@ export default function App(){
     refuerzoWeekdayShift:{start:"12:00",end:"20:00",label:"Refuerzo",lunchMinutes:60},
     refuerzoMorningShift:{start:"10:00",end:"18:00",label:"Refuerzo Mañana",lunchMinutes:0},
     refuerzoAfternoonShift:{start:"14:00",end:"22:00",label:"Refuerzo Tarde",lunchMinutes:0},
-    events: [], timeOffs: [],
+    events: [], timeOffs: [], extraHours: [],
     workingHolidays: [],   // ← días festivos que se trabajan como finde (12h)
     security:{ adminPin:"1234", personPins:{P1:"1111",P2:"2222",P3:"3333",P4:"4444"} },
     rebalance:false,
@@ -1353,6 +1353,61 @@ function forceAssign(dateStr, assignmentIndex, personId){
     return next;
   });
 }
+
+  // ===== Horas sueltas (extra) =====
+  const getDayExtraHours = useCallback((dateStr) => {
+    return (state.extraHours || []).filter(e => e?.dateStr === dateStr);
+  }, [state.extraHours]);
+
+  const hasShiftThatDay = useCallback((dateStr, personId) => {
+    const day = (ASS?.[dateStr] || []);
+    return day.some(a => a?.personId === personId);
+  }, [ASS]);
+
+  const addExtraHours = useCallback(({ dateStr, personId, hours, comment }) => {
+    if (!dateStr || !personId) return;
+    const h = Number(hours);
+    if (!Number.isFinite(h) || h <= 0) { alert("Horas no válidas"); return; }
+
+    const id = (typeof crypto !== "undefined" && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : ("eh_" + Math.random().toString(16).slice(2));
+
+    const actor = auth.user?.email || auth.user?.name || "unknown";
+
+    setState(prev => {
+      const next = structuredClone(prev);
+      const list = Array.isArray(next.extraHours) ? next.extraHours.slice() : [];
+      list.push({
+        id, dateStr, personId,
+        hours: Math.round(h * 100) / 100,
+        comment: (comment || "").trim(),
+        ts: new Date().toISOString(),
+        actor
+      });
+      next.extraHours = list;
+      next.audit = Array.isArray(next.audit)
+        ? [...next.audit, { ts: new Date().toISOString(), actor, action: "extraHours:add", dateStr, personId, hours: Math.round(h*100)/100 }]
+        : [{ ts: new Date().toISOString(), actor, action: "extraHours:add", dateStr, personId, hours: Math.round(h*100)/100 }];
+      return next;
+    });
+
+    showToast("Horas adicionales añadidas");
+  }, [auth.user, setState, showToast]);
+
+  const removeExtraHours = useCallback((id) => {
+    if (!id) return;
+    const actor = auth.user?.email || auth.user?.name || "unknown";
+    setState(prev => {
+      const next = structuredClone(prev);
+      next.extraHours = (next.extraHours || []).filter(e => e?.id !== id);
+      next.audit = Array.isArray(next.audit)
+        ? [...next.audit, { ts: new Date().toISOString(), actor, action: "extraHours:remove", extraId: id }]
+        : [{ ts: new Date().toISOString(), actor, action: "extraHours:remove", extraId: id }];
+      return next;
+    });
+    showToast("Horas adicionales eliminadas");
+  }, [auth.user, setState, showToast]);
 
   // Sincroniza offPolicy con window para que generateSchedule lea la política activa
   useEffect(() => {
@@ -4813,7 +4868,7 @@ function ResumenPanel({ controls, annualTarget, onExportICS }){
   );
 }
 // ===== Modal Día =====
-function DayModal({ dateStr, date, assignments, people, onOverride, onClose, isAdmin, onQuickAssign }){
+function DayModal({ dateStr, date, assignments, people, onOverride, onClose, isAdmin, onQuickAssign, extraHours=[], hasShiftThatDay, onAddExtraHours, onRemoveExtraHours }){
   const pmap=new Map(people.map(p=>[p.id,p]));
   const sorted=assignments.map(x=>x); // ya vienen ordenados por ASS
   return (
@@ -4829,6 +4884,87 @@ function DayModal({ dateStr, date, assignments, people, onOverride, onClose, isA
         <div className="p-4 space-y-3">
           {sorted.length===0 && <div className="text-sm text-slate-500">No hay turnos este día.</div>}
           {sorted.map((c,i)=>{ const p=c.personId?pmap.get(c.personId):null; const span=formatSpan(c.shift.start,c.shift.end); const dur = effectiveMinutes(c.shift)/60;
+                      {/* Horas adicionales */}
+            <div className="rounded-xl border border-slate-200 p-3">
+              <div className="flex items-center justify-between">
+                <div className="font-medium text-sm">⏱️ Horas adicionales</div>
+                <div className="text-xs text-slate-500">se guardan por día/persona</div>
+              </div>
+
+              {isAdmin && (
+                <div className="mt-3 grid grid-cols-12 gap-2 items-end">
+                  <div className="col-span-5">
+                    <label className="text-xs text-slate-600">Persona</label>
+                    <select id={`eh-person-${dateStr}`} className="w-full border rounded px-2 py-1 text-sm">
+                      <option value="">Selecciona…</option>
+                      {(people||[]).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                    </select>
+                  </div>
+                  <div className="col-span-3">
+                    <label className="text-xs text-slate-600">Horas</label>
+                    <input id={`eh-hours-${dateStr}`} type="number" step="0.25" min="0" className="w-full border rounded px-2 py-1 text-sm" placeholder="3" />
+                  </div>
+                  <div className="col-span-4">
+                    <label className="text-xs text-slate-600">Comentario</label>
+                    <input id={`eh-comment-${dateStr}`} className="w-full border rounded px-2 py-1 text-sm" placeholder="Motivo…" />
+                  </div>
+                  <div className="col-span-12">
+                    <button
+                      type="button"
+                      className="w-full px-3 py-1.5 rounded-lg border"
+                      onClick={() => {
+                        const personId = document.getElementById(`eh-person-${dateStr}`)?.value || "";
+                        const hours = document.getElementById(`eh-hours-${dateStr}`)?.value || "";
+                        const comment = document.getElementById(`eh-comment-${dateStr}`)?.value || "";
+                        onAddExtraHours && onAddExtraHours({ dateStr, personId, hours, comment });
+                        // limpia
+                        const hEl = document.getElementById(`eh-hours-${dateStr}`);
+                        const cEl = document.getElementById(`eh-comment-${dateStr}`);
+                        if (hEl) hEl.value = "";
+                        if (cEl) cEl.value = "";
+                      }}
+                    >
+                      Añadir horas adicionales
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <div className="mt-3 space-y-2">
+                {(!extraHours || extraHours.length===0) && (
+                  <div className="text-sm text-slate-500">No hay horas adicionales.</div>
+                )}
+
+                {(extraHours || []).map((eh) => {
+                  const hasShift = typeof hasShiftThatDay === "function" ? hasShiftThatDay(dateStr, eh.personId) : false;
+                  const cls = hasShift
+                    ? "bg-violet-50 border-violet-300 text-violet-900"
+                    : "bg-sky-50 border-sky-300 text-sky-900";
+                  const who = (pmap.get(eh.personId)?.name) || eh.personId;
+
+                  return (
+                    <div
+                      key={eh.id}
+                      className={`rounded-xl border px-3 py-2 text-sm flex items-center gap-2 ${cls}`}
+                      title={eh.comment ? `+${eh.hours}h · ${who} · ${eh.comment}` : `+${eh.hours}h · ${who}`}
+                    >
+                      <span className="font-medium">+{eh.hours}h</span>
+                      <span className="text-slate-700">{who}</span>
+                      {eh.comment ? <span className="ml-auto">💬</span> : <span className="ml-auto text-xs text-slate-500"> </span>}
+                      {isAdmin && (
+                        <button
+                          className="ml-2 px-2 py-0.5 rounded border text-xs"
+                          onClick={() => onRemoveExtraHours && onRemoveExtraHours(eh.id)}
+                          title="Eliminar"
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
             return (
               <div key={i} className={`rounded-xl border p-3 ${c.conflict? 'border-red-300 bg-red-50':'border-slate-200'}`}>
                 <div className="flex items-center justify-between gap-3">
@@ -6087,16 +6223,20 @@ if (cmd.type === 'removeExtraSlot') {
       <footer className="w-full max-w-[1800px] mx-auto px-6 pb-10 text-xs text-slate-500">Persistencia local + Nube SQLite. </footer>
 
        {modalDay && (
-        <DayModal
-          dateStr={modalDay}
-          date={parseDateValue(modalDay)}
-          assignments={ASS[modalDay]||[]}
-          people={state.people}
-          onOverride={forceAssign}
-          isAdmin={isAdmin}
-          onQuickAssign={onQuickAssign}
-          onClose={()=>setModalDay(null)}
-        />
+          <DayModal
+            dateStr={modalDay}
+            date={parseDateValue(modalDay)}
+            assignments={ASS[modalDay]||[]}
+            people={state.people}
+            onOverride={forceAssign}
+            isAdmin={isAdmin}
+            onQuickAssign={onQuickAssign}
+            extraHours={getDayExtraHours(modalDay)}
+            hasShiftThatDay={hasShiftThatDay}
+            onAddExtraHours={addExtraHours}
+            onRemoveExtraHours={removeExtraHours}
+            onClose={()=>setModalDay(null)}
+          />
       )}
     </div>
   );
