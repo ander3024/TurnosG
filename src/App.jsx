@@ -1354,61 +1354,6 @@ function forceAssign(dateStr, assignmentIndex, personId){
   });
 }
 
-  // ===== Horas sueltas (extra) =====
-  const getDayExtraHours = useCallback((dateStr) => {
-    return (state.extraHours || []).filter(e => e?.dateStr === dateStr);
-  }, [state.extraHours]);
-
-  const hasShiftThatDay = useCallback((dateStr, personId) => {
-    const day = (ASS?.[dateStr] || []);
-    return day.some(a => a?.personId === personId);
-  }, [ASS]);
-
-  const addExtraHours = useCallback(({ dateStr, personId, hours, comment }) => {
-    if (!dateStr || !personId) return;
-    const h = Number(hours);
-    if (!Number.isFinite(h) || h <= 0) { alert("Horas no válidas"); return; }
-
-    const id = (typeof crypto !== "undefined" && crypto.randomUUID)
-      ? crypto.randomUUID()
-      : ("eh_" + Math.random().toString(16).slice(2));
-
-    const actor = auth.user?.email || auth.user?.name || "unknown";
-
-    setState(prev => {
-      const next = structuredClone(prev);
-      const list = Array.isArray(next.extraHours) ? next.extraHours.slice() : [];
-      list.push({
-        id, dateStr, personId,
-        hours: Math.round(h * 100) / 100,
-        comment: (comment || "").trim(),
-        ts: new Date().toISOString(),
-        actor
-      });
-      next.extraHours = list;
-      next.audit = Array.isArray(next.audit)
-        ? [...next.audit, { ts: new Date().toISOString(), actor, action: "extraHours:add", dateStr, personId, hours: Math.round(h*100)/100 }]
-        : [{ ts: new Date().toISOString(), actor, action: "extraHours:add", dateStr, personId, hours: Math.round(h*100)/100 }];
-      return next;
-    });
-
-    showToast("Horas adicionales añadidas");
-  }, [auth.user, setState, showToast]);
-
-  const removeExtraHours = useCallback((id) => {
-    if (!id) return;
-    const actor = auth.user?.email || auth.user?.name || "unknown";
-    setState(prev => {
-      const next = structuredClone(prev);
-      next.extraHours = (next.extraHours || []).filter(e => e?.id !== id);
-      next.audit = Array.isArray(next.audit)
-        ? [...next.audit, { ts: new Date().toISOString(), actor, action: "extraHours:remove", extraId: id }]
-        : [{ ts: new Date().toISOString(), actor, action: "extraHours:remove", extraId: id }];
-      return next;
-    });
-    showToast("Horas adicionales eliminadas");
-  }, [auth.user, setState, showToast]);
-
   // Sincroniza offPolicy con window para que generateSchedule lea la política activa
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -1499,6 +1444,7 @@ function forceAssign(dateStr, assignmentIndex, personId){
       hoursPerPersonMin:base.hoursPerPersonMin, annualTargetHours:state.annualTargetHours,
       startDate, weeks:state.weeks, vacationDaysNatural:state.vacationDaysNatural,
       timeOffs:state.timeOffs, province:state.province, consumeVacationOnHoliday:state.consumeVacationOnHoliday,
+      extraHours: state.extraHours,
       events: state.events, refuerzoWeekdayShift: state.refuerzoWeekdayShift
     }), [base, state.people, state.weekdayShifts, state.weekendShift, state.annualTargetHours, startDate, state.weeks, state.vacationDaysNatural, state.timeOffs, state.province, state.consumeVacationOnHoliday]);
 
@@ -1534,6 +1480,61 @@ const assignmentsImproved = useMemo(()=> improveConciliation({
   // Usar ASS para pintar/expotar
   const ASS = state.applyConciliation ? assignmentsImproved : assignments;
 
+    // ===== Horas sueltas (extra) =====
+  const getDayExtraHours = useCallback((dateStr) => {
+    return (state.extraHours || []).filter(e => e?.dateStr === dateStr);
+  }, [state.extraHours]);
+
+  const hasShiftThatDay = useCallback((dateStr, personId) => {
+    const day = (ASS?.[dateStr] || []);
+    return day.some(a => a?.personId === personId);
+  }, [ASS]);
+
+  const addExtraHours = useCallback(({ dateStr, personId, hours, comment }) => {
+    if (!dateStr || !personId) return;
+    const h = Number(hours);
+    if (!Number.isFinite(h) || h <= 0) { alert("Horas no válidas"); return; }
+
+    const id = (typeof crypto !== "undefined" && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : ("eh_" + Math.random().toString(16).slice(2));
+
+    const actor = auth.user?.email || auth.user?.name || "unknown";
+
+    setState(prev => {
+      const next = structuredClone(prev);
+      const list = Array.isArray(next.extraHours) ? next.extraHours.slice() : [];
+      list.push({
+        id, dateStr, personId,
+        hours: Math.round(h * 100) / 100,
+        comment: (comment || "").trim(),
+        ts: new Date().toISOString(),
+        actor
+      });
+      next.extraHours = list;
+      next.audit = Array.isArray(next.audit)
+        ? [...next.audit, { ts: new Date().toISOString(), actor, action: "extraHours:add", dateStr, personId, hours: Math.round(h*100)/100 }]
+        : [{ ts: new Date().toISOString(), actor, action: "extraHours:add", dateStr, personId, hours: Math.round(h*100)/100 }];
+      return next;
+    });
+
+    showToast("Horas adicionales añadidas");
+  }, [auth.user, setState, showToast]);
+
+  const removeExtraHours = useCallback((id) => {
+    if (!id) return;
+    const actor = auth.user?.email || auth.user?.name || "unknown";
+    setState(prev => {
+      const next = structuredClone(prev);
+      next.extraHours = (next.extraHours || []).filter(e => e?.id !== id);
+      next.audit = Array.isArray(next.audit)
+        ? [...next.audit, { ts: new Date().toISOString(), actor, action: "extraHours:remove", extraId: id }]
+        : [{ ts: new Date().toISOString(), actor, action: "extraHours:remove", extraId: id }];
+      return next;
+    });
+    showToast("Horas adicionales eliminadas");
+  }, [auth.user, setState, showToast]);
+
   // Recalcular controles con ASS (para que refleje la vista final)
   const controls=useMemo(()=> buildControls({
       assignments:ASS, people:state.people,
@@ -1541,8 +1542,8 @@ const assignmentsImproved = useMemo(()=> improveConciliation({
       hoursPerPersonMin:new Map(), // no lo necesitamos aquí
       annualTargetHours:state.annualTargetHours,
       startDate, weeks:state.weeks, vacationDaysNatural:state.vacationDaysNatural,
-      timeOffs:state.timeOffs, province:state.province, consumeVacationOnHoliday:state.consumeVacationOnHoliday
-    }), [ASS, state.people, state.weekdayShifts, state.weekendShift, state.annualTargetHours, startDate, state.weeks, state.vacationDaysNatural, state.timeOffs, state.province, state.consumeVacationOnHoliday]);
+      timeOffs:state.timeOffs, province:state.province, consumeVacationOnHoliday:state.consumeVacationOnHoliday,
+      extraHours: state.extraHours,}), [ASS, state.people, state.weekdayShifts, state.weekendShift, state.annualTargetHours, startDate, state.weeks, state.vacationDaysNatural, state.timeOffs, state.province, state.consumeVacationOnHoliday]);
 
   const sandboxState = useMemo(() => normalizeSandbox(state.sandbox), [state.sandbox]);
   const activeSandboxLayer = useMemo(() => sandboxState.layers.find(l => l.id === sandboxState.active) || null, [sandboxState]);
@@ -2836,6 +2837,10 @@ return (
   selectAllConflictProposals={selectAllConflictProposals}
   clearConflictSelection={clearConflictSelection}
   applyConflictProposals={applyConflictProposals}
+  getDayExtraHours={getDayExtraHours}
+  hasShiftThatDay={hasShiftThatDay}
+  addExtraHours={addExtraHours}
+  removeExtraHours={removeExtraHours}
 />
 );
 }
@@ -4775,27 +4780,27 @@ function ScoreDebugPanel({ assignments, people, startDate, weeks, conciliacion, 
 // ===== Resumen y Modal Día =====
 function buildControls({
   assignments, people, weekdayShifts, weekendShift,
-  hoursPerPersonMin, // ya no lo necesitamos, pero lo dejo en la firma por compatibilidad
+  hoursPerPersonMin, // lo dejamos aunque no lo uses
   annualTargetHours, startDate, weeks, vacationDaysNatural,
-  timeOffs, province, consumeVacationOnHoliday
+  timeOffs, province, consumeVacationOnHoliday,
+  extraHours = [] // ✅ NUEVO
 }){
-  // Inicializa resumen
-  const summary = people.map(p=>({
+  const summary = (people || []).map(p=>({
     id:p.id, name:p.name, color:p.color,
     weekdays:0, weekends:0, minutes:0
   }));
   const index = new Map(summary.map(s=>[s.id,s]));
 
-  // Recorre todo el periodo y acumula días y minutos
-  const dates = Object.keys(assignments).length
-    ? Object.keys(assignments)
+  const dates = Object.keys(assignments || {}).length
+    ? Object.keys(assignments || {})
     : [...Array(weeks*7)].map((_,i)=> toDateValue(addDays(startDate, i)));
 
+  // 1) Turnos (ASS)
   for (const ds of dates){
-    const cell = assignments[ds] || [];
+    const cell = (assignments && assignments[ds]) ? assignments[ds] : [];
     const isWE = isWeekend(parseDateValue(ds));
     for (const c of cell){
-      if (!c.personId) continue;
+      if (!c?.personId || !c?.shift) continue;
       const s = index.get(c.personId);
       if (!s) continue;
       if (isWE) s.weekends += 1; else s.weekdays += 1;
@@ -4803,9 +4808,37 @@ function buildControls({
     }
   }
 
+  // 2) Horas adicionales (extraHours)
+  const extraByPerson = new Map();
+  for (const eh of (extraHours || [])){
+    if (!eh?.personId) continue;
+    const h = Number(eh.hours);
+    if (!Number.isFinite(h) || h <= 0) continue;
+    extraByPerson.set(eh.personId, (extraByPerson.get(eh.personId)||0) + h);
+  }
+  for (const [pid, h] of extraByPerson.entries()){
+    const s = index.get(pid);
+    if (s) s.minutes += h * 60;
+  }
+
+  // 3) Créditos por VIAJE (si quieres que cuenten en el total)
+  for (const to of (timeOffs || [])){
+    if (!to || to.type !== 'viaje') continue;
+    const effective = (to.status === 'aprobada') || (to.status == null);
+    if (!effective) continue;
+    const hpd = Number(to.hoursPerDay || 0);
+    if (!Number.isFinite(hpd) || hpd <= 0) continue;
+
+    const days = expandRange(to.start, to.end);
+    for (const ds of days){
+      const s = index.get(to.personId);
+      if (s) s.minutes += hpd * 60;
+    }
+  }
+
   // Vacaciones usadas (laborables)
   const vacByPerson = new Map();
-  for (const to of timeOffs){
+  for (const to of (timeOffs || [])){
     if (to.type==='vacaciones' && to.status==='aprobada'){
       const days = countVacationDaysConsideringHolidays(to.start,to.end,province,consumeVacationOnHoliday);
       vacByPerson.set(to.personId,(vacByPerson.get(to.personId)||0)+days);
@@ -4821,8 +4854,8 @@ function buildControls({
     s.remaining = annualTargetHours - s.annualProjection;
   }
 
-  // Conflictos (por si en el futuro los marcas)
-  const totalConflicts = dates.reduce((acc,ds)=> acc + (assignments[ds]||[]).filter(a=>a.conflict).length, 0);
+  // Conflictos
+  const totalConflicts = dates.reduce((acc,ds)=> acc + ((assignments && assignments[ds]) ? (assignments[ds]||[]).filter(a=>a.conflict).length : 0), 0);
 
   // Etiqueta de periodo visible en resumen
   const periodStart = startDate;
@@ -4830,7 +4863,14 @@ function buildControls({
   const fmt = d => d.toLocaleDateString(undefined,{ day:"2-digit", month:"short", year:"numeric"});
   const periodLabel = `${fmt(periodStart)} – ${fmt(periodEnd)} · ${weeks} sem`;
 
-  return { rows:summary, totalConflicts, vacationsUsedNatural, vacationUsedNaturalByPerson: vacByPerson, periodLabel };
+  return {
+    rows:summary,
+    totalConflicts,
+    vacationsUsedNatural,
+    vacationUsedNaturalByPerson: vacByPerson,
+    periodLabel,
+    extraHoursByPerson: extraByPerson // ✅ NUEVO (útil para UI)
+  };
 }
 function ResumenPanel({ controls, annualTarget, onExportICS }){
   return (
@@ -4867,10 +4907,85 @@ function ResumenPanel({ controls, annualTarget, onExportICS }){
     </Card>
   );
 }
+
+function MyBalancePanel({ controls, people, annualTarget }){
+  const [pid, setPid] = React.useState(() => (people && people[0]?.id) ? people[0].id : '');
+  const row = (controls?.rows || []).find(r => r.id === pid) || null;
+  const extraMap = controls?.extraHoursByPerson;
+  const extraH = (pid && extraMap && typeof extraMap.get === 'function') ? (extraMap.get(pid) || 0) : 0;
+
+  if (!people || people.length === 0) return null;
+
+  return (
+    <Card title="Mi saldo (informativo)">
+      <div className="text-xs text-slate-600 mb-3">
+        Periodo mostrado: {controls?.periodLabel || '—'}.
+      </div>
+
+      <div className="grid grid-cols-12 gap-3 items-end">
+        <div className="col-span-12 sm:col-span-6">
+          <label className="text-xs text-slate-600">Persona</label>
+          <select className="w-full border rounded px-2 py-1 text-sm" value={pid} onChange={e=>setPid(e.target.value)}>
+            {(people || []).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        </div>
+
+        <div className="col-span-6 sm:col-span-3">
+          <div className="text-xs text-slate-600">Horas periodo</div>
+          <div className="text-lg font-semibold">{row ? row.hours.toFixed(1) : '—'}h</div>
+        </div>
+
+        <div className="col-span-6 sm:col-span-3">
+          <div className="text-xs text-slate-600">ExtraHours</div>
+          <div className="text-lg font-semibold">{Number(extraH||0).toFixed(1)}h</div>
+        </div>
+
+        <div className="col-span-6 sm:col-span-3">
+          <div className="text-xs text-slate-600">Proyección anual</div>
+          <div className="text-lg font-semibold">{row ? row.annualProjection.toFixed(0) : '—'}h</div>
+        </div>
+
+        <div className="col-span-6 sm:col-span-3">
+          <div className="text-xs text-slate-600">Δ vs {annualTarget}h</div>
+          <div className={`text-lg font-semibold ${row?.delta>0 ? 'text-amber-700' : row?.delta<0 ? 'text-blue-700' : ''}`}>
+            {row ? row.delta.toFixed(0) : '—'}
+          </div>
+        </div>
+
+        <div className="col-span-12 sm:col-span-6">
+          <div className="text-xs text-slate-600">Horas pendientes / sobrantes</div>
+          <div className={`text-lg font-semibold ${row?.remaining>0 ? 'text-blue-700' : row?.remaining<0 ? 'text-amber-700' : ''}`}>
+            {row ? row.remaining.toFixed(0) : '—'}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-3 text-[11px] text-slate-500">
+        * Incluye turnos + horas adicionales + crédito por viaje (si aplica).
+      </div>
+    </Card>
+  );
+}
+
+
 // ===== Modal Día =====
-function DayModal({ dateStr, date, assignments, people, onOverride, onClose, isAdmin, onQuickAssign, extraHours=[], hasShiftThatDay, onAddExtraHours, onRemoveExtraHours }){
-  const pmap=new Map(people.map(p=>[p.id,p]));
-  const sorted=assignments.map(x=>x); // ya vienen ordenados por ASS
+function DayModal({
+  dateStr,
+  date,
+  assignments,
+  people,
+  onOverride,
+  onClose,
+  isAdmin,
+  onQuickAssign,
+  extraHours = [],
+  hasShiftThatDay,
+  onAddExtraHours,
+  onRemoveExtraHours
+}) {
+  const pmap = new Map((people || []).map(p => [p.id, p]));
+  const sorted = (assignments || []).map(x => x);
+
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-3xl max-h-[85vh] overflow-auto">
@@ -4879,137 +4994,304 @@ function DayModal({ dateStr, date, assignments, people, onOverride, onClose, isA
             <div className="text-sm text-slate-500">{dateStr}</div>
             <div className="text-lg font-semibold">Detalle del día</div>
           </div>
-          <button onClick={onClose} className="px-3 py-1.5 rounded-lg border hover:bg-slate-100">Cerrar</button>
+          <button
+            onClick={onClose}
+            className="px-3 py-1.5 rounded-lg border hover:bg-slate-100"
+          >
+            Cerrar
+          </button>
         </div>
+
         <div className="p-4 space-y-3">
-          {sorted.length===0 && <div className="text-sm text-slate-500">No hay turnos este día.</div>}
-          {sorted.map((c,i)=>{ const p=c.personId?pmap.get(c.personId):null; const span=formatSpan(c.shift.start,c.shift.end); const dur = effectiveMinutes(c.shift)/60;
+
+          {sorted.length === 0 && (
+            <div className="text-sm text-slate-500">
+              No hay turnos este día.
+            </div>
+          )}
+
+          {sorted.map((c, i) => {
+            if (!c?.shift) return null;
+
+            const p = c.personId ? pmap.get(c.personId) : null;
+            const span = formatSpan(c.shift.start, c.shift.end);
+            const dur = effectiveMinutes(c.shift) / 60;
+
             return (
-              <div key={i} className={`rounded-xl border p-3 ${c.conflict? 'border-red-300 bg-red-50':'border-slate-200'}`}>
+              <div
+                key={i}
+                className={`rounded-xl border p-3 ${
+                  c.conflict
+                    ? "border-red-300 bg-red-50"
+                    : "border-slate-200"
+                }`}
+              >
                 <div className="flex items-center justify-between gap-3">
                   <div className="text-sm">
-                    <div className="font-medium">{c.shift.label||`Turno ${i+1}`} · {span} <span className="text-slate-500 font-normal">({dur}h{c.shift.lunchMinutes ? " · comida " + (c.shift.lunchMinutes) + "m" : ""})</span></div>
+                    <div className="font-medium">
+                      {c.shift.label || `Turno ${i + 1}`} · {span}
+                      <span className="text-slate-500 font-normal">
+                        {" "}
+                        ({dur}h
+                        {c.shift.lunchMinutes
+                          ? " · comida " + c.shift.lunchMinutes + "m"
+                          : ""}
+                        )
+                      </span>
+                    </div>
+
                     <div className="text-xs">
-                      {c.forcedEmpty
-                        ? <span className="text-rose-700">🔒 Vacío forzado</span>
-                        : (c.conflict
-                            ? <span className="text-rose-700">⚠ Falta asignar</span>
-                            : <>
-                                <span className="text-slate-500">Asignado</span>
-                                {c.origin==='override' && <span className="ml-2 text-amber-700">· Override</span>}
-                                {c.origin==='forced'   && <span className="ml-2 text-emerald-700">· Forzado</span>}
-                                {(!c.origin || c.origin==='auto') && <span className="ml-2 text-slate-600">· Auto</span>}
-                              </>
-                          )
-                      }
+                      {c.forcedEmpty ? (
+                        <span className="text-rose-700">
+                          🔒 Vacío forzado
+                        </span>
+                      ) : c.conflict ? (
+                        <span className="text-rose-700">
+                          ⚠ Falta asignar
+                        </span>
+                      ) : (
+                        <>
+                          <span className="text-slate-500">
+                            Asignado
+                          </span>
+                          {c.origin === "override" && (
+                            <span className="ml-2 text-amber-700">
+                              · Override
+                            </span>
+                          )}
+                          {c.origin === "forced" && (
+                            <span className="ml-2 text-emerald-700">
+                              · Forzado
+                            </span>
+                          )}
+                          {(!c.origin || c.origin === "auto") && (
+                            <span className="ml-2 text-slate-600">
+                              · Auto
+                            </span>
+                          )}
+                        </>
+                      )}
                     </div>
                   </div>
+
                   <div className="flex items-center gap-2">
                     <select
                       className="border rounded px-2 py-1 text-sm"
-                      value={c.forcedEmpty ? '__EMPTY__' : (c.personId || '')}
-                      onChange={e=> (isAdmin && onOverride(dateStr, i, e.target.value || null))}
+                      value={
+                        c.forcedEmpty
+                          ? "__EMPTY__"
+                          : c.personId || ""
+                      }
+                      onChange={e =>
+                        isAdmin &&
+                        onOverride(
+                          dateStr,
+                          i,
+                          e.target.value || null
+                        )
+                      }
                       disabled={!isAdmin}
                     >
-                      <option value="">— Sin override —</option>
-                      {isAdmin && <option value="__EMPTY__">Bloquear (vacío)</option>}
-                      {(people || []).map(pp=> <option key={pp.id} value={pp.id}>{pp.name}</option>)}
+                      <option value="">
+                        — Sin override —
+                      </option>
+                      {isAdmin && (
+                        <option value="__EMPTY__">
+                          Bloquear (vacío)
+                        </option>
+                      )}
+                      {(people || []).map(pp => (
+                        <option key={pp.id} value={pp.id}>
+                          {pp.name}
+                        </option>
+                      ))}
                     </select>
-                    {p && <span className="inline-flex items-center gap-1 text-sm">
-                      <span className="h-3 w-3 rounded" style={{background:p.color}}/> {p.name}
-                    </span>}
+
+                    {p && (
+                      <span className="inline-flex items-center gap-1 text-sm">
+                        <span
+                          className="h-3 w-3 rounded"
+                          style={{ background: p.color }}
+                        />
+                        {p.name}
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>
             );
           })}
-                      {/* Horas adicionales */}
-            <div className="rounded-xl border border-slate-200 p-3">
-              <div className="flex items-center justify-between">
-                <div className="font-medium text-sm">⏱️ Horas adicionales</div>
-                <div className="text-xs text-slate-500">se guardan por día/persona</div>
-              </div>
 
-              {isAdmin && (
-                <div className="mt-3 grid grid-cols-12 gap-2 items-end">
-                  <div className="col-span-5">
-                    <label className="text-xs text-slate-600">Persona</label>
-                    <select id={`eh-person-${dateStr}`} className="w-full border rounded px-2 py-1 text-sm">
-                      <option value="">Selecciona…</option>
-                      {(people||[]).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                    </select>
-                  </div>
-                  <div className="col-span-3">
-                    <label className="text-xs text-slate-600">Horas</label>
-                    <input id={`eh-hours-${dateStr}`} type="number" step="0.25" min="0" className="w-full border rounded px-2 py-1 text-sm" placeholder="3" />
-                  </div>
-                  <div className="col-span-4">
-                    <label className="text-xs text-slate-600">Comentario</label>
-                    <input id={`eh-comment-${dateStr}`} className="w-full border rounded px-2 py-1 text-sm" placeholder="Motivo…" />
-                  </div>
-                  <div className="col-span-12">
-                    <button
-                      type="button"
-                      className="w-full px-3 py-1.5 rounded-lg border"
-                      onClick={() => {
-                        const personId = document.getElementById(`eh-person-${dateStr}`)?.value || "";
-                        const hours = document.getElementById(`eh-hours-${dateStr}`)?.value || "";
-                        const comment = document.getElementById(`eh-comment-${dateStr}`)?.value || "";
-                        onAddExtraHours && onAddExtraHours({ dateStr, personId, hours, comment });
-                        // limpia
-                        const hEl = document.getElementById(`eh-hours-${dateStr}`);
-                        const cEl = document.getElementById(`eh-comment-${dateStr}`);
-                        if (hEl) hEl.value = "";
-                        if (cEl) cEl.value = "";
-                      }}
-                    >
-                      Añadir horas adicionales
-                    </button>
-                  </div>
+          {/* Separador */}
+          <hr className="my-3 border-slate-200" />
+
+          {/* Horas adicionales */}
+          <div className="rounded-xl border border-slate-200 p-3">
+            <div className="flex items-center justify-between">
+              <div className="font-medium text-sm">
+                ⏱️ Horas adicionales
+              </div>
+              <div className="text-xs text-slate-500">
+                se guardan por día/persona
+              </div>
+            </div>
+
+            {isAdmin && (
+              <div className="mt-3 grid grid-cols-12 gap-2 items-end">
+                <div className="col-span-5">
+                  <label className="text-xs text-slate-600">
+                    Persona
+                  </label>
+                  <select
+                    id={`eh-person-${dateStr}`}
+                    className="w-full border rounded px-2 py-1 text-sm"
+                  >
+                    <option value="">Selecciona…</option>
+                    {(people || []).map(p => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="col-span-3">
+                  <label className="text-xs text-slate-600">
+                    Horas
+                  </label>
+                  <input
+                    id={`eh-hours-${dateStr}`}
+                    type="number"
+                    step="0.25"
+                    min="0"
+                    className="w-full border rounded px-2 py-1 text-sm"
+                    placeholder="3"
+                  />
+                </div>
+
+                <div className="col-span-4">
+                  <label className="text-xs text-slate-600">
+                    Comentario
+                  </label>
+                  <input
+                    id={`eh-comment-${dateStr}`}
+                    className="w-full border rounded px-2 py-1 text-sm"
+                    placeholder="Motivo…"
+                  />
+                </div>
+
+                <div className="col-span-12">
+                  <button
+                    type="button"
+                    className="w-full px-3 py-1.5 rounded-lg border"
+                    onClick={() => {
+                      const personId =
+                        document.getElementById(
+                          `eh-person-${dateStr}`
+                        )?.value || "";
+                      const hours =
+                        document.getElementById(
+                          `eh-hours-${dateStr}`
+                        )?.value || "";
+                      const comment =
+                        document.getElementById(
+                          `eh-comment-${dateStr}`
+                        )?.value || "";
+
+                      if (onAddExtraHours) {
+                        onAddExtraHours({
+                          dateStr,
+                          personId,
+                          hours,
+                          comment
+                        });
+                      }
+
+                      const hEl = document.getElementById(
+                        `eh-hours-${dateStr}`
+                      );
+                      const cEl = document.getElementById(
+                        `eh-comment-${dateStr}`
+                      );
+                      if (hEl) hEl.value = "";
+                      if (cEl) cEl.value = "";
+                    }}
+                  >
+                    Añadir horas adicionales
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div className="mt-3 space-y-2">
+              {(!extraHours || extraHours.length === 0) && (
+                <div className="text-sm text-slate-500">
+                  No hay horas adicionales.
                 </div>
               )}
 
-              <div className="mt-3 space-y-2">
-                {(!extraHours || extraHours.length===0) && (
-                  <div className="text-sm text-slate-500">No hay horas adicionales.</div>
-                )}
+              {(extraHours || []).map(eh => {
+                const hasShift =
+                  typeof hasShiftThatDay === "function"
+                    ? hasShiftThatDay(dateStr, eh.personId)
+                    : false;
 
-                {(extraHours || []).map((eh) => {
-                  const hasShift = typeof hasShiftThatDay === "function" ? hasShiftThatDay(dateStr, eh.personId) : false;
-                  const cls = hasShift
-                    ? "bg-violet-50 border-violet-300 text-violet-900"
-                    : "bg-sky-50 border-sky-300 text-sky-900";
-                  const who = (pmap.get(eh.personId)?.name) || eh.personId;
+                const cls = hasShift
+                  ? "bg-violet-50 border-violet-300 text-violet-900"
+                  : "bg-sky-50 border-sky-300 text-sky-900";
 
-                  return (
-                    <div
-                      key={eh.id}
-                      className={`rounded-xl border px-3 py-2 text-sm flex items-center gap-2 ${cls}`}
-                      title={eh.comment ? `+${eh.hours}h · ${who} · ${eh.comment}` : `+${eh.hours}h · ${who}`}
-                    >
-                      <span className="font-medium">+{eh.hours}h</span>
-                      <span className="text-slate-700">{who}</span>
-                      {eh.comment ? <span className="ml-auto">💬</span> : <span className="ml-auto text-xs text-slate-500"> </span>}
-                      {isAdmin && (
-                        <button
-                          className="ml-2 px-2 py-0.5 rounded border text-xs"
-                          onClick={() => onRemoveExtraHours && onRemoveExtraHours(eh.id)}
-                          title="Eliminar"
-                        >
-                          ✕
-                        </button>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
+                const who =
+                  pmap.get(eh.personId)?.name ||
+                  eh.personId;
+
+                return (
+                  <div
+                    key={eh.id}
+                    className={`rounded-xl border px-3 py-2 text-sm flex items-center gap-2 ${cls}`}
+                    title={
+                      eh.comment
+                        ? `+${eh.hours}h · ${who} · ${eh.comment}`
+                        : `+${eh.hours}h · ${who}`
+                    }
+                  >
+                    <span className="font-medium">
+                      +{eh.hours}h
+                    </span>
+                    <span className="text-slate-700">
+                      {who}
+                    </span>
+
+                    {eh.comment ? (
+                      <span className="ml-auto">💬</span>
+                    ) : (
+                      <span className="ml-auto text-xs text-slate-500">
+                        {" "}
+                      </span>
+                    )}
+
+                    {isAdmin && (
+                      <button
+                        className="ml-2 px-2 py-0.5 rounded border text-xs"
+                        onClick={() =>
+                          onRemoveExtraHours &&
+                          onRemoveExtraHours(eh.id)
+                        }
+                        title="Eliminar"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
             </div>
+          </div>
+
         </div>
       </div>
     </div>
   );
 }
-
 // ===== CSV / ICS =====
 function buildCSV(assignments, people){ const header=["fecha","turno","inicio","fin","persona","tipo","conflicto"]; const rows=[header.join(',')]; const pmap=new Map(people.map(p=>[p.id,p.name])); const dates=Object.keys(assignments).sort(); for(const d of dates){ for(const a of assignments[d]){ rows.push([d,a.shift.label||"",a.shift.start,a.shift.end,a.personId?pmap.get(a.personId):"", isWeekend(parseDateValue(d))?"fin_de_semana":"laborable", a.conflict?"SI":"NO"].join(',')); } } return rows; }
 function buildICS({ assignments, people, personId, startDate, weeks }){ const prod='-//Gestor Turnos 4P//ES'; let ics=`BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:${prod}\nCALSCALE:GREGORIAN\nMETHOD:PUBLISH\n`; const person=people.find(p=>p.id===personId); const fmt=(d)=> d.getFullYear().toString().padStart(4,'0')+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0')+'T'+String(d.getHours()).padStart(2,'0')+String(d.getMinutes()).padStart(2,'0')+'00'; for(let w=0;w<weeks;w++){ for(let d=0;d<7;d++){ const date=addDays(startDate,w*7+d); const ds=toDateValue(date); const cell=assignments[ds]||[]; for(const c of cell){ if(c.personId!==personId) continue; const [sh,sm]=c.shift.start.split(':').map(Number); const [eh,em]=c.shift.end.split(':').map(Number); const s=new Date(date.getFullYear(),date.getMonth(),date.getDate(),sh,sm||0,0); const e=new Date(date.getFullYear(),date.getMonth(),date.getDate(),eh,em||0,0); const uid=`${personId}-${ds}-${c.shift.start.replace(':','')}`; const summary=`${c.shift.label||'Turno'} · ${person?.name||personId}`; ics+=`BEGIN:VEVENT\nUID:${uid}@turnos4p\nDTSTAMP:${fmt(new Date())}\nDTSTART:${fmt(s)}\nDTEND:${fmt(e)}\nSUMMARY:${summary}\nDESCRIPTION:${isWeekend(date)?'Fin de semana':'Laborable'}\nEND:VEVENT\n`; } } } ics+='END:VCALENDAR\n'; return ics; }
@@ -5545,7 +5827,7 @@ function AuthenticatedApp(props){
           selectedDiffSummary, applySelectedDiffs, diffApplyPending, lastSelectionBatchId,
           conflictSolver, conflictApplyPending, generateConflictProposals, toggleConflictProposal,
           selectAllConflictProposals, clearConflictSelection,
-          applyConflictProposals } = props;
+          applyConflictProposals, getDayExtraHours, hasShiftThatDay, addExtraHours, removeExtraHours } = props;
 
   // === AUDITORÍA DE PRESENCIA (online) ===
   const [online, setOnline] = useState({ users: [], at: null });
@@ -6202,16 +6484,51 @@ if (cmd.type === 'removeExtraSlot') {
             onToggleApply={(v)=>up(['applyConciliation'], v)}
           />
 
-          )}{isAdmin && (<Card title="Nómina (CSV por rango)">
-            <div className="grid grid-cols-12 gap-2">
-              <div className="col-span-6"><label className="text-xs">Desde</label><input type="date" value={payroll.from} onChange={(e)=>setPayroll({...payroll,from:e.target.value})} className="w-full px-2 py-1 rounded border"/></div>
-              <div className="col-span-6"><label className="text-xs">Hasta</label><input type="date" value={payroll.to} onChange={(e)=>setPayroll({...payroll,to:e.target.value})} className="w-full px-2 py-1 rounded border"/></div>
-              <button onClick={exportPayroll} className="px-3 py-1.5 rounded-lg border w-full">Exportar Nómina (CSV)</button>
-            </div>
-          </Card>
+          )}
 
-          )}{isAdmin && (<ResumenPanel controls={controls} annualTarget={state.annualTargetHours} onExportICS={exportICS} />
-        )}</section>
+{isAdmin && (
+  <Card title="Nómina (CSV por rango)">
+    <div className="grid grid-cols-12 gap-2">
+      <div className="col-span-6">
+        <label className="text-xs">Desde</label>
+        <input
+          type="date"
+          value={payroll.from}
+          onChange={(e)=>setPayroll({...payroll,from:e.target.value})}
+          className="w-full px-2 py-1 rounded border"
+        />
+      </div>
+      <div className="col-span-6">
+        <label className="text-xs">Hasta</label>
+        <input
+          type="date"
+          value={payroll.to}
+          onChange={(e)=>setPayroll({...payroll,to:e.target.value})}
+          className="w-full px-2 py-1 rounded border"
+        />
+      </div>
+      <button onClick={exportPayroll} className="px-3 py-1.5 rounded-lg border w-full">
+        Exportar Nómina (CSV)
+      </button>
+    </div>
+  </Card>
+)}
+
+{isAdmin ? (
+  <ResumenPanel
+    controls={controls}
+    annualTarget={state.annualTargetHours}
+    onExportICS={exportICS}
+  />
+) : (
+  <MyBalancePanel
+    controls={controls}
+    people={state.people}
+    annualTarget={state.annualTargetHours}
+    currentUser={auth.user}
+  />
+)}
+</section>
 
         {auth.user.role === 'admin' && (
           <section className="lg:col-span-3 space-y-6">
@@ -6223,21 +6540,23 @@ if (cmd.type === 'removeExtraSlot') {
       <footer className="w-full max-w-[1800px] mx-auto px-6 pb-10 text-xs text-slate-500">Persistencia local + Nube SQLite. </footer>
 
        {modalDay && (
-          <DayModal
-            dateStr={modalDay}
-            date={parseDateValue(modalDay)}
-            assignments={ASS[modalDay]||[]}
-            people={state.people}
-            onOverride={forceAssign}
-            isAdmin={isAdmin}
-            onQuickAssign={onQuickAssign}
-            extraHours={getDayExtraHours(modalDay)}
-            hasShiftThatDay={hasShiftThatDay}
-            onAddExtraHours={addExtraHours}
-            onRemoveExtraHours={removeExtraHours}
-            onClose={()=>setModalDay(null)}
-          />
-      )}
+            <DayModal
+              dateStr={modalDay}
+              date={parseDateValue(modalDay)}
+              assignments={ASS[modalDay] || []}
+              people={state.people}
+              onOverride={forceAssign}
+              isAdmin={isAdmin}
+              onQuickAssign={onQuickAssign}
+
+              extraHours={getDayExtraHours ? getDayExtraHours(modalDay) : []}
+              hasShiftThatDay={hasShiftThatDay}
+              onAddExtraHours={addExtraHours}
+              onRemoveExtraHours={removeExtraHours}
+
+              onClose={() => setModalDay(null)}
+            />
+          )}
     </div>
   );
 }
