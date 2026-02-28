@@ -1226,6 +1226,7 @@ function proponerCierreHoras({
 export default function App(){
   // ---------- Auth (JWT) ----------
   const [auth, setAuth] = useState(() => {
+  const isAdmin = (auth?.user?.role === "admin");
     try { const saved = localStorage.getItem("turnos_auth"); return saved ? JSON.parse(saved) : { token:"", user:null }; }
     catch { return { token:"", user:null }; }
   });
@@ -1291,7 +1292,6 @@ export default function App(){
     closedExtraDates: [],
     customHolidaysByYear: {},
     overrides:{},
-    extraHours: [],
     swaps: [], showArchivedSwaps:false,
     rules: { enforce:true, maxDailyHours:9, maxWeeklyHours:40, minRestHours:12, maxDaysPerWeek:5, maxConsecutiveWeekends:1 },
     applyConciliation: true,
@@ -2324,54 +2324,6 @@ const assignmentsImproved = useMemo(()=> improveConciliation({
     : density==="spacious"
     ? "px-3 py-2 min-h-[56px] text-[13px]"
     : "px-2.5 py-1.5 min-h-[52px] text-[12px]";
-// ===== Horas adicionales (sueltas) =====
-function onAddExtraHours({ dateStr, personId, hours, comment }) {
-  if (!dateStr || !personId) return;
-  const h = Number(hours);
-  if (!Number.isFinite(h) || h <= 0) { alert('Horas no válidas'); return; }
-  const id = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : ('eh_' + Math.random().toString(16).slice(2));
-  const actor = auth.user?.email || auth.user?.name || "unknown";
-  setState(prev => {
-    const next = structuredClone(prev);
-    const list = Array.isArray(next.extraHours) ? next.extraHours.slice() : [];
-    list.push({
-      id,
-      dateStr,
-      personId,
-      hours: Math.round(h * 100) / 100,
-      comment: (comment || '').trim(),
-      ts: new Date().toISOString(),
-      actor
-    });
-    next.extraHours = list;
-    next.audit = [
-      ...(next.audit || []),
-      { ts: new Date().toISOString(), actor, action: 'extraHours:add', personId, dateStr, hours: Math.round(h*100)/100 }
-    ];
-    return next;
-  });
-  showToast('Horas adicionales añadidas');
-  };
-
-function removeExtraHoursEntry(id){
-  if (!id) return;
-  const actor = auth.user?.email || auth.user?.name || "unknown";
-  setState(prev => {
-    const next = structuredClone(prev);
-    next.extraHours = (next.extraHours || []).filter(e => e?.id !== id);
-    next.audit = [
-      ...(next.audit || []),
-      { ts: new Date().toISOString(), actor, action: 'extraHours:remove', extraId: id }
-    ];
-    return next;
-  });
-  showToast('Horas adicionales eliminadas');
-  };
-
-function getExtraHoursFor(dateStr, personId){
-  return (state.extraHours || []).filter(e => e?.dateStr === dateStr && e?.personId === personId);
-}
-
 function goToday(){
     const t = startOfWeekMonday(new Date());
     const idx = Math.max(0, Math.min(state.weeks-1, Math.floor((t - startDate)/(7*24*3600*1000))));
@@ -3860,7 +3812,7 @@ function WorkingHolidaysPanel({ state, up }){
   );
 }
 
-function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmin, onQuickAssign, province, closeOnHolidays, closedExtraDates, customHolidaysByYear, pillClass, workingHolidays=[], extraHours=[] }){
+function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmin, onQuickAssign, province, closeOnHolidays, closedExtraDates, customHolidaysByYear, pillClass, workingHolidays=[] }){
   const days=[]; for(let w=0;w<weeks;w++) for(let d=0;d<7;d++) days.push(addDays(startDate, w*7+d));
   const personMap=new Map(people.map(p=>[p.id,p]));
   const todayStr = toDateValue(new Date());
@@ -3921,8 +3873,6 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
           const sorted=[...cell].sort((a,b)=> minutesFromHHMM(a?.shift?.start || "00:00") - minutesFromHHMM(b?.shift?.start || "00:00"));
           const isClosedFestivo = isClosedBusinessDay2(dateStr, province, closeOnHolidays, closedExtraDates, customHolidaysByYear);
           const isClosed = isClosedFestivo && !workingSet.has(dateStr);
-          const extras = (extraHours || []).filter(e => e?.dateStr === dateStr);
-          const hasShiftForPerson = (pid) => (assignments?.[dateStr] || []).some(a => a?.personId === pid);
           return (
             <div key={dateStr} className={`rounded-2xl border p-2 ${isWE? 'bg-transparent':'bg-transparent'} ${hasConflict? 'border-red-400':'border-slate-200'} ${dateStr===todayStr ? 'ring-2 ring-amber-400' : ''}`}>
               <div className="flex items-center justify-between mb-2">
@@ -4171,27 +4121,7 @@ function CalendarView({ startDate, weeks, assignments, people, onOpenDay, isAdmi
                               </div>
                             </div>
                           </details>
-
-)}
-
-{extras.length>0 && (
-                  <div className="mt-2 pt-2 border-t border-slate-100 space-y-1">
-                    <div className="text-[10px] text-slate-500">Horas adicionales</div>
-                    {extras.map((eh,ei)=>(
-                      <div
-                        key={eh.id || ei}
-                        className={`rounded-xl border px-2 py-1 text-[12px] inline-flex items-center gap-2 w-full ${hasShiftForPerson(eh.personId) ? "bg-violet-50 border-violet-300 text-violet-800" : "bg-sky-50 border-sky-300 text-sky-800"}`}
-                        title={eh.comment ? `Horas adicionales · ${eh.hours}h · ${eh.comment}` : `Horas adicionales · ${eh.hours}h`}
-                      >
-                        <span className="font-medium">⏱️ +{eh.hours}h</span>
-                        <span className="text-[11px] text-slate-700">
-                          {(personMap.get(eh.personId)?.name) || eh.personId}
-                        </span>
-                        {eh.comment ? <span className="ml-auto">💬</span> : null}
-                      </div>
-                    ))}
-                  </div>
-                )}
+                        )}
                     </div>
                   </div>
                 );})}
@@ -4264,7 +4194,7 @@ function dayCounts(assignments, ds){
     conflict: cell.some(c=>c.conflict)
   };
 }
-function WeeklyView({ startDate, weeks, assignments, people, timeOffs, province, closeOnHolidays, closedExtraDates, customHolidaysByYear, consumeVacationOnHoliday, pillClass, isAdmin, onQuickAssign, extraHours=[] }){ const todayStr = toDateValue(new Date());
+function WeeklyView({ startDate, weeks, assignments, people, timeOffs, province, closeOnHolidays, closedExtraDates, customHolidaysByYear, consumeVacationOnHoliday, pillClass, isAdmin, onQuickAssign }){ const todayStr = toDateValue(new Date());
   const header=[];
 for(let d=0; d<7*weeks; d++){
   const date = addDays(startDate,d);
@@ -4342,8 +4272,6 @@ for(let d=0; d<7*weeks; d++){
         const cell = (assignments[h.dateStr] || [])
           .filter(c => c?.personId === p.id && c?.shift)              // ← descarta sin shift
           .sort((a, b) => minutesFromHHMM(a?.shift?.start || "00:00") - minutesFromHHMM(b?.shift?.start || "00:00"));
-        const extra = (extraHours || []).filter(e => e?.dateStr === h.dateStr && e?.personId === p.id);
-        const hasExtra = extra.length>0;
         // Tipo de “Time Off” y festivo para celda vacía
         // Tipo de “Time Off” (aprobado) y festivo
         let toType = (typeof getTOType === 'function') ? getTOType(h.dateStr, p.id) : null;
@@ -4387,8 +4315,8 @@ for(let d=0; d<7*weeks; d++){
         return (
                 <td
           key={h.dateStr || idx}
-          className={`p-1 align-top ${weeks>=2 ? 'min-w-[120px]' : ''} border-l border-slate-100 ${h.dateStr===todayStr ? "bg-amber-50/30" : ""} ${h.isWE ? "bg-slate-50/50" : ""} ${hasExtra ? (cell.length>0 ? "bg-violet-50/60" : "bg-sky-50/40") : ""}`} >
-            {(cell.length===0 && !hasExtra) ? (
+          className={`p-1 align-top ${weeks>=2 ? 'min-w-[120px]' : ''} border-l border-slate-100 ${h.dateStr===todayStr ? "bg-amber-50/30" : ""} ${h.isWE ? "bg-slate-50/50" : ""}`} >
+            {cell.length===0 ? (
               <div className="rounded border bg-transparent px-1 py-0.5 inline-flex items-center gap-1">
                 {renderEmptyCell(toType, isFest)}
                 {isAdmin && !isFest && (
@@ -4414,25 +4342,9 @@ for(let d=0; d<7*weeks; d++){
                   </details>
                 )}
               </div>
-            ) : (
-              <div className="space-y-1">
-                {cell.map((a,i)=>(<PrettyAssignment a={a} h={h} p={p} i={i} pillClass={pillClass} />))}
-                {hasExtra && (
-                  <div className="flex flex-col gap-1">
-                    {extra.map((eh,ei)=>(
-                      <div
-                        key={eh.id || ei}
-                        className={`rounded-xl border px-2 py-1 text-[12px] leading-tight ${cell.length>0 ? 'bg-violet-50 border-violet-300 text-violet-800' : 'bg-sky-50 border-sky-300 text-sky-800'}`}
-                        title={eh.comment ? `Horas adicionales: +${eh.hours}h · ${eh.comment}` : `Horas adicionales: +${eh.hours}h`}
-                      >
-                        <span className="font-medium">⏱️ +{eh.hours}h</span>
-                        {eh.comment ? <span className="ml-1">💬</span> : null}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
+            ) : ( 
+            cell.map((a,i)=>(<PrettyAssignment a={a} h={h} p={p} i={i} pillClass={pillClass} />))
+          )}
         </td>
         );
       })}
@@ -4901,12 +4813,9 @@ function ResumenPanel({ controls, annualTarget, onExportICS }){
   );
 }
 // ===== Modal Día =====
-function DayModal({ dateStr, date, assignments, people, onOverride, onClose, isAdmin, onQuickAssign, extraHours=[], onAddExtraHours, onRemoveExtraHours }){
+function DayModal({ dateStr, date, assignments, people, onOverride, onClose, isAdmin, onQuickAssign }){
   const pmap=new Map(people.map(p=>[p.id,p]));
-  const hasShiftForPerson = (pid) => (assignments || []).some(a => a?.personId === pid);
   const sorted=assignments.map(x=>x); // ya vienen ordenados por ASS
-  const extras = (extraHours || []).filter(e => e?.dateStr === dateStr);
-  const [ehForm, setEhForm] = useState({ personId: people?.[0]?.id || '', hours: 1, comment: '' });
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-3xl max-h-[85vh] overflow-auto">
@@ -4959,72 +4868,6 @@ function DayModal({ dateStr, date, assignments, people, onOverride, onClose, isA
               </div>
             );
           })}
-
-          {/* Horas adicionales (sueltas) */}
-          <div className="rounded-xl border p-3">
-            <div className="flex items-center justify-between">
-              <div className="text-sm font-medium">Horas adicionales</div>
-              <div className="text-[11px] text-slate-500">hover para ver comentario</div>
-            </div>
-
-            {extras.length===0 && (
-              <div className="text-sm text-slate-500 mt-2">No hay horas adicionales este día.</div>
-            )}
-
-            {extras.length>0 && (
-              <div className="mt-2 space-y-1">
-                {extras.map((eh,ei)=>(
-                  <div key={eh.id || ei} className={`rounded-xl border px-2 py-1 flex items-center gap-2 ${hasShiftForPerson(eh.personId) ? "bg-violet-50 border-violet-300 text-violet-900" : "bg-sky-50 border-sky-300 text-sky-900"}`}
-                       title={eh.comment ? `+${eh.hours}h · ${eh.comment}` : `+${eh.hours}h`}>
-                    <span className="font-medium">⏱️ +{eh.hours}h</span>
-                    <span className="text-sm">{pmap.get(eh.personId)?.name || eh.personId}</span>
-                    {eh.comment ? <span className="text-sm">💬</span> : null}
-                    {isAdmin && (
-                      <button
-                        className="ml-auto px-2 py-0.5 rounded border text-[11px] text-rose-700"
-                        onClick={()=>{ if(confirm('¿Eliminar estas horas adicionales?')) onRemoveExtraHours && onRemoveExtraHours(eh.id); }}
-                      >Eliminar</button>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {isAdmin && (
-              <div className="mt-3 grid grid-cols-12 gap-2">
-                <div className="col-span-4">
-                  <label className="text-xs text-slate-600">Persona</label>
-                  <select className="w-full border rounded px-2 py-1 text-sm"
-                          value={ehForm.personId}
-                          onChange={e=>setEhForm(prev=>({...prev, personId:e.target.value}))}>
-                    {(people||[]).map(pp => <option key={pp.id} value={pp.id}>{pp.name}</option>)}
-                  </select>
-                </div>
-                <div className="col-span-2">
-                  <label className="text-xs text-slate-600">Horas</label>
-                  <input className="w-full border rounded px-2 py-1 text-sm" type="number" min="0" step="0.25"
-                         value={ehForm.hours}
-                         onChange={e=>setEhForm(prev=>({...prev, hours:e.target.value}))}/>
-                </div>
-                <div className="col-span-6">
-                  <label className="text-xs text-slate-600">Comentario</label>
-                  <input className="w-full border rounded px-2 py-1 text-sm"
-                         value={ehForm.comment}
-                         onChange={e=>setEhForm(prev=>({...prev, comment:e.target.value}))}
-                         placeholder="Ej: inventario, formación, urgencia..." />
-                </div>
-                <div className="col-span-12">
-                  <button className="w-full px-3 py-1.5 rounded-lg border hover:bg-slate-50"
-                          onClick={()=>{
-                            onAddExtraHours && onAddExtraHours({ dateStr, personId: ehForm.personId, hours: ehForm.hours, comment: ehForm.comment });
-                            setEhForm(prev=>({...prev, comment:''}));
-                          }}>
-                    Añadir horas adicionales
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
         </div>
       </div>
     </div>
@@ -5698,9 +5541,11 @@ useEffect(() => {
   }, [auth?.user, auth?.token]);
 
 
-  // --- Modal del día (estado local) ---
+  // --- modal día (scope local) ---
+  const modalDayProp = modalDay;
+  const setModalDayProp = setModalDay;
 
-  // ---------- Exportaciones (CSV/ICS/Nómina) ----------
+// ---------- Exportaciones (CSV/ICS/Nómina) ----------
   
   
   
@@ -6074,7 +5919,6 @@ if (cmd.type === 'removeExtraSlot') {
     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border bg-transparent">🏖️ Vacaciones</span>
     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border bg-transparent">🛌 Libranza</span>
     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border bg-transparent">✈️ Viaje</span>
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border bg-transparent">⏱️ Horas adicionales</span>
   </div>
 <WeeklyView
     startDate={weeklyStart}
@@ -6090,7 +5934,6 @@ if (cmd.type === 'removeExtraSlot') {
     consumeVacationOnHoliday={state.consumeVacationOnHoliday}
     isAdmin={isAdmin}
     onQuickAssign={onQuickAssign}
-    extraHours={state.extraHours}
   />
 </Card>
 
@@ -6102,7 +5945,7 @@ if (cmd.type === 'removeExtraSlot') {
       assignments={ASS}
       people={state.people}
       isAdmin={isAdmin}
-      onOpenDay={(ds)=>setModalDay(ds)}
+      onOpenDay={(ds)=>setModalDayProp(ds)}
       onQuickAssign={handleCalendarCommand}
       province={state.province}
       closeOnHolidays={state.closeOnHolidays}
@@ -6110,7 +5953,6 @@ if (cmd.type === 'removeExtraSlot') {
       customHolidaysByYear={state.customHolidaysByYear}
       workingHolidays={state.workingHolidays}
       pillClass={pillClass}
-      extraHours={state.extraHours}
     />
   </Card>
 )}
@@ -6125,7 +5967,7 @@ if (cmd.type === 'removeExtraSlot') {
                 <button onClick={()=>window.print()} className="px-3 py-1.5 rounded-lg border">Imprimir / PDF</button>
               </div>
             </div>
-            <WeeklyView startDate={weeklyStart} weeks={1} pillClass={pillClass} assignments={ASS} people={state.people} timeOffs={state.timeOffs} province={state.province} closeOnHolidays={state.closeOnHolidays} closedExtraDates={state.closedExtraDates} customHolidaysByYear={state.customHolidaysByYear} consumeVacationOnHoliday={state.consumeVacationOnHoliday} isAdmin={isAdmin} onQuickAssign={onQuickAssign} extraHours={state.extraHours} />
+            <WeeklyView startDate={weeklyStart} weeks={1} pillClass={pillClass} assignments={ASS} people={state.people} timeOffs={state.timeOffs} province={state.province} closeOnHolidays={state.closeOnHolidays} closedExtraDates={state.closedExtraDates} customHolidaysByYear={state.customHolidaysByYear} consumeVacationOnHoliday={state.consumeVacationOnHoliday} isAdmin={isAdmin} onQuickAssign={onQuickAssign} />
           </Card>)}
 
           <TimeOffPanel state={state} setState={setState} controls={controls} isAdmin={isAdmin} currentUser={auth.user} />
@@ -6245,19 +6087,16 @@ if (cmd.type === 'removeExtraSlot') {
 
       <footer className="w-full max-w-[1800px] mx-auto px-6 pb-10 text-xs text-slate-500">Persistencia local + Nube SQLite. </footer>
 
-       {modalDay && (
+       {modalDayProp && (
         <DayModal
-          dateStr={modalDay}
-          date={parseDateValue(modalDay)}
-          assignments={ASS[modalDay]||[]}
+          dateStr={modalDayProp}
+          date={parseDateValue(modalDayProp)}
+          assignments={ASS[modalDayProp]||[]}
           people={state.people}
           onOverride={forceAssign}
           isAdmin={isAdmin}
           onQuickAssign={onQuickAssign}
-          extraHours={state.extraHours}
-          onAddExtraHours={onAddExtraHours}
-          onRemoveExtraHours={removeExtraHoursEntry}
-          onClose={()=>setModalDay(null)}
+          onClose={()=>setModalDayProp(null)}
         />
       )}
     </div>
