@@ -2703,7 +2703,7 @@ return (
   ui={ui}
   setUI={setUI}
   showToast={showToast}
-    isAdmin={isAdmin}
+  isAdmin={isAdmin}
   modalDay={modalDay}
   setModalDay={setModalDay}
   state={state}
@@ -5389,7 +5389,7 @@ function VacationPolicyPanel({ state, up }){
 }
 
 function AuthenticatedApp(props){
-  const { auth, setAuth, ui, setUI, showToast,
+  const { auth, setAuth, ui, setUI, showToast, isAdmin, modalDay, setModalDay,
           state, setState,
           cloud, setCloud, cloudLoad, cloudSave,
           startDate, weeklyStart,
