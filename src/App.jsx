@@ -4884,6 +4884,45 @@ function DayModal({ dateStr, date, assignments, people, onOverride, onClose, isA
         <div className="p-4 space-y-3">
           {sorted.length===0 && <div className="text-sm text-slate-500">No hay turnos este día.</div>}
           {sorted.map((c,i)=>{ const p=c.personId?pmap.get(c.personId):null; const span=formatSpan(c.shift.start,c.shift.end); const dur = effectiveMinutes(c.shift)/60;
+            return (
+              <div key={i} className={`rounded-xl border p-3 ${c.conflict? 'border-red-300 bg-red-50':'border-slate-200'}`}>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-sm">
+                    <div className="font-medium">{c.shift.label||`Turno ${i+1}`} · {span} <span className="text-slate-500 font-normal">({dur}h{c.shift.lunchMinutes ? " · comida " + (c.shift.lunchMinutes) + "m" : ""})</span></div>
+                    <div className="text-xs">
+                      {c.forcedEmpty
+                        ? <span className="text-rose-700">🔒 Vacío forzado</span>
+                        : (c.conflict
+                            ? <span className="text-rose-700">⚠ Falta asignar</span>
+                            : <>
+                                <span className="text-slate-500">Asignado</span>
+                                {c.origin==='override' && <span className="ml-2 text-amber-700">· Override</span>}
+                                {c.origin==='forced'   && <span className="ml-2 text-emerald-700">· Forzado</span>}
+                                {(!c.origin || c.origin==='auto') && <span className="ml-2 text-slate-600">· Auto</span>}
+                              </>
+                          )
+                      }
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <select
+                      className="border rounded px-2 py-1 text-sm"
+                      value={c.forcedEmpty ? '__EMPTY__' : (c.personId || '')}
+                      onChange={e=> (isAdmin && onOverride(dateStr, i, e.target.value || null))}
+                      disabled={!isAdmin}
+                    >
+                      <option value="">— Sin override —</option>
+                      {isAdmin && <option value="__EMPTY__">Bloquear (vacío)</option>}
+                      {(people || []).map(pp=> <option key={pp.id} value={pp.id}>{pp.name}</option>)}
+                    </select>
+                    {p && <span className="inline-flex items-center gap-1 text-sm">
+                      <span className="h-3 w-3 rounded" style={{background:p.color}}/> {p.name}
+                    </span>}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
                       {/* Horas adicionales */}
             <div className="rounded-xl border border-slate-200 p-3">
               <div className="flex items-center justify-between">
@@ -4965,45 +5004,6 @@ function DayModal({ dateStr, date, assignments, people, onOverride, onClose, isA
                 })}
               </div>
             </div>
-            return (
-              <div key={i} className={`rounded-xl border p-3 ${c.conflict? 'border-red-300 bg-red-50':'border-slate-200'}`}>
-                <div className="flex items-center justify-between gap-3">
-                  <div className="text-sm">
-                    <div className="font-medium">{c.shift.label||`Turno ${i+1}`} · {span} <span className="text-slate-500 font-normal">({dur}h{c.shift.lunchMinutes ? " · comida " + (c.shift.lunchMinutes) + "m" : ""})</span></div>
-                    <div className="text-xs">
-                      {c.forcedEmpty
-                        ? <span className="text-rose-700">🔒 Vacío forzado</span>
-                        : (c.conflict
-                            ? <span className="text-rose-700">⚠ Falta asignar</span>
-                            : <>
-                                <span className="text-slate-500">Asignado</span>
-                                {c.origin==='override' && <span className="ml-2 text-amber-700">· Override</span>}
-                                {c.origin==='forced'   && <span className="ml-2 text-emerald-700">· Forzado</span>}
-                                {(!c.origin || c.origin==='auto') && <span className="ml-2 text-slate-600">· Auto</span>}
-                              </>
-                          )
-                      }
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <select
-                      className="border rounded px-2 py-1 text-sm"
-                      value={c.forcedEmpty ? '__EMPTY__' : (c.personId || '')}
-                      onChange={e=> (isAdmin && onOverride(dateStr, i, e.target.value || null))}
-                      disabled={!isAdmin}
-                    >
-                      <option value="">— Sin override —</option>
-                      {isAdmin && <option value="__EMPTY__">Bloquear (vacío)</option>}
-                      {(people || []).map(pp=> <option key={pp.id} value={pp.id}>{pp.name}</option>)}
-                    </select>
-                    {p && <span className="inline-flex items-center gap-1 text-sm">
-                      <span className="h-3 w-3 rounded" style={{background:p.color}}/> {p.name}
-                    </span>}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
         </div>
       </div>
     </div>
