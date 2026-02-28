@@ -1,6 +1,3 @@
-const isAdmin = false;
-const modalDay = null;
-const setModalDay = () => {};
 import React, { useEffect, useMemo, useState, useRef, useCallback } from "react";
 
 import WeekendAuditPanel from "./components/WeekendAuditPanel";
@@ -2706,6 +2703,8 @@ return (
   ui={ui}
   setUI={setUI}
   showToast={showToast}
+    isAdmin={isAdmin}
+    isAdmin={isAdmin}
   modalDay={modalDay}
   setModalDay={setModalDay}
   state={state}
@@ -5844,7 +5843,9 @@ if (cmd.type === 'removeExtraSlot') {
             </div>
           </Card>
 
-{isAdmin && <AdminSessionsAuditCard auth={auth} showToast={showToast} />}
+{isAdmin && <AdminSessionsAuditCard auth={auth} showToast={showToast}
+    isAdmin={isAdmin}
+    isAdmin={isAdmin} />}
 
           <Card title="Auditoría (últimos 100)">
             {typeof exportAuditCsv === 'function' && (
