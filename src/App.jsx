@@ -6083,11 +6083,11 @@ if (cmd.type === 'removeExtraSlot') {
 
       <footer className="w-full max-w-[1800px] mx-auto px-6 pb-10 text-xs text-slate-500">Persistencia local + Nube SQLite. </footer>
 
-       {modalDayProp && (
+       {modalDay && (
         <DayModal
-          dateStr={modalDayProp}
-          date={parseDateValue(modalDayProp)}
-          assignments={ASS[modalDayProp]||[]}
+          dateStr={modalDay}
+          date={parseDateValue(modalDay)}
+          assignments={ASS[modalDay]||[]}
           people={state.people}
           onOverride={forceAssign}
           isAdmin={isAdmin}
