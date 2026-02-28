@@ -5844,7 +5844,7 @@ if (cmd.type === 'removeExtraSlot') {
 
 {isAdmin && <AdminSessionsAuditCard auth={auth} showToast={showToast}
     isAdmin={isAdmin}
-    isAdmin={isAdmin} />}
+/>}
 
           <Card title="Auditoría (últimos 100)">
             {typeof exportAuditCsv === 'function' && (
