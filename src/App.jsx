@@ -1,4 +1,6 @@
 const isAdmin = false;
+const modalDay = null;
+const setModalDay = () => {};
 import React, { useEffect, useMemo, useState, useRef, useCallback } from "react";
 
 import WeekendAuditPanel from "./components/WeekendAuditPanel";
