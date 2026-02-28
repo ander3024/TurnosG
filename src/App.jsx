@@ -1226,7 +1226,6 @@ function proponerCierreHoras({
 export default function App(){
   // ---------- Auth (JWT) ----------
   const [auth, setAuth] = useState(() => {
-  const isAdmin = (auth?.user?.role === "admin");
     try { const saved = localStorage.getItem("turnos_auth"); return saved ? JSON.parse(saved) : { token:"", user:null }; }
     catch { return { token:"", user:null }; }
   });
@@ -1270,7 +1269,6 @@ export default function App(){
 
 
   // --- permisos UI ---
-  const isAdmin = auth.user?.role === 'admin';
 
   // ---------- Estado principal ----------
   const defaultStart = startOfWeekMonday(new Date());
@@ -5478,7 +5476,6 @@ useEffect(() => {
 
 // === Auto-refresh de datos para usuarios NO admin ===
 useEffect(() => {
-  const isAdmin = !!(auth?.user?.role === 'admin');
   if (!auth?.user || isAdmin) return;
 
   const onVis = () => {
