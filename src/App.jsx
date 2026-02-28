@@ -2704,7 +2704,6 @@ return (
   setUI={setUI}
   showToast={showToast}
     isAdmin={isAdmin}
-    isAdmin={isAdmin}
   modalDay={modalDay}
   setModalDay={setModalDay}
   state={state}
