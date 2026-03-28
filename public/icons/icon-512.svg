@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="100" fill="#1a2b6b"/>
+  <circle cx="256" cy="224" r="147" fill="none" stroke="white" stroke-width="12"/>
+  <g transform="translate(256,224) scale(2.67)" fill="white">
+    <ellipse cx="0" cy="18" rx="28" ry="22"/>
+    <ellipse cx="-12" cy="5" rx="18" ry="25"/>
+    <path d="M -15,-10 Q -22,-25 -18,-42 Q -15,-50 -8,-52 Q -2,-53 2,-48 Q -2,-44 -6,-38 Q -12,-25 -8,-8" />
+    <ellipse cx="-6" cy="-50" rx="10" ry="9"/>
+    <path d="M -16,-52 L -26,-50 L -16,-47" />
+    <path d="M 22,5 Q 32,-5 28,-15 Q 25,-8 20,0" />
+    <g transform="translate(-5,38)">
+      <path d="M -4,0 L -8,5 L -2,4 L 0,0" />
+      <path d="M 4,0 L 0,5 L 6,4 L 8,0" />
+    </g>
+  </g>
+  <text x="256" y="455" font-family="Georgia,'Times New Roman',serif" font-size="44" font-weight="bold" fill="white" text-anchor="middle" letter-spacing="8">TURNOS</text>
+</svg>

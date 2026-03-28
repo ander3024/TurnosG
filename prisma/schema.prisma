@@ -1,0 +1,272 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ─── USUARIOS ───────────────────────────────────────────
+model User {
+  id           Int      @id @default(autoincrement())
+  email        String   @unique
+  name         String
+  passwordHash String   @map("password_hash")
+  role         String   @default("user") // admin | manager | user
+  active       Boolean  @default(true)
+  avatarUrl    String?  @map("avatar_url")
+  phone        String?
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  person              Person?
+  timeOffRequests     TimeOffRequest[]
+  auditLogs           AuditLog[]       @relation("AuditActor")
+  sessions            Session[]
+  notifications       Notification[]
+  notifPreferences    NotificationPreference[]
+  pushSubscriptions   PushSubscription[]
+  resetTokens         PasswordResetToken[]
+  swapRequestsFrom    SwapRequest[]    @relation("SwapFrom")
+  swapRequestsTo      SwapRequest[]    @relation("SwapTo")
+  extraHoursLogged    ExtraHours[]     @relation("ExtraHoursActor")
+
+  @@map("users")
+}
+
+// ─── PERSONAS (empleados en el calendario de turnos) ────
+model Person {
+  id     Int     @id @default(autoincrement())
+  code   String  @unique // P1, P2, P3...
+  name   String
+  color  String  @default("#3b82f6")
+  offset Int     @default(0)
+  active Boolean @default(true)
+
+  userId Int?  @unique @map("user_id")
+  user   User? @relation(fields: [userId], references: [id])
+
+  timeOffs   TimeOffRequest[]
+  overrides  Override[]
+  extraHours ExtraHours[]
+  swapsFrom  SwapRequest[] @relation("SwapPersonFrom")
+  swapsTo    SwapRequest[] @relation("SwapPersonTo")
+
+  @@map("people")
+}
+
+// ─── TIPOS DE TURNO ─────────────────────────────────────
+model ShiftType {
+  id           Int     @id @default(autoincrement())
+  code         String  @unique
+  label        String
+  startTime    String  @map("start_time")
+  endTime      String  @map("end_time")
+  lunchMinutes Int     @default(0) @map("lunch_minutes")
+  category     String  @default("regular") // regular | weekend | refuerzo
+  active       Boolean @default(true)
+
+  overrides Override[]
+
+  @@map("shift_types")
+}
+
+// ─── EVENTOS ESPECIALES ─────────────────────────────────
+model Event {
+  id                 Int     @id @default(autoincrement())
+  label              String
+  startDate          String  @map("start_date")
+  endDate            String  @map("end_date")
+  weekdaysExtraSlots Int     @default(0) @map("weekdays_extra_slots")
+  weekendExtraSlots  Int     @default(0) @map("weekend_extra_slots")
+  assigneePersonId   Int?    @map("assignee_person_id")
+  assigneeForced     Boolean @default(false) @map("assignee_forced")
+  weekdayRefuerzo    String? @map("weekday_refuerzo")
+  color              String?
+  notes              String?
+  createdAt          DateTime @default(now()) @map("created_at")
+
+  @@map("events")
+}
+
+// ─── SOLICITUDES DE AUSENCIA / VACACIONES ───────────────
+model TimeOffRequest {
+  id          Int       @id @default(autoincrement())
+  personId    Int       @map("person_id")
+  person      Person    @relation(fields: [personId], references: [id])
+  requesterId Int       @map("requester_id")
+  requester   User      @relation(fields: [requesterId], references: [id])
+  type        String    // vacaciones | asuntos_propios | enfermedad | otro
+  startDate   String    @map("start_date")
+  endDate     String    @map("end_date")
+  hoursPerDay Float     @default(8) @map("hours_per_day")
+  status      String    @default("pendiente")
+  note        String?
+  reviewedAt  DateTime? @map("reviewed_at")
+  reviewedBy  String?   @map("reviewed_by")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  @@map("time_off_requests")
+}
+
+// ─── OVERRIDES (asignaciones manuales) ──────────────────
+model Override {
+  id          Int       @id @default(autoincrement())
+  date        String
+  shiftTypeId Int       @map("shift_type_id")
+  shiftType   ShiftType @relation(fields: [shiftTypeId], references: [id])
+  personId    Int?      @map("person_id")
+  person      Person?   @relation(fields: [personId], references: [id])
+  slotIndex   Int       @default(0) @map("slot_index")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  @@unique([date, shiftTypeId, slotIndex])
+  @@map("overrides")
+}
+
+// ─── HORAS EXTRA ────────────────────────────────────────
+model ExtraHours {
+  id        Int      @id @default(autoincrement())
+  personId  Int      @map("person_id")
+  person    Person   @relation(fields: [personId], references: [id])
+  actorId   Int      @map("actor_id")
+  actor     User     @relation("ExtraHoursActor", fields: [actorId], references: [id])
+  date      String
+  hours     Float
+  comment   String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("extra_hours")
+}
+
+// ─── INTERCAMBIOS DE TURNO ──────────────────────────────
+model SwapRequest {
+  id             Int       @id @default(autoincrement())
+  fromUserId     Int       @map("from_user_id")
+  fromUser       User      @relation("SwapFrom", fields: [fromUserId], references: [id])
+  toUserId       Int       @map("to_user_id")
+  toUser         User      @relation("SwapTo", fields: [toUserId], references: [id])
+  fromPersonId   Int       @map("from_person_id")
+  fromPerson     Person    @relation("SwapPersonFrom", fields: [fromPersonId], references: [id])
+  toPersonId     Int       @map("to_person_id")
+  toPerson       Person    @relation("SwapPersonTo", fields: [toPersonId], references: [id])
+  fromDate       String    @map("from_date")
+  toDate         String    @map("to_date")
+  fromShiftLabel String    @map("from_shift_label")
+  toShiftLabel   String    @map("to_shift_label")
+  status         String    @default("pendiente")
+  reason         String?
+  createdAt      DateTime  @default(now()) @map("created_at")
+  resolvedAt     DateTime? @map("resolved_at")
+
+  @@map("swap_requests")
+}
+
+// ─── FESTIVOS ───────────────────────────────────────────
+model Holiday {
+  id       Int     @id @default(autoincrement())
+  date     String
+  label    String?
+  year     Int
+  province String  @default("Madrid")
+  type     String  @default("official") // official | custom | working
+
+  @@unique([date, province])
+  @@map("holidays")
+}
+
+// ─── CONFIGURACIÓN GLOBAL ───────────────────────────────
+model Setting {
+  id    Int     @id @default(autoincrement())
+  key   String  @unique
+  value String
+  label String?
+
+  @@map("settings")
+}
+
+// ─── AUDIT LOG ──────────────────────────────────────────
+model AuditLog {
+  id        Int      @id @default(autoincrement())
+  actorId   Int?     @map("actor_id")
+  actor     User?    @relation("AuditActor", fields: [actorId], references: [id])
+  action    String
+  entity    String
+  entityId  String?  @map("entity_id")
+  details   String?
+  ip        String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("audit_logs")
+}
+
+// ─── SESIONES ───────────────────────────────────────────
+model Session {
+  id        Int      @id @default(autoincrement())
+  userId    Int      @map("user_id")
+  user      User     @relation(fields: [userId], references: [id])
+  ip        String?
+  userAgent String?  @map("user_agent")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([createdAt])
+  @@map("sessions")
+}
+
+// ─── NOTIFICACIONES ─────────────────────────────────────
+model Notification {
+  id        Int      @id @default(autoincrement())
+  userId    Int      @map("user_id")
+  user      User     @relation(fields: [userId], references: [id])
+  title     String
+  message   String
+  type      String   @default("info")
+  read      Boolean  @default(false)
+  link      String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("notifications")
+}
+
+// ─── PREFERENCIAS DE NOTIFICACIÓN ─────────────────────
+model NotificationPreference {
+  id        Int     @id @default(autoincrement())
+  userId    Int     @map("user_id")
+  user      User    @relation(fields: [userId], references: [id])
+  eventType String  @map("event_type")
+  inApp     Boolean @default(true) @map("in_app")
+  push      Boolean @default(true)
+  email     Boolean @default(false)
+  locked    Boolean @default(false)
+
+  @@unique([userId, eventType])
+  @@map("notification_preferences")
+}
+
+// ─── SUSCRIPCIONES PUSH ───────────────────────────────
+model PushSubscription {
+  id        Int      @id @default(autoincrement())
+  userId    Int      @map("user_id")
+  user      User     @relation(fields: [userId], references: [id])
+  endpoint  String
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("push_subscriptions")
+}
+
+// ─── TOKEN RESET CONTRASEÑA ───────────────────────────
+model PasswordResetToken {
+  id        Int      @id @default(autoincrement())
+  userId    Int      @map("user_id")
+  user      User     @relation(fields: [userId], references: [id])
+  token     String   @unique
+  expiresAt DateTime @map("expires_at")
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("password_reset_tokens")
+}

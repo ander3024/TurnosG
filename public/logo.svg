@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <!-- App icon: El Ganso goose in circle on navy rounded square -->
+  <rect width="200" height="200" rx="40" fill="#1a2b6b"/>
+
+  <!-- Circle border -->
+  <circle cx="100" cy="88" r="58" fill="none" stroke="white" stroke-width="5"/>
+
+  <!-- Goose silhouette facing left - faithful to El Ganso brand -->
+  <g transform="translate(100,88)" fill="white">
+    <!-- Body - round plump shape -->
+    <ellipse cx="0" cy="18" rx="28" ry="22"/>
+    <!-- Chest/breast curve -->
+    <ellipse cx="-12" cy="5" rx="18" ry="25"/>
+    <!-- Neck - long curved going up-left -->
+    <path d="M -15,-10 Q -22,-25 -18,-42 Q -15,-50 -8,-52 Q -2,-53 2,-48 Q -2,-44 -6,-38 Q -12,-25 -8,-8" />
+    <!-- Head -->
+    <ellipse cx="-6" cy="-50" rx="10" ry="9"/>
+    <!-- Beak pointing left -->
+    <path d="M -16,-52 L -26,-50 L -16,-47" />
+    <!-- Tail feathers going right-up -->
+    <path d="M 22,5 Q 32,-5 28,-15 Q 25,-8 20,0" />
+    <!-- Feet -->
+    <g transform="translate(-5,38)">
+      <path d="M -4,0 L -8,5 L -2,4 L 0,0" />
+      <path d="M 4,0 L 0,5 L 6,4 L 8,0" />
+    </g>
+  </g>
+
+  <!-- Text below circle -->
+  <text x="100" y="175" font-family="Georgia,'Times New Roman',serif" font-size="17" font-weight="bold" fill="white" text-anchor="middle" letter-spacing="3">TURNOS</text>
+</svg>
