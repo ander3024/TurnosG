@@ -1,15 +1,14 @@
-// El Ganso Turnos - Service Worker v7
-// Cache for offline + push notifications
-// Compatible with Safari/iOS PWA
+// El Ganso Turnos - Service Worker v11
+// Network-first for everything, cache only for offline fallback
+// Push notifications
 
-var CACHE = "eg-turnos-v7";
+var CACHE = "eg-turnos-v11";
 var OFFLINE = "/offline.html";
-var PRECACHE = ["/login", "/offline.html", "/logo.png", "/logo-white.png", "/logo-small.png", "/icons/icon-192.png"];
 
 self.addEventListener("install", function(e) {
   e.waitUntil(
     caches.open(CACHE).then(function(cache) {
-      return cache.addAll(PRECACHE);
+      return cache.addAll([OFFLINE, "/icons/icon-192.png"]);
     })
   );
   self.skipWaiting();
@@ -27,43 +26,18 @@ self.addEventListener("activate", function(e) {
 });
 
 self.addEventListener("fetch", function(e) {
-  var url = e.request.url;
-  var isNav = e.request.mode === "navigate";
-  var isGet = e.request.method === "GET";
-  var isSameOrigin = url.startsWith(self.location.origin);
-  var isApi = url.indexOf("/api/") !== -1;
+  // Only handle GET same-origin non-API requests
+  if (e.request.method !== "GET") return;
+  if (!e.request.url.startsWith(self.location.origin)) return;
+  if (e.request.url.indexOf("/api/") !== -1) return;
 
-  // Skip non-GET, cross-origin, and API requests
-  if (!isGet || !isSameOrigin || isApi) return;
-
-  // Navigation: network first, fallback to cache, then offline page
-  if (isNav) {
-    e.respondWith(
-      fetch(e.request).then(function(res) {
-        if (res && res.status === 200) {
-          var clone = res.clone();
-          caches.open(CACHE).then(function(c) { c.put(e.request, clone); });
-        }
-        return res;
-      }).catch(function() {
-        return caches.match(e.request).then(function(cached) {
-          return cached || caches.match(OFFLINE);
-        });
-      })
-    );
-    return;
-  }
-
-  // Static assets: cache first, fallback to network
+  // ALWAYS network first, cache as fallback only when offline
   e.respondWith(
-    caches.match(e.request).then(function(cached) {
-      if (cached) return cached;
-      return fetch(e.request).then(function(res) {
-        if (res && res.status === 200) {
-          var clone = res.clone();
-          caches.open(CACHE).then(function(c) { c.put(e.request, clone); });
-        }
-        return res;
+    fetch(e.request).catch(function() {
+      return caches.match(e.request).then(function(cached) {
+        if (cached) return cached;
+        if (e.request.mode === "navigate") return caches.match(OFFLINE);
+        return new Response("", { status: 408 });
       });
     })
   );

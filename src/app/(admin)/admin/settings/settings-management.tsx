@@ -8,6 +8,7 @@ import {
   Mail,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useToast } from "@/components/ui/toast";
 
 interface SettingData {
   id: number;
@@ -26,6 +27,7 @@ export function SettingsManagement({ initialSettings }: Props) {
   const [saved, setSaved] = useState<string | null>(null);
   const [testingEmail, setTestingEmail] = useState(false);
   const [testEmailResult, setTestEmailResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const toast = useToast();
 
   function getValue(key: string): string {
     return settings.find((s) => s.key === key)?.value ?? "";
@@ -56,8 +58,9 @@ export function SettingsManagement({ initialSettings }: Props) {
         setSettings(settings.map((s) => (s.key === key ? data : s)));
         setSaved(key);
         setTimeout(() => setSaved(null), 2000);
-      }
-    } finally {
+        toast.success("Guardado");
+      } else toast.error("Error al guardar configuración");
+    } catch { toast.error("Error de conexión"); } finally {
       setSaving(null);
     }
   }

@@ -15,6 +15,7 @@ import {
   Check,
 } from "lucide-react";
 import { cn, formatDate, formatDateTime, statusColor, statusLabel } from "@/lib/utils";
+import { useToast } from "@/components/ui/toast";
 
 interface TimeOffData {
   id: number;
@@ -77,6 +78,7 @@ export function TimeOffManagement({ initialRequests }: Props) {
   const [deleting, setDeleting] = useState<number | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [people, setPeople] = useState<PersonOption[]>([]);
+  const toast = useToast();
 
   useEffect(() => {
     fetch("/api/admin/people")
@@ -131,8 +133,9 @@ export function TimeOffManagement({ initialRequests }: Props) {
       if (res.ok) {
         const data = await res.json();
         setRequests(requests.map((r) => (r.id === id ? { ...r, ...data } : r)));
-      }
-    } finally {
+        toast.success(action === "aprobada" ? "Solicitud aprobada" : "Solicitud rechazada");
+      } else { const err = await res.json().catch(() => ({})); toast.error(err.error || "Error al procesar"); }
+    } catch { toast.error("Error de conexión"); } finally {
       setProcessing(null);
     }
   }
@@ -157,8 +160,9 @@ export function TimeOffManagement({ initialRequests }: Props) {
         setRequests([data, ...requests]);
         setShowCreate(false);
         setForm(emptyForm);
-      }
-    } finally {
+        toast.success("Solicitud creada");
+      } else { const err = await res.json().catch(() => ({})); toast.error(err.error || "Error al crear solicitud"); }
+    } catch { toast.error("Error de conexión"); } finally {
       setSaving(false);
     }
   }
@@ -181,8 +185,9 @@ export function TimeOffManagement({ initialRequests }: Props) {
         setRequests(requests.map((r) => (r.id === id ? { ...r, ...data } : r)));
         setEditingId(null);
         setForm(emptyForm);
-      }
-    } finally {
+        toast.success("Solicitud actualizada");
+      } else { const err = await res.json().catch(() => ({})); toast.error(err.error || "Error al actualizar"); }
+    } catch { toast.error("Error de conexión"); } finally {
       setSaving(false);
     }
   }
@@ -204,16 +209,18 @@ export function TimeOffManagement({ initialRequests }: Props) {
         if (res.ok) {
           const data = await res.json();
           setRequests(requests.map((r) => (r.id === id ? { ...r, ...data } : r)));
-        }
+          toast.success("Solicitud cancelada");
+        } else toast.error("Error al cancelar");
       } else {
         const res = await fetch(`/api/admin/timeoff/${id}`, {
           method: "DELETE",
         });
         if (res.ok) {
           setRequests(requests.filter((r) => r.id !== id));
-        }
+          toast.success("Solicitud eliminada");
+        } else toast.error("Error al eliminar");
       }
-    } finally {
+    } catch { toast.error("Error de conexión"); } finally {
       setDeleting(null);
     }
   }

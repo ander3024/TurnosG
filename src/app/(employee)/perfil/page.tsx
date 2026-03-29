@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { User, Lock, Check } from "lucide-react";
+import { useToast } from "@/components/ui/toast";
 
 interface Profile {
   id: number;
@@ -31,6 +32,7 @@ export default function PerfilPage() {
   const [passwordError, setPasswordError] = useState("");
   const [passwordSuccess, setPasswordSuccess] = useState(false);
   const [changingPassword, setChangingPassword] = useState(false);
+  const toast = useToast();
 
   useEffect(() => {
     fetchProfile();
@@ -77,6 +79,7 @@ export default function PerfilPage() {
         setNewPassword("");
         setConfirmPassword("");
         setTimeout(() => setPasswordSuccess(false), 3000);
+        toast.success("Contraseña actualizada correctamente");
       } else {
         const data = await res.json();
         setPasswordError(data.error || "Error al cambiar la contrasena");

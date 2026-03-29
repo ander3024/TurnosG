@@ -5,9 +5,10 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
   ChevronLeft, ChevronRight, Calendar as CalIcon, X, User, Save,
-  RotateCcw, Plus, Clock, Sun, Moon, Sunrise, Coffee, Palmtree, BedDouble,
+  RotateCcw, Plus, Clock, Sun, Moon, Sunrise, Coffee, Palmtree, BedDouble, ArrowLeftRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useToast } from "@/components/ui/toast";
 
 interface ShiftAssignment {
   date: string; shiftTypeCode: string; shiftTypeLabel: string;
@@ -29,6 +30,7 @@ interface HoursSummary {
 }
 interface PersonOption { id: number; code: string; name: string; color: string; }
 interface ShiftTypeOption { id: number; code: string; label: string; }
+interface SwapInfo { id: number; fromPerson: { name: string; color: string }; toPerson: { name: string; color: string }; fromDate: string; toDate: string; fromShiftLabel: string; toShiftLabel: string; status: string }
 
 const monthNames = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
 const dayNames = ["LUN","MAR","MIÉ","JUE","VIE","SÁB","DOM"];
@@ -50,6 +52,7 @@ export default function AdminCalendarPage() {
   const [shiftTypes, setShiftTypes] = useState<ShiftTypeOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedDay, setSelectedDay] = useState<DaySchedule | null>(null);
+  const [swaps, setSwaps] = useState<SwapInfo[]>([]);
 
   const from = `${year}-${String(month + 1).padStart(2, "0")}-01`;
   const lastDay = new Date(year, month + 1, 0).getDate();
@@ -58,20 +61,27 @@ export default function AdminCalendarPage() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [s, h, p, st] = await Promise.all([
-        fetch(`/api/admin/schedule?from=${from}&to=${to}`).then(r => r.json()),
-        fetch(`/api/admin/schedule/hours?from=${year}-01-01&to=${year}-12-31`).then(r => r.json()),
-        fetch("/api/admin/people").then(r => r.json()),
-        fetch("/api/admin/shifts").then(r => r.json()),
+      const nc = { cache: "no-store" as const };
+      const [s, h, p, st, sw] = await Promise.all([
+        fetch(`/api/admin/schedule?from=${from}&to=${to}`, nc).then(r => { if (!r.ok) throw new Error(); return r.json(); }),
+        fetch(`/api/admin/schedule/hours?from=${year}-01-01&to=${year}-12-31`, nc).then(r => { if (!r.ok) throw new Error(); return r.json(); }),
+        fetch("/api/admin/people", nc).then(r => r.json()),
+        fetch("/api/admin/shifts", nc).then(r => r.json()),
+        fetch("/api/admin/swaps", nc).then(r => r.ok ? r.json() : { items: [] }),
       ]);
       setSchedule(s.schedule || []);
       setHours(h.hours || []);
       setPeople(Array.isArray(p) ? p : []);
       setShiftTypes(Array.isArray(st) ? st : []);
-    } finally { setLoading(false); }
+      setSwaps(sw.items || []);
+    } catch { /* errors handled by empty state */ } finally { setLoading(false); }
   }, [from, to, year]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  function getSwapsForDate(date: string) {
+    return swaps.filter(s => (s.fromDate === date || s.toDate === date) && ["pendiente", "aceptado", "aprobado"].includes(s.status));
+  }
 
   function prevMonth() { if (month === 0) { setMonth(11); setYear(year - 1); } else setMonth(month - 1); }
   function nextMonth() { if (month === 11) { setMonth(0); setYear(year + 1); } else setMonth(month + 1); }
@@ -155,11 +165,16 @@ export default function AdminCalendarPage() {
               const dayNum = parseInt(dateStr.split("-")[2]);
               const dow = idx % 7;
               const isWe = dow >= 5;
+              const cellSwaps = getSwapsForDate(dateStr);
+              const cellPending = cellSwaps.some(s => s.status === "pendiente" || s.status === "aceptado");
+              const cellApproved = cellSwaps.some(s => s.status === "aprobado");
               return (
                 <div key={idx} onClick={() => day && setSelectedDay(day)} className={cn(
                   "min-h-[130px] border-b border-r border-gray-100 p-1.5 cursor-pointer transition-all duration-150 hover:bg-indigo-50/40",
                   isWe && "bg-slate-50/60", day?.isClosed && "bg-rose-50/50", day?.isHoliday && !day?.isClosed && "bg-amber-50/30",
-                  isToday && "ring-2 ring-inset ring-indigo-500 bg-indigo-50/20"
+                  isToday && "ring-2 ring-inset ring-indigo-500 bg-indigo-50/20",
+                  cellPending && "animate-pulse-subtle ring-1 ring-inset ring-purple-300 bg-purple-50/30",
+                  cellApproved && !cellPending && "ring-1 ring-inset ring-cyan-300 bg-cyan-50/20",
                 )}>
                   <div className="flex items-center justify-between mb-1">
                     <span className={cn("text-[11px] font-bold", isToday ? "bg-indigo-600 text-white rounded-full w-6 h-6 flex items-center justify-center" : isWe ? "text-amber-700" : "text-gray-800")}>{dayNum}</span>
@@ -177,11 +192,18 @@ export default function AdminCalendarPage() {
                         <span className={cn("text-[8px] ml-auto flex-shrink-0 font-bold", si.color)}>{si.shortLabel}</span>
                       </div>
                     ); })}
-                    {day?.timeOffs.map((to, i) => (
+                    {day?.timeOffs.filter(t => t.type !== "intercambio").map((to, i) => (
                       <div key={`v${i}`} className="flex items-center gap-[3px] rounded-md px-1 py-[2px] bg-emerald-50">
                         <Palmtree className="w-[10px] h-[10px] text-emerald-500 flex-shrink-0" />
                         <span className="text-[10px] font-semibold text-emerald-700 truncate">{to.personName}</span>
                         <span className="text-[8px] ml-auto text-emerald-500 font-bold flex-shrink-0">VAC</span>
+                      </div>
+                    ))}
+                    {day?.timeOffs.filter(t => t.type === "intercambio").map((to, i) => (
+                      <div key={`si${i}`} className="flex items-center gap-[3px] rounded-md px-1 py-[2px] bg-cyan-50">
+                        <ArrowLeftRight className="w-[10px] h-[10px] text-cyan-500 flex-shrink-0" />
+                        <span className="text-[10px] font-semibold text-cyan-700 truncate">{to.personName}</span>
+                        <span className="text-[8px] ml-auto text-cyan-500 font-bold flex-shrink-0">LIB</span>
                       </div>
                     ))}
                     {day?.offPeople?.map((op, i) => (
@@ -189,6 +211,16 @@ export default function AdminCalendarPage() {
                         <BedDouble className="w-[10px] h-[10px] text-gray-400 flex-shrink-0" />
                         <span className="text-[10px] font-medium text-gray-400 truncate">{op.personName}</span>
                         <span className="text-[8px] ml-auto text-gray-400 font-bold flex-shrink-0">LIB</span>
+                      </div>
+                    ))}
+                    {cellSwaps.map((sw, i) => (
+                      <div key={`sw${i}`} className={cn("flex items-center gap-[3px] rounded-md px-1 py-[2px] mt-0.5",
+                        sw.status === "aprobado" ? "bg-cyan-50 border border-cyan-200" : "bg-purple-50 border border-purple-200"
+                      )}>
+                        <ArrowLeftRight className={cn("w-[10px] h-[10px] flex-shrink-0", sw.status === "aprobado" ? "text-cyan-500" : "text-purple-500")} />
+                        <span className="text-[9px] font-semibold truncate" style={{ color: sw.fromPerson.color }}>{sw.fromPerson.name.split(" ")[0]}</span>
+                        <span className="text-[9px] text-gray-300">↔</span>
+                        <span className="text-[9px] font-semibold truncate" style={{ color: sw.toPerson.color }}>{sw.toPerson.name.split(" ")[0]}</span>
                       </div>
                     ))}
                   </div>
@@ -238,9 +270,14 @@ export default function AdminCalendarPage() {
                         </span>
                       );
                     })}
-                    {day.timeOffs.map((to, i) => (
+                    {day.timeOffs.filter(t => t.type !== "intercambio").map((to, i) => (
                       <span key={`v${i}`} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-700">
                         <Palmtree className="w-3 h-3" /> {to.personName}
+                      </span>
+                    ))}
+                    {day.timeOffs.filter(t => t.type === "intercambio").map((to, i) => (
+                      <span key={`si${i}`} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-cyan-50 text-cyan-700">
+                        <ArrowLeftRight className="w-3 h-3" /> {to.personName} (intercambio)
                       </span>
                     ))}
                     {day.offPeople?.map((op, i) => (
@@ -297,7 +334,7 @@ function DayEditModal({ day, people, shiftTypes, onClose, onSaved }: {
   const [ehSaving, setEhSaving] = useState(false);
   const [showAddShift, setShowAddShift] = useState(false);
   const [addForm, setAddForm] = useState({ shiftTypeId: "", personId: "" });
-  const [feedback, setFeedback] = useState("");
+  const toast = useToast();
 
   async function handleOverride(shiftTypeCode: string, slotIndex: number, newPersonId: number | null) {
     const st = shiftTypes.find((s) => s.code === shiftTypeCode);
@@ -308,8 +345,9 @@ function DayEditModal({ day, people, shiftTypes, onClose, onSaved }: {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ date: day.date, shiftTypeId: st.id, personId: newPersonId, slotIndex }),
       });
-      if (res.ok) { setFeedback("Guardado"); setTimeout(() => { setFeedback(""); onSaved(); }, 500); }
-    } finally { setSaving(null); }
+      if (res.ok) { toast.success("Asignación guardada"); onSaved(); }
+      else { const err = await res.json().catch(() => ({})); toast.error(err.error || "Error al guardar"); }
+    } catch { toast.error("Error de conexión"); } finally { setSaving(null); }
   }
 
   async function handleRemoveOverride(shiftTypeCode: string, slotIndex: number) {
@@ -318,8 +356,9 @@ function DayEditModal({ day, people, shiftTypes, onClose, onSaved }: {
     setSaving(`del-${shiftTypeCode}-${slotIndex}`);
     try {
       const res = await fetch(`/api/admin/schedule/override?date=${day.date}&shiftTypeId=${st.id}&slotIndex=${slotIndex}`, { method: "DELETE" });
-      if (res.ok) { setFeedback("Override eliminado"); setTimeout(() => { setFeedback(""); onSaved(); }, 500); }
-    } finally { setSaving(null); }
+      if (res.ok) { toast.success("Override eliminado"); onSaved(); }
+      else toast.error("Error al eliminar override");
+    } catch { toast.error("Error de conexión"); } finally { setSaving(null); }
   }
 
   async function handleAddExtraHours(e: React.FormEvent) {
@@ -329,8 +368,9 @@ function DayEditModal({ day, people, shiftTypes, onClose, onSaved }: {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ personId: parseInt(ehForm.personId), date: day.date, hours: parseFloat(ehForm.hours), comment: ehForm.comment || null }),
       });
-      if (res.ok) { setFeedback("Horas extra añadidas"); setEhForm({ personId: "", hours: "", comment: "" }); setShowExtraHours(false); setTimeout(() => { setFeedback(""); onSaved(); }, 500); }
-    } finally { setEhSaving(false); }
+      if (res.ok) { toast.success("Horas extra añadidas"); setEhForm({ personId: "", hours: "", comment: "" }); setShowExtraHours(false); onSaved(); }
+      else { const err = await res.json().catch(() => ({})); toast.error(err.error || "Error al añadir horas"); }
+    } catch { toast.error("Error de conexión"); } finally { setEhSaving(false); }
   }
 
   async function handleAddShift(e: React.FormEvent) {
@@ -345,8 +385,9 @@ function DayEditModal({ day, people, shiftTypes, onClose, onSaved }: {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ date: day.date, shiftTypeId: parseInt(addForm.shiftTypeId), personId: addForm.personId ? parseInt(addForm.personId) : null, slotIndex: nextSlot }),
       });
-      if (res.ok) { setFeedback("Turno añadido"); setShowAddShift(false); setAddForm({ shiftTypeId: "", personId: "" }); setTimeout(() => { setFeedback(""); onSaved(); }, 500); }
-    } finally { setSaving(null); }
+      if (res.ok) { toast.success("Turno añadido"); setShowAddShift(false); setAddForm({ shiftTypeId: "", personId: "" }); onSaved(); }
+      else { const err = await res.json().catch(() => ({})); toast.error(err.error || "Error al añadir turno"); }
+    } catch { toast.error("Error de conexión"); } finally { setSaving(null); }
   }
 
   const dateLabel = new Date(day.date + "T12:00:00").toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
@@ -363,7 +404,6 @@ function DayEditModal({ day, people, shiftTypes, onClose, onSaved }: {
                 {day.isWeekend && <Badge variant="info">Fin de semana</Badge>}
                 {day.isHoliday && <Badge variant="warning">{day.holidayLabel || "Festivo"}</Badge>}
                 {day.isClosed && <Badge variant="danger">Cerrado</Badge>}
-                {feedback && <Badge variant="success">{feedback}</Badge>}
               </div>
             </div>
             <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-xl"><X className="w-5 h-5 text-gray-400" /></button>
@@ -430,11 +470,11 @@ function DayEditModal({ day, people, shiftTypes, onClose, onSaved }: {
                   </div>
                 ))}
                 {day.timeOffs.map((to, i) => (
-                  <div key={`v${i}`} className="flex items-center gap-3 p-2.5 rounded-xl bg-emerald-50">
-                    <Palmtree className="w-4 h-4 text-emerald-500" />
-                    <span className="text-sm font-medium text-emerald-700">{to.personName}</span>
-                    <Badge variant="success" className="ml-auto">
-                      {to.type === "vacaciones" ? "Vacaciones" : to.type === "enfermedad" ? "Baja" : "Ausencia"}
+                  <div key={`v${i}`} className={cn("flex items-center gap-3 p-2.5 rounded-xl", to.type === "intercambio" ? "bg-cyan-50" : "bg-emerald-50")}>
+                    {to.type === "intercambio" ? <ArrowLeftRight className="w-4 h-4 text-cyan-500" /> : <Palmtree className="w-4 h-4 text-emerald-500" />}
+                    <span className={cn("text-sm font-medium", to.type === "intercambio" ? "text-cyan-700" : "text-emerald-700")}>{to.personName}</span>
+                    <Badge variant={to.type === "intercambio" ? "info" : "success"} className="ml-auto">
+                      {to.type === "intercambio" ? "Intercambio" : to.type === "vacaciones" ? "Vacaciones" : to.type === "enfermedad" ? "Baja" : "Ausencia"}
                     </Badge>
                   </div>
                 ))}

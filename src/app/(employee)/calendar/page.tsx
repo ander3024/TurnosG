@@ -10,7 +10,10 @@ import {
 } from "lucide-react";
 
 interface TeamAssignment { personCode: string | null; personName: string | null; personColor: string | null; shiftLabel: string; startTime: string; endTime: string; }
-interface DayData { date: string; isWeekend: boolean; isClosed: boolean; shifts: { code: string; label: string; startTime: string; endTime: string; hours: number }[]; timeOff: { type: string; status: string } | null; holiday: { label: string } | null; teamAssignments: TeamAssignment[]; }
+interface OffPerson { personCode: string; personName: string; personColor: string; }
+interface TeamTimeOff { personCode: string; personName: string; personColor: string; type: string; }
+interface DayData { date: string; isWeekend: boolean; isClosed: boolean; shifts: { code: string; label: string; startTime: string; endTime: string; hours: number }[]; timeOff: { type: string; status: string } | null; isSwapOff?: boolean; holiday: { label: string } | null; teamAssignments: TeamAssignment[]; offPeople?: OffPerson[]; teamTimeOffs?: TeamTimeOff[]; }
+interface SwapInfo { id: number; fromPerson: { name: string; color: string }; toPerson: { name: string; color: string }; fromDate: string; toDate: string; fromShiftLabel: string; toShiftLabel: string; status: string; isOneWay?: boolean }
 
 const MONTHS = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
 const DAYS = ["LUN","MAR","MIÉ","JUE","VIE","SÁB","DOM"];
@@ -31,6 +34,7 @@ export default function CalendarPage() {
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth());
   const [days, setDays] = useState<DayData[]>([]);
+  const [swaps, setSwaps] = useState<SwapInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedDay, setSelectedDay] = useState<DayData | null>(null);
 
@@ -42,11 +46,24 @@ export default function CalendarPage() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/employee/calendar?start=${from}&end=${to}`);
-      if (res.ok) { const j = await res.json(); setDays(j.days || []); }
+      const t = Date.now();
+      const [calRes, swapRes] = await Promise.all([
+        fetch(`/api/employee/calendar?start=${from}&end=${to}&_=${t}`, { cache: "no-store" }),
+        fetch(`/api/employee/swaps?_=${t}`, { cache: "no-store" }),
+      ]);
+      if (calRes.ok) { const j = await calRes.json(); setDays(j.days || []); }
+      if (swapRes.ok) { const j = await swapRes.json(); setSwaps(j.swaps || []); }
     } catch {} finally { setLoading(false); }
   }, [from, to]);
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  // Get swaps affecting a specific date (pending or approved, not rejected/cancelled)
+  function getSwapsForDate(date: string) {
+    return swaps.filter(s =>
+      (s.fromDate === date || s.toDate === date) &&
+      ["pendiente", "aceptado", "aprobado"].includes(s.status)
+    );
+  }
 
   function prevMonth() { if (month === 0) { setMonth(11); setYear(year - 1); } else setMonth(month - 1); }
   function nextMonth() { if (month === 11) { setMonth(0); setYear(year + 1); } else setMonth(month + 1); }
@@ -100,13 +117,18 @@ export default function CalendarPage() {
             const isWe = dow >= 5;
             const myShifts = day?.shifts || [];
             const hasMyShift = myShifts.length > 0;
+            const daySwaps = getSwapsForDate(dateStr);
+            const hasPendingSwap = daySwaps.some(s => s.status === "pendiente" || s.status === "aceptado");
+            const hasApprovedSwap = daySwaps.some(s => s.status === "aprobado");
 
             return (
               <div key={idx} onClick={() => day && setSelectedDay(day)} className={cn(
                 "min-h-[120px] border-b border-r border-gray-100 p-1.5 cursor-pointer transition-all hover:bg-indigo-50/30",
                 isWe && "bg-slate-50/60", day?.isClosed && "bg-rose-50/40",
                 hasMyShift && "bg-indigo-50/20",
-                isToday && "ring-2 ring-inset ring-indigo-500"
+                isToday && "ring-2 ring-inset ring-indigo-500",
+                hasPendingSwap && "animate-pulse-subtle bg-purple-50/40 ring-1 ring-inset ring-purple-300",
+                hasApprovedSwap && !hasPendingSwap && "bg-cyan-50/30 ring-1 ring-inset ring-cyan-300",
               )}>
                 <div className="flex items-center justify-between mb-1">
                   <span className={cn("text-[11px] font-bold", isToday ? "bg-indigo-600 text-white rounded-full w-6 h-6 flex items-center justify-center" : isWe ? "text-amber-700" : "text-gray-800")}>{dayNum}</span>
@@ -134,6 +156,38 @@ export default function CalendarPage() {
                       <span className="text-[8px] ml-auto text-emerald-500 font-bold">VAC</span>
                     </div>
                   )}
+                  {!day?.timeOff && day?.isSwapOff && (
+                    <div className="flex items-center gap-[3px] rounded-md px-1 py-[2px] bg-cyan-50 ring-2 ring-cyan-300">
+                      <ArrowLeftRight className="w-[10px] h-[10px] text-cyan-500" />
+                      <span className="text-[10px] font-bold text-cyan-700">Tú</span>
+                      <span className="text-[8px] ml-auto text-cyan-500 font-bold">LIB</span>
+                    </div>
+                  )}
+                  {day?.teamTimeOffs?.map((tt, i) => (
+                    <div key={`tt${i}`} className="flex items-center gap-[3px] rounded-md px-1 py-[2px] bg-emerald-50/50">
+                      <Palmtree className="w-[10px] h-[10px] text-emerald-400" />
+                      <span className="text-[10px] font-medium text-emerald-600 truncate">{tt.personName}</span>
+                      <span className="text-[8px] ml-auto text-emerald-400 font-bold">VAC</span>
+                    </div>
+                  ))}
+                  {day?.offPeople?.map((op, i) => (
+                    <div key={`op${i}`} className="flex items-center gap-[3px] rounded-md px-1 py-[2px] bg-gray-50">
+                      <BedDouble className="w-[10px] h-[10px] text-gray-400" />
+                      <span className="text-[10px] font-medium text-gray-400 truncate">{op.personName}</span>
+                      <span className="text-[8px] ml-auto text-gray-400 font-bold">LIB</span>
+                    </div>
+                  ))}
+                  {/* Swap indicators */}
+                  {daySwaps.map((sw, i) => (
+                    <div key={`sw${i}`} className={cn("flex items-center gap-[3px] rounded-md px-1 py-[2px] mt-0.5",
+                      sw.status === "aprobado" ? "bg-cyan-50 border border-cyan-200" : "bg-purple-50 border border-purple-200 animate-pulse"
+                    )}>
+                      <ArrowLeftRight className={cn("w-[10px] h-[10px] flex-shrink-0", sw.status === "aprobado" ? "text-cyan-500" : "text-purple-500")} />
+                      <span className="text-[9px] font-semibold truncate" style={{ color: sw.fromPerson.color }}>{sw.fromPerson.name.split(" ")[0]}</span>
+                      <span className="text-[9px] text-gray-300">↔</span>
+                      <span className="text-[9px] font-semibold truncate" style={{ color: sw.toPerson.color }}>{sw.toPerson.name.split(" ")[0]}</span>
+                    </div>
+                  ))}
                 </div>
               </div>
             );
@@ -150,12 +204,17 @@ export default function CalendarPage() {
           const isToday = day.date === today;
           const myShifts = day.shifts || [];
           const hasMyShift = myShifts.length > 0;
+          const mobileSwaps = getSwapsForDate(day.date);
+          const mobilePending = mobileSwaps.some(s => s.status === "pendiente" || s.status === "aceptado");
+          const mobileApproved = mobileSwaps.some(s => s.status === "aprobado");
 
           return (
             <div key={day.date} onClick={() => setSelectedDay(day)} className={cn(
               "rounded-xl border p-3 cursor-pointer transition-all hover:shadow-sm",
               isToday ? "border-indigo-400 bg-indigo-50/30" : day.isClosed ? "border-gray-200 bg-rose-50/30" :
-              hasMyShift ? "border-indigo-200 bg-white" : "border-gray-100 bg-gray-50/30"
+              hasMyShift ? "border-indigo-200 bg-white" : "border-gray-100 bg-gray-50/30",
+              mobilePending && "border-purple-300 bg-purple-50/20 animate-pulse",
+              mobileApproved && !mobilePending && "border-cyan-300 bg-cyan-50/20",
             )}>
               <div className="flex items-start gap-3">
                 <div className={cn("w-12 text-center flex-shrink-0", isToday ? "text-indigo-600" : "text-gray-600")}>
@@ -169,6 +228,11 @@ export default function CalendarPage() {
                       <Palmtree className="w-3 h-3" /> Vacaciones
                     </span>
                   )}
+                  {!day.timeOff && day.isSwapOff && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-cyan-100 text-cyan-700 text-xs font-semibold">
+                      <ArrowLeftRight className="w-3 h-3" /> Libras (intercambio)
+                    </span>
+                  )}
                   {hasMyShift && myShifts.map((s, i) => {
                     const c = si(s.label);
                     return (
@@ -178,12 +242,12 @@ export default function CalendarPage() {
                       </div>
                     );
                   })}
-                  {!hasMyShift && !day.timeOff && !day.isClosed && (
+                  {!hasMyShift && !day.timeOff && !day.isSwapOff && !day.isClosed && (
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-gray-100 text-gray-400 text-xs"><BedDouble className="w-3 h-3" /> Libras</span>
                   )}
-                  {!day.isClosed && day.teamAssignments?.length > 0 && (
+                  {!day.isClosed && (
                     <div className="flex flex-wrap gap-1">
-                      {day.teamAssignments.filter((ta) => !myShifts.some((ms) => ms.label === ta.shiftLabel)).map((ta, i) => {
+                      {day.teamAssignments?.filter((ta) => !myShifts.some((ms) => ms.label === ta.shiftLabel)).map((ta, i) => {
                         const c = si(ta.shiftLabel);
                         return (
                           <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] bg-gray-50 border border-gray-100">
@@ -193,6 +257,24 @@ export default function CalendarPage() {
                           </span>
                         );
                       })}
+                      {day.teamTimeOffs?.map((tt, i) => (
+                        <span key={`tt${i}`} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] bg-emerald-50 text-emerald-600 border border-emerald-100">
+                          <Palmtree className="w-3 h-3" /> {tt.personName}
+                        </span>
+                      ))}
+                      {day.offPeople?.map((op, i) => (
+                        <span key={`op${i}`} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] bg-gray-100 text-gray-400">
+                          <BedDouble className="w-3 h-3" /> {op.personName}
+                        </span>
+                      ))}
+                      {mobileSwaps.map((sw, i) => (
+                        <span key={`sw${i}`} className={cn("inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold",
+                          sw.status === "aprobado" ? "bg-cyan-100 text-cyan-700 border border-cyan-200" : "bg-purple-100 text-purple-700 border border-purple-200"
+                        )}>
+                          <ArrowLeftRight className="w-3 h-3" />
+                          {sw.fromPerson.name.split(" ")[0]} ↔ {sw.toPerson.name.split(" ")[0]}
+                        </span>
+                      ))}
                     </div>
                   )}
                 </div>
@@ -210,6 +292,8 @@ export default function CalendarPage() {
         <div className="flex items-center gap-1"><Sun className="w-3.5 h-3.5 text-amber-600" /> Finde</div>
         <div className="flex items-center gap-1"><Palmtree className="w-3.5 h-3.5 text-emerald-500" /> Vacaciones</div>
         <div className="flex items-center gap-1"><BedDouble className="w-3.5 h-3.5 text-gray-400" /> Libra</div>
+        <div className="flex items-center gap-1"><span className="w-3.5 h-3.5 rounded border border-purple-300 bg-purple-50 flex items-center justify-center"><ArrowLeftRight className="w-2 h-2 text-purple-500" /></span> Intercambio pendiente</div>
+        <div className="flex items-center gap-1"><span className="w-3.5 h-3.5 rounded border border-cyan-300 bg-cyan-50 flex items-center justify-center"><ArrowLeftRight className="w-2 h-2 text-cyan-500" /></span> Intercambio aprobado</div>
       </div>
 
       {/* Day detail modal */}
@@ -226,6 +310,12 @@ export default function CalendarPage() {
                 <div className="p-3 rounded-xl bg-emerald-50 flex items-center gap-3">
                   <Palmtree className="w-5 h-5 text-emerald-600" />
                   <p className="text-sm font-semibold text-emerald-800">Estás de vacaciones</p>
+                </div>
+              )}
+              {!selectedDay.timeOff && selectedDay.isSwapOff && (
+                <div className="p-3 rounded-xl bg-cyan-50 flex items-center gap-3">
+                  <ArrowLeftRight className="w-5 h-5 text-cyan-600" />
+                  <p className="text-sm font-semibold text-cyan-800">Libras por intercambio de turno</p>
                 </div>
               )}
               {selectedDay.shifts?.map((s, i) => {
@@ -259,6 +349,69 @@ export default function CalendarPage() {
                         </div>
                       );
                     })}
+                  </div>
+                </div>
+              )}
+              {/* Off people */}
+              {((selectedDay.offPeople?.length || 0) > 0 || (selectedDay.teamTimeOffs?.length || 0) > 0) && (
+                <div>
+                  <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">No trabajan hoy</h4>
+                  <div className="space-y-1.5">
+                    {selectedDay.teamTimeOffs?.map((tt, i) => (
+                      <div key={`tt${i}`} className="flex items-center gap-3 p-2.5 rounded-xl bg-emerald-50">
+                        <div className="w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold text-white" style={{ backgroundColor: tt.personColor || "#10b981" }}>
+                          {tt.personName?.slice(0, 2)}
+                        </div>
+                        <div className="flex-1">
+                          <p className="text-sm font-semibold text-emerald-700">{tt.personName}</p>
+                          <p className="text-xs text-emerald-500">{tt.type === "vacaciones" ? "Vacaciones" : tt.type === "enfermedad" ? "Baja" : "Ausencia"}</p>
+                        </div>
+                        <Palmtree className="w-4 h-4 text-emerald-400" />
+                      </div>
+                    ))}
+                    {selectedDay.offPeople?.map((op, i) => (
+                      <div key={`op${i}`} className="flex items-center gap-3 p-2.5 rounded-xl bg-gray-50">
+                        <div className="w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold text-white" style={{ backgroundColor: op.personColor || "#9ca3af" }}>
+                          {op.personName?.slice(0, 2)}
+                        </div>
+                        <div className="flex-1">
+                          <p className="text-sm font-medium text-gray-500">{op.personName}</p>
+                          <p className="text-xs text-gray-400">Libra</p>
+                        </div>
+                        <BedDouble className="w-4 h-4 text-gray-300" />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {/* Swap indicators in modal */}
+              {getSwapsForDate(selectedDay.date).length > 0 && (
+                <div>
+                  <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Intercambios de turno</h4>
+                  <div className="space-y-1.5">
+                    {getSwapsForDate(selectedDay.date).map((sw, i) => (
+                      <div key={i} className={cn("flex items-center gap-3 p-3 rounded-xl",
+                        sw.status === "aprobado" ? "bg-cyan-50 border border-cyan-200" : "bg-purple-50 border border-purple-200"
+                      )}>
+                        <ArrowLeftRight className={cn("w-5 h-5 flex-shrink-0", sw.status === "aprobado" ? "text-cyan-500" : "text-purple-500")} />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold">
+                            <span style={{ color: sw.fromPerson.color }}>{sw.fromPerson.name}</span>
+                            <span className="text-gray-400 mx-1">↔</span>
+                            <span style={{ color: sw.toPerson.color }}>{sw.toPerson.name}</span>
+                          </p>
+                          <p className="text-xs text-gray-500">
+                            {sw.fromShiftLabel} → {sw.toShiftLabel === "Libra" ? "Cobertura" : sw.toShiftLabel}
+                          </p>
+                        </div>
+                        <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded-full",
+                          sw.status === "aprobado" ? "bg-cyan-100 text-cyan-700" :
+                          sw.status === "aceptado" ? "bg-amber-100 text-amber-700" : "bg-purple-100 text-purple-700"
+                        )}>
+                          {sw.status === "aprobado" ? "Aprobado" : sw.status === "aceptado" ? "Esperando admin" : "Pendiente"}
+                        </span>
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}

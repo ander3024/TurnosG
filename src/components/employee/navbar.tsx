@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
@@ -37,6 +37,25 @@ export function EmployeeNavbar({ user }: NavbarProps) {
   const pathname = usePathname();
   const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [pendingSwaps, setPendingSwaps] = useState(0);
+
+  const fetchPendingSwaps = useCallback(async () => {
+    try {
+      const res = await fetch("/api/employee/swaps");
+      if (res.ok) {
+        const data = await res.json();
+        const swaps = data.swaps || [];
+        const pending = swaps.filter((s: any) => s.status === "pendiente" && s.toUser?.id === user.id).length;
+        setPendingSwaps(pending);
+      }
+    } catch {}
+  }, [user.id]);
+
+  useEffect(() => {
+    fetchPendingSwaps();
+    const interval = setInterval(fetchPendingSwaps, 30000);
+    return () => clearInterval(interval);
+  }, [fetchPendingSwaps]);
 
   const isActive = (href: string) => {
     if (href === "/") return pathname === "/";
@@ -71,12 +90,13 @@ export function EmployeeNavbar({ user }: NavbarProps) {
           <div className="hidden md:flex items-center gap-1">
             {links.map((link) => {
               const Icon = link.icon;
+              const hasBadge = link.href === "/intercambios" && pendingSwaps > 0;
               return (
                 <Link
                   key={link.href}
                   href={link.href}
                   className={cn(
-                    "flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors",
+                    "relative flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors",
                     isActive(link.href)
                       ? "bg-indigo-50 text-indigo-700"
                       : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
@@ -84,6 +104,11 @@ export function EmployeeNavbar({ user }: NavbarProps) {
                 >
                   <Icon className="w-4 h-4" />
                   {link.label}
+                  {hasBadge && (
+                    <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white animate-pulse">
+                      {pendingSwaps}
+                    </span>
+                  )}
                 </Link>
               );
             })}
@@ -135,6 +160,7 @@ export function EmployeeNavbar({ user }: NavbarProps) {
           <div className="px-4 py-3 space-y-1">
             {links.map((link) => {
               const Icon = link.icon;
+              const hasBadge = link.href === "/intercambios" && pendingSwaps > 0;
               return (
                 <Link
                   key={link.href}
@@ -149,6 +175,11 @@ export function EmployeeNavbar({ user }: NavbarProps) {
                 >
                   <Icon className="w-5 h-5" />
                   {link.label}
+                  {hasBadge && (
+                    <span className="ml-auto flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white animate-pulse">
+                      {pendingSwaps}
+                    </span>
+                  )}
                 </Link>
               );
             })}

@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { useToast } from "@/components/ui/toast";
 import {
   Bell,
   Send,
@@ -94,6 +95,7 @@ export default function AdminNotificationsPage() {
   const [sendTarget, setSendTarget] = useState<"all" | "specific">("all");
   const [sendUserId, setSendUserId] = useState<number | null>(null);
   const [sending, setSending] = useState(false);
+  const toast = useToast();
 
   const fetchNotifications = useCallback(async () => {
     try {
@@ -148,7 +150,7 @@ export default function AdminNotificationsPage() {
     if (!sendTitle.trim() || !sendMessage.trim()) return;
     setSending(true);
     try {
-      await fetch("/api/admin/notifications", {
+      const res = await fetch("/api/admin/notifications", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -158,13 +160,16 @@ export default function AdminNotificationsPage() {
           userId: sendTarget === "specific" ? sendUserId : undefined,
         }),
       });
-      setSendTitle("");
-      setSendMessage("");
-      setSendTarget("all");
-      setSendUserId(null);
-      fetchNotifications();
+      if (res.ok) {
+        toast.success("Notificación enviada");
+        setSendTitle("");
+        setSendMessage("");
+        setSendTarget("all");
+        setSendUserId(null);
+        fetchNotifications();
+      } else toast.error("Error al enviar notificación");
     } catch {
-      // silently fail
+      toast.error("Error de conexión");
     } finally {
       setSending(false);
     }
@@ -173,13 +178,15 @@ export default function AdminNotificationsPage() {
   const saveSettings = async () => {
     setSavingSettings(true);
     try {
-      await fetch("/api/admin/notifications/settings", {
+      const res = await fetch("/api/admin/notifications/settings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ settings }),
       });
+      if (res.ok) toast.success("Configuración guardada");
+      else toast.error("Error al guardar configuración");
     } catch {
-      // silently fail
+      toast.error("Error de conexión");
     } finally {
       setSavingSettings(false);
     }

@@ -2,6 +2,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { AdminSidebar, MobileMenuButton } from "@/components/admin/sidebar";
+import { ToastProvider } from "@/components/ui/toast";
 
 export default function AdminLayout({
   children,
@@ -42,21 +43,23 @@ export default function AdminLayout({
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex">
-      <AdminSidebar user={user} mobileOpen={mobileOpen} setMobileOpen={setMobileOpen} />
+    <ToastProvider>
+      <div className="min-h-screen bg-gray-50 flex">
+        <AdminSidebar user={user} mobileOpen={mobileOpen} setMobileOpen={setMobileOpen} />
 
-      {/* Mobile top bar */}
-      <div className="fixed top-0 left-0 right-0 z-30 md:hidden bg-white border-b border-gray-200">
-        <div className="flex items-center gap-3 px-4 py-3">
-          <MobileMenuButton onClick={() => setMobileOpen(true)} />
-          <img src="/logo-small.png" alt="El Ganso" className="w-8 h-8 object-contain" />
-          <span className="font-bold text-gray-900 text-sm">El Ganso</span>
+        {/* Mobile top bar */}
+        <div className="fixed top-0 left-0 right-0 z-30 md:hidden bg-white border-b border-gray-200">
+          <div className="flex items-center gap-3 px-4 py-3">
+            <MobileMenuButton onClick={() => setMobileOpen(true)} />
+            <img src="/logo-small.png" alt="El Ganso" className="w-8 h-8 object-contain" />
+            <span className="font-bold text-gray-900 text-sm">El Ganso</span>
+          </div>
         </div>
-      </div>
 
-      <main className="flex-1 ml-0 md:ml-64">
-        <div className="p-4 md:p-8 pt-16 md:pt-8">{children}</div>
-      </main>
-    </div>
+        <main className="flex-1 ml-0 md:ml-64">
+          <div className="p-4 md:p-8 pt-16 md:pt-8">{children}</div>
+        </main>
+      </div>
+    </ToastProvider>
   );
 }

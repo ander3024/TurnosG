@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { formatDate, statusColor, statusLabel } from "@/lib/utils";
 import { Plus, X, Palmtree, Send } from "lucide-react";
+import { useToast } from "@/components/ui/toast";
 
 interface TimeOffRequest {
   id: number;
@@ -31,6 +32,7 @@ export default function VacacionesPage() {
   const [showForm, setShowForm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const toast = useToast();
 
   // Form state
   const [type, setType] = useState("vacaciones");
@@ -82,6 +84,7 @@ export default function VacacionesPage() {
         setEndDate("");
         setNote("");
         fetchRequests();
+        toast.success("Solicitud enviada correctamente");
       } else {
         const data = await res.json();
         setError(data.error || "Error al crear la solicitud");

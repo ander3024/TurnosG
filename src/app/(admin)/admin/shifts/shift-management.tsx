@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Plus, Pencil, X, Check, Clock, Sun, Coffee, Zap, UtensilsCrossed } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useToast } from "@/components/ui/toast";
 
 interface ShiftData {
   id: number;
@@ -44,6 +45,7 @@ export function ShiftManagement({ initialShifts }: Props) {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(emptyForm);
+  const toast = useToast();
 
   function startEdit(shift: ShiftData) {
     setEditingId(shift.id);
@@ -77,10 +79,9 @@ export function ShiftManagement({ initialShifts }: Props) {
         const data = await res.json();
         setShifts([...shifts, data]);
         cancelEdit();
-      }
-    } finally {
-      setSaving(false);
-    }
+        toast.success("Tipo de turno creado");
+      } else { const err = await res.json().catch(() => ({})); toast.error(err.error || "Error al crear turno"); }
+    } catch { toast.error("Error de conexión"); } finally { setSaving(false); }
   }
 
   async function handleUpdate(id: number) {
@@ -95,21 +96,23 @@ export function ShiftManagement({ initialShifts }: Props) {
         const data = await res.json();
         setShifts(shifts.map((s) => (s.id === id ? data : s)));
         cancelEdit();
-      }
-    } finally {
-      setSaving(false);
-    }
+        toast.success("Turno actualizado");
+      } else { const err = await res.json().catch(() => ({})); toast.error(err.error || "Error al actualizar"); }
+    } catch { toast.error("Error de conexión"); } finally { setSaving(false); }
   }
 
   async function toggleActive(id: number, active: boolean) {
-    const res = await fetch(`/api/admin/shifts/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ active: !active }),
-    });
-    if (res.ok) {
-      setShifts(shifts.map((s) => (s.id === id ? { ...s, active: !active } : s)));
-    }
+    try {
+      const res = await fetch(`/api/admin/shifts/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ active: !active }),
+      });
+      if (res.ok) {
+        setShifts(shifts.map((s) => (s.id === id ? { ...s, active: !active } : s)));
+        toast.success(active ? "Turno desactivado" : "Turno activado");
+      } else toast.error("Error al cambiar estado");
+    } catch { toast.error("Error de conexión"); }
   }
 
   // Group by category

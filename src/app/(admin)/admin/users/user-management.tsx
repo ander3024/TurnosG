@@ -9,6 +9,7 @@ import {
   UserPlus, Search, Pencil, Trash2, X, Check, Key, Mail, Shield,
   Phone, User, Calendar, Link2, Send, Eye, EyeOff,
 } from "lucide-react";
+import { useToast } from "@/components/ui/toast";
 
 interface UserData {
   id: number; email: string; name: string; role: string;
@@ -40,6 +41,7 @@ export function UserManagement({ initialUsers, availablePeople }: Props) {
   const [newPassword, setNewPassword] = useState("");
   const [showPw, setShowPw] = useState(false);
   const [feedback, setFeedback] = useState<{ id: number; msg: string } | null>(null);
+  const toast = useToast();
 
   const filtered = users.filter((u) =>
     u.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -66,7 +68,7 @@ export function UserManagement({ initialUsers, availablePeople }: Props) {
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
-    if (form.password.length < 6) { alert("La contraseña debe tener al menos 6 caracteres"); return; }
+    if (form.password.length < 6) { toast.warning("La contraseña debe tener al menos 6 caracteres"); return; }
     setSaving(true);
     try {
       const res = await fetch("/api/admin/users", {
@@ -77,11 +79,12 @@ export function UserManagement({ initialUsers, availablePeople }: Props) {
         const data = await res.json();
         setUsers([data, ...users]);
         cancelEdit();
+        toast.success("Usuario creado correctamente");
       } else {
-        const err = await res.json();
-        alert(err.error || "Error al crear usuario");
+        const err = await res.json().catch(() => ({}));
+        toast.error(err.error || "Error al crear usuario");
       }
-    } finally { setSaving(false); }
+    } catch { toast.error("Error de conexión"); } finally { setSaving(false); }
   }
 
   async function handleUpdate(id: number) {
@@ -95,13 +98,16 @@ export function UserManagement({ initialUsers, availablePeople }: Props) {
         const data = await res.json();
         setUsers(users.map((u) => (u.id === id ? { ...u, ...data } : u)));
         cancelEdit();
-        showFeedback(id, "Usuario actualizado");
+        toast.success("Usuario actualizado");
+      } else {
+        const err = await res.json().catch(() => ({}));
+        toast.error(err.error || "Error al actualizar usuario");
       }
-    } finally { setSaving(false); }
+    } catch { toast.error("Error de conexión"); } finally { setSaving(false); }
   }
 
   async function handleResetPassword(id: number) {
-    if (!newPassword || newPassword.length < 6) { alert("Mínimo 6 caracteres"); return; }
+    if (!newPassword || newPassword.length < 6) { toast.warning("Mínimo 6 caracteres"); return; }
     setSaving(true);
     try {
       const res = await fetch(`/api/admin/users/${id}`, {
@@ -111,9 +117,12 @@ export function UserManagement({ initialUsers, availablePeople }: Props) {
       if (res.ok) {
         setNewPassword("");
         setShowPw(false);
-        showFeedback(id, "Contraseña cambiada");
+        toast.success("Contraseña cambiada");
+      } else {
+        const err = await res.json().catch(() => ({}));
+        toast.error(err.error || "Error al cambiar contraseña");
       }
-    } finally { setSaving(false); }
+    } catch { toast.error("Error de conexión"); } finally { setSaving(false); }
   }
 
   async function sendResetEmail(email: string, id: number) {
@@ -123,26 +132,31 @@ export function UserManagement({ initialUsers, availablePeople }: Props) {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email }),
       });
-      if (res.ok) showFeedback(id, "Email de recuperación enviado");
-    } finally { setSaving(false); }
+      if (res.ok) toast.success("Email de recuperación enviado");
+      else toast.error("Error al enviar email de recuperación");
+    } catch { toast.error("Error de conexión"); } finally { setSaving(false); }
   }
 
   async function toggleActive(id: number, active: boolean) {
-    const res = await fetch(`/api/admin/users/${id}`, {
-      method: "PATCH", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ active: !active }),
-    });
-    if (res.ok) {
-      setUsers(users.map((u) => (u.id === id ? { ...u, active: !active } : u)));
-      showFeedback(id, active ? "Usuario desactivado" : "Usuario activado");
-    }
+    try {
+      const res = await fetch(`/api/admin/users/${id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ active: !active }),
+      });
+      if (res.ok) {
+        setUsers(users.map((u) => (u.id === id ? { ...u, active: !active } : u)));
+        toast.success(active ? "Usuario desactivado" : "Usuario activado");
+      } else toast.error("Error al cambiar estado");
+    } catch { toast.error("Error de conexión"); }
   }
 
   async function handleDelete(id: number, name: string) {
     if (!confirm(`¿Eliminar a "${name}"? Esta acción no se puede deshacer.`)) return;
-    const res = await fetch(`/api/admin/users/${id}`, { method: "DELETE" });
-    if (res.ok) setUsers(users.filter((u) => u.id !== id));
-    else { const err = await res.json(); alert(err.error || "Error al eliminar"); }
+    try {
+      const res = await fetch(`/api/admin/users/${id}`, { method: "DELETE" });
+      if (res.ok) { setUsers(users.filter((u) => u.id !== id)); toast.success("Usuario eliminado"); }
+      else { const err = await res.json().catch(() => ({})); toast.error(err.error || "Error al eliminar"); }
+    } catch { toast.error("Error de conexión"); }
   }
 
   return (

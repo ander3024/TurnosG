@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Plus, Pencil, Trash2, CalendarDays, Info, Search, X } from "lucide-react";
 import { formatDate } from "@/lib/utils";
+import { useToast } from "@/components/ui/toast";
 
 interface EventData {
   id: number;
@@ -226,6 +227,7 @@ export function EventManagement({ initialEvents, people }: Props) {
   const [showCreate, setShowCreate] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState<number | null>(null);
+  const toast = useToast();
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [editForm, setEditForm] = useState(emptyForm);
@@ -262,8 +264,9 @@ export function EventManagement({ initialEvents, people }: Props) {
         setEvents([data, ...events]);
         setShowCreate(false);
         setForm(emptyForm);
-      }
-    } finally {
+        toast.success("Evento creado");
+      } else { const err = await res.json().catch(() => ({})); toast.error(err.error || "Error al crear evento"); }
+    } catch { toast.error("Error de conexión"); } finally {
       setSaving(false);
     }
   }
@@ -288,8 +291,9 @@ export function EventManagement({ initialEvents, people }: Props) {
         const data = await res.json();
         setEvents(events.map((ev) => (ev.id === id ? data : ev)));
         setEditingId(null);
-      }
-    } finally {
+        toast.success("Evento actualizado");
+      } else { const err = await res.json().catch(() => ({})); toast.error(err.error || "Error al actualizar"); }
+    } catch { toast.error("Error de conexión"); } finally {
       setSaving(false);
     }
   }
@@ -301,8 +305,9 @@ export function EventManagement({ initialEvents, people }: Props) {
       const res = await fetch(`/api/admin/events/${id}`, { method: "DELETE" });
       if (res.ok) {
         setEvents(events.filter((e) => e.id !== id));
-      }
-    } finally {
+        toast.success("Evento eliminado");
+      } else toast.error("Error al eliminar evento");
+    } catch { toast.error("Error de conexión"); } finally {
       setDeleting(null);
     }
   }

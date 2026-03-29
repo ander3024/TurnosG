@@ -40,3 +40,12 @@ html {
   outline: 2px solid #4f46e5;
   outline-offset: 2px;
 }
+
+/* Subtle pulse for pending swaps */
+@keyframes pulse-subtle {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+.animate-pulse-subtle {
+  animation: pulse-subtle 2s ease-in-out infinite;
+}

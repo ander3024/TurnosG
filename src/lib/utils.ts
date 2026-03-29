@@ -37,6 +37,7 @@ export function statusColor(status: string): string {
     case "rechazado":
       return "bg-red-100 text-red-800";
     case "cancelada":
+    case "cancelado":
       return "bg-gray-100 text-gray-600";
     default:
       return "bg-gray-100 text-gray-800";
@@ -52,6 +53,7 @@ export function statusLabel(status: string): string {
     cancelada: "Cancelada",
     aceptado: "Aceptado",
     rechazado: "Rechazado",
+    cancelado: "Cancelado",
   };
   return labels[status] || status;
 }

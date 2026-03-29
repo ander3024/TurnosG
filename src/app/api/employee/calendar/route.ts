@@ -46,10 +46,28 @@ export async function GET(req: NextRequest) {
           }))
       : [];
 
-    // Time offs for this person
+    // Time offs for this person (exclude "intercambio" type — those show as "Libra")
     const myTimeOff = person
-      ? day.timeOffs.find((to) => to.personId === person.id) || null
+      ? day.timeOffs.find((to) => to.personId === person.id && to.type !== "intercambio") || null
       : null;
+
+    // Separate intercambio timeoffs (show as "Libra") from real vacations
+    const swapTimeOffs = day.timeOffs.filter((to) => to.type === "intercambio");
+    const realTimeOffs = day.timeOffs.filter((to) => to.type !== "intercambio");
+
+    // offPeople = rotation off + intercambio off
+    const offFromRotation = (day.offPeople || []).map((op) => ({
+      personCode: op.personCode,
+      personName: op.personName,
+      personColor: op.personColor,
+    }));
+    const offFromSwaps = swapTimeOffs
+      .filter((to) => !offFromRotation.some((op) => op.personCode === to.personCode))
+      .map((to) => ({
+        personCode: to.personCode,
+        personName: to.personName,
+        personColor: to.personColor,
+      }));
 
     return {
       date: day.date,
@@ -57,8 +75,9 @@ export async function GET(req: NextRequest) {
       isClosed: day.isClosed,
       shifts: myShifts,
       timeOff: myTimeOff ? { type: myTimeOff.type, status: "aprobada" } : null,
+      // If I have an intercambio timeoff, I'm off but NOT on vacation
+      isSwapOff: person ? swapTimeOffs.some((to) => to.personId === person.id) : false,
       holiday: day.isHoliday ? { label: day.holidayLabel || "Festivo" } : null,
-      // Show all assignments so employee can see team schedule
       teamAssignments: day.assignments.map((a) => ({
         personCode: a.personCode,
         personName: a.personName,
@@ -67,6 +86,20 @@ export async function GET(req: NextRequest) {
         startTime: a.startTime,
         endTime: a.endTime,
       })),
+      offPeople: [...offFromRotation, ...offFromSwaps]
+        .filter((op) => {
+          // Don't show "me" in offPeople — I already see my own status via shifts/timeOff/isSwapOff
+          if (person && op.personCode === person.code) return false;
+          return true;
+        }),
+      teamTimeOffs: realTimeOffs
+        .filter((to) => !person || to.personId !== person.id)
+        .map((to) => ({
+          personCode: to.personCode,
+          personName: to.personName,
+          personColor: to.personColor,
+          type: to.type,
+        })),
     };
   });
 

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useToast } from "@/components/ui/toast";
 import {
   Bell,
   BellOff,
@@ -62,6 +63,7 @@ export default function NotificacionesConfigPage() {
   const [pushLoading, setPushLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
+  const toast = useToast();
 
   const fetchPreferences = useCallback(async () => {
     try {
@@ -167,13 +169,15 @@ export default function NotificacionesConfigPage() {
   const savePreferences = async () => {
     setSaving(true);
     try {
-      await fetch("/api/employee/notifications/preferences", {
+      const res = await fetch("/api/employee/notifications/preferences", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ preferences }),
       });
+      if (res.ok) toast.success("Preferencias guardadas");
+      else toast.error("Error al guardar preferencias");
     } catch {
-      // silently fail
+      toast.error("Error de conexión");
     } finally {
       setSaving(false);
     }

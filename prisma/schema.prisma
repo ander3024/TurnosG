@@ -158,6 +158,9 @@ model SwapRequest {
   toShiftLabel   String    @map("to_shift_label")
   status         String    @default("pendiente")
   reason         String?
+  isOneWay       Boolean   @default(false) @map("is_one_way")
+  settled        Boolean   @default(false)
+  settledBySwapId Int?     @map("settled_by_swap_id")
   createdAt      DateTime  @default(now()) @map("created_at")
   resolvedAt     DateTime? @map("resolved_at")
 
