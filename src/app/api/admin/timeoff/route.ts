@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/auth";
+import { checkVacationLimit } from "@/lib/vacation-limit";
 
 // GET /api/admin/timeoff - List time off requests with filters
 export async function GET(request: NextRequest) {
@@ -70,44 +71,9 @@ export async function POST(request: NextRequest) {
 
     // Validate vacation days limit
     if (type === "vacaciones") {
-      const settings = await prisma.setting.findMany();
-      const vacLimit = parseInt(settings.find((s) => s.key === "vacationDaysNatural")?.value || "23");
-      const holidays = await prisma.holiday.findMany();
-      const holidayDates = new Set(holidays.map((h) => h.date));
-
-      // Count existing approved vacation days
-      const existing = await prisma.timeOffRequest.findMany({
-        where: { personId, status: "aprobada", type: "vacaciones" },
-      });
-      let usedDays = 0;
-      for (const t of existing) {
-        const s = new Date(t.startDate + "T12:00:00Z");
-        const e = new Date(t.endDate + "T12:00:00Z");
-        const d = new Date(s);
-        while (d <= e) {
-          if (d.getUTCDay() !== 0 && d.getUTCDay() !== 6 && !holidayDates.has(d.toISOString().slice(0, 10))) usedDays++;
-          d.setUTCDate(d.getUTCDate() + 1);
-        }
-      }
-
-      // Count new request days
-      let newDays = 0;
-      const ns = new Date(startDate + "T12:00:00Z");
-      const ne = new Date(endDate + "T12:00:00Z");
-      const nd = new Date(ns);
-      while (nd <= ne) {
-        if (nd.getUTCDay() !== 0 && nd.getUTCDay() !== 6 && !holidayDates.has(nd.toISOString().slice(0, 10))) newDays++;
-        nd.setUTCDate(nd.getUTCDate() + 1);
-      }
-
-      if (usedDays + newDays > vacLimit) {
-        return NextResponse.json({
-          error: `Excede el límite de vacaciones: ${usedDays} días usados + ${newDays} solicitados = ${usedDays + newDays} (máximo ${vacLimit})`,
-          usedDays,
-          newDays,
-          total: usedDays + newDays,
-          limit: vacLimit,
-        }, { status: 400 });
+      const check = await checkVacationLimit(personId, startDate, endDate);
+      if (!check.ok) {
+        return NextResponse.json({ error: check.error }, { status: 400 });
       }
     }
 

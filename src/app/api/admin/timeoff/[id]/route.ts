@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/auth";
+import { checkVacationLimit } from "@/lib/vacation-limit";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -41,6 +42,14 @@ export async function PATCH(request: NextRequest, { params }: Params) {
           { error: "Only pending requests can be approved or rejected" },
           { status: 400 }
         );
+      }
+
+      // Check vacation limit before approving
+      if (status === "aprobada" && existing.type === "vacaciones") {
+        const check = await checkVacationLimit(existing.personId, existing.startDate, existing.endDate, existing.id);
+        if (!check.ok) {
+          return NextResponse.json({ error: check.error }, { status: 400 });
+        }
       }
 
       const data: Record<string, any> = {

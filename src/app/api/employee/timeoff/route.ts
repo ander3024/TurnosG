@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { checkVacationLimit } from "@/lib/vacation-limit";
 
 // GET /api/employee/timeoff — list own time-off requests
 export async function GET() {
@@ -80,6 +81,14 @@ export async function POST(req: NextRequest) {
       { error: "Ya tienes una solicitud que solapa con esas fechas" },
       { status: 409 }
     );
+  }
+
+  // Check vacation limit before creating request
+  if (type === "vacaciones") {
+    const check = await checkVacationLimit(person.id, startDate, endDate);
+    if (!check.ok) {
+      return NextResponse.json({ error: check.error }, { status: 400 });
+    }
   }
 
   const request = await prisma.timeOffRequest.create({
