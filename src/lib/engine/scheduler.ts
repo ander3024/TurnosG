@@ -278,18 +278,31 @@ export function generateSchedule(ctx: EngineContext, from: string, to: string): 
       const mOv = dayOverrides.find((o) => o.shiftTypeCode === "morning" && o.slotIndex === 0);
       const aOv = dayOverrides.find((o) => o.shiftTypeCode === "afternoon" && o.slotIndex === 0);
 
-      // Resolve overrides first to know who's already claimed
       const mOvPerson = mOv?.personId ? findPerson(ctx, mOv.personId) || null : null;
       const aOvPerson = aOv?.personId ? findPerson(ctx, aOv.personId) || null : null;
+      const mOverridden = !!mOv;
+      const aOverridden = !!aOv;
 
-      // Real hours for balancing
       const realH = (pid: number) =>
         (counts.weekday.get(pid) || 0) * 8 + (counts.weekend.get(pid) || 0) * 12;
 
-      // Get all available workers for today (3 people: 2 titulares + weekend person)
       const todayPool = ctx.people.filter(
         (p) => p.id !== plan.offPerson?.id && !isBlocked(blockedDates, p.id, date)
       );
+
+      // First: compute who WOULD be assigned without overrides (to find displaced people)
+      const naturalPool = [...todayPool].sort((a, b) => realH(a.id) - realH(b.id));
+      const naturalMorning = naturalPool[0] || null;
+      const naturalAfternoon = naturalPool[1] || null;
+
+      // People displaced by overrides should NOT be auto-reassigned to other slots
+      const displaced = new Set<number>();
+      if (mOv && naturalMorning && mOvPerson?.id !== naturalMorning.id) {
+        displaced.add(naturalMorning.id);
+      }
+      if (aOv && naturalAfternoon && aOvPerson?.id !== naturalAfternoon.id) {
+        displaced.add(naturalAfternoon.id);
+      }
 
       let mp: EnginePerson | null = null;
       let ap: EnginePerson | null = null;
@@ -303,18 +316,21 @@ export function generateSchedule(ctx: EngineContext, from: string, to: string): 
         ap = aOvPerson; aSrc = "override";
       }
 
-      // Auto-assign: sort by real hours (lowest first gets the shift)
-      if (!mp || !ap) {
+      // Auto-assign only slots NOT touched by admin
+      if ((!mp && !mOverridden) || (!ap && !aOverridden)) {
         const used = new Set<number>();
         if (mp) used.add(mp.id);
         if (ap) used.add(ap.id);
+        for (const ov of dayOverrides) { if (ov.personId) used.add(ov.personId); }
+        // Exclude displaced people
+        for (const d of displaced) used.add(d);
         const remaining = todayPool.filter((p) => !used.has(p.id));
         remaining.sort((a, b) => realH(a.id) - realH(b.id));
 
-        if (!mp && remaining.length > 0) {
+        if (!mp && !mOverridden && remaining.length > 0) {
           mp = remaining.shift()!; mSrc = "balance";
         }
-        if (!ap && remaining.length > 0) {
+        if (!ap && !aOverridden && remaining.length > 0) {
           ap = remaining.shift()!; aSrc = "balance";
         }
       }
@@ -348,15 +364,15 @@ export function generateSchedule(ctx: EngineContext, from: string, to: string): 
         let tp: EnginePerson | null = null;
         let tSrc: ShiftAssignment["source"] = "rotation";
 
+        const refOverridden = !!refOv; // admin touched this slot
         if (refOv) {
           const ovP = refOv.personId ? findPerson(ctx, refOv.personId) || null : null;
-          // Only apply override if person doesn't already have a shift today
           if (ovP && !assigned.has(ovP.id)) {
             tp = ovP; tSrc = "override";
           }
-          // If override person already works, skip (don't create double)
+          // If override with null personId → admin explicitly removed refuerzo
         }
-        if (!tp) {
+        if (!tp && !refOverridden) {
           // 3rd worker L-V: pick person with FEWEST REAL HOURS
           // For refuerzos, only block on EXACT vacation days (not whole week)
           // This allows the person to do refuerzos on non-vacation days of their vacation week
@@ -364,7 +380,7 @@ export function generateSchedule(ctx: EngineContext, from: string, to: string): 
             (to) => to.personId === pid && to.startDate <= date && to.endDate >= date
           );
           const cands = ctx.people.filter(
-            (p) => p.id !== plan.offPerson?.id && !hasTimeOffToday(p.id) && !assigned.has(p.id)
+            (p) => p.id !== plan.offPerson?.id && !hasTimeOffToday(p.id) && !assigned.has(p.id) && !displaced.has(p.id)
           );
           // Sort by real accumulated hours (lowest first = gets the refuerzo)
           cands.sort((a, b) => {

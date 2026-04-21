@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyToken } from "@/lib/jwt";
+import { verifyToken, renewToken } from "@/lib/jwt";
 
 const PUBLIC_PATHS = [
   "/login",
@@ -45,11 +45,24 @@ export async function middleware(req: NextRequest) {
     return NextResponse.redirect(new URL("/", req.url));
   }
 
-  // Add user info to headers for server components
+  // Sliding session: renew token on every request to reset the 2h inactivity timer
   const response = NextResponse.next();
   response.headers.set("x-user-id", payload.sub);
   response.headers.set("x-user-role", payload.role);
   response.headers.set("x-user-email", payload.email);
+
+  // Renew token (reset expiration) on every navigation/API call
+  const newToken = await renewToken(payload);
+  if (newToken) {
+    response.cookies.set("token", newToken, {
+      httpOnly: true,
+      secure: true,
+      sameSite: "lax",
+      maxAge: 7200, // 2h
+      path: "/",
+    });
+  }
+
   return response;
 }
 

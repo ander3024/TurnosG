@@ -8,6 +8,7 @@ import Link from "next/link";
 import {
   ChevronLeft, ChevronRight, Sunrise, Moon, Sun, Palmtree, BedDouble, ArrowLeftRight,
 } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
 
 interface TeamAssignment { personCode: string | null; personName: string | null; personColor: string | null; shiftLabel: string; startTime: string; endTime: string; }
 interface OffPerson { personCode: string; personName: string; personColor: string; }
@@ -100,8 +101,20 @@ export default function CalendarPage() {
         <button onClick={nextMonth} className="p-2 rounded-lg hover:bg-gray-200"><ChevronRight className="w-5 h-5 text-gray-600" /></button>
       </div>
 
+      {/* Loading skeleton */}
+      {loading && (
+        <div className="space-y-2">
+          <div className="hidden md:grid grid-cols-7 gap-1">
+            {Array.from({ length: 35 }).map((_, i) => <Skeleton key={i} className="h-24 rounded-lg" />)}
+          </div>
+          <div className="md:hidden space-y-2">
+            {Array.from({ length: 8 }).map((_, i) => <Skeleton key={i} className="h-16 rounded-xl" />)}
+          </div>
+        </div>
+      )}
+
       {/* ═══ DESKTOP: Grid ═══ */}
-      <div className="hidden md:block bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+      {!loading && <div className="hidden md:block bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
         <div className="grid grid-cols-7 bg-gray-50/80">
           {DAYS.map((d, i) => (
             <div key={d} className={cn("text-center text-[11px] font-bold tracking-wider py-2", i >= 5 ? "text-amber-600" : "text-gray-500")}>{d}</div>
@@ -193,10 +206,10 @@ export default function CalendarPage() {
             );
           })}
         </div>
-      </div>
+      </div>}
 
       {/* ═══ MOBILE: List ═══ */}
-      <div className="md:hidden space-y-1">
+      {!loading && <div className="md:hidden space-y-1">
         {days.map((day) => {
           const dt = new Date(day.date + "T12:00:00");
           const dow = dt.getDay();
@@ -283,7 +296,7 @@ export default function CalendarPage() {
             </div>
           );
         })}
-      </div>
+      </div>}
 
       {/* Legend */}
       <div className="flex flex-wrap gap-3 text-[11px] text-gray-500">

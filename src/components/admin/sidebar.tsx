@@ -16,6 +16,7 @@ import {
   Palmtree,
   ArrowLeftRight,
   Activity,
+  BarChart3,
   Bell,
   Zap,
   Menu,
@@ -35,6 +36,7 @@ const sections: { title: string; items: NavItem[] }[] = [
     items: [
       { label: "Dashboard", href: "/admin", icon: LayoutDashboard },
       { label: "Calendario", href: "/admin/calendar", icon: Calendar },
+      { label: "Estadísticas", href: "/admin/stats", icon: BarChart3 },
     ],
   },
   {

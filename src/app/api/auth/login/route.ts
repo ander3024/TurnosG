@@ -40,9 +40,9 @@ export async function POST(req: NextRequest) {
 
   response.cookies.set("token", token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure: true,
     sameSite: "lax",
-    maxAge: 86400,
+    maxAge: 7200, // 2h — se renueva automáticamente con cada petición
     path: "/",
   });
 

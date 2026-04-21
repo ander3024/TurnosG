@@ -3,7 +3,7 @@ import { SignJWT, jwtVerify } from "jose";
 const SECRET = new TextEncoder().encode(
   process.env.JWT_SECRET || "beta-turnos-secret-change-in-production-2026"
 );
-const TTL = "24h";
+const TTL = "2h"; // Session expires after 2h of inactivity
 
 export interface JWTPayload {
   sub: string;
@@ -34,6 +34,24 @@ export async function verifyToken(token: string): Promise<JWTPayload | null> {
   try {
     const { payload } = await jwtVerify(token, SECRET);
     return payload as unknown as JWTPayload;
+  } catch {
+    return null;
+  }
+}
+
+/** Renew a token with a fresh expiration (sliding session) */
+export async function renewToken(payload: JWTPayload): Promise<string | null> {
+  try {
+    return new SignJWT({
+      sub: payload.sub,
+      email: payload.email,
+      role: payload.role,
+      name: payload.name,
+    })
+      .setProtectedHeader({ alg: "HS256" })
+      .setIssuedAt()
+      .setExpirationTime(TTL)
+      .sign(SECRET);
   } catch {
     return null;
   }

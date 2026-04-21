@@ -41,6 +41,11 @@ html {
   outline-offset: 2px;
 }
 
+/* Safe area for iOS PWA bottom bar */
+.safe-area-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
 /* Subtle pulse for pending swaps */
 @keyframes pulse-subtle {
   0%, 100% { opacity: 1; }

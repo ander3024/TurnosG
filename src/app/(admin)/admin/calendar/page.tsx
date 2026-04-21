@@ -445,7 +445,7 @@ function DayEditModal({ day, people, shiftTypes, onClose, onSaved }: {
                         {a.source === "override" ? "Manual" : a.source === "event" ? "Evento" : "Auto"}
                       </Badge>
                       {a.source === "override" && (
-                        <button onClick={() => handleRemoveOverride(a.shiftTypeCode, a.slotIndex)} disabled={!!saving} className="p-1.5 hover:bg-amber-50 rounded-lg" title="Volver a auto">
+                        <button onClick={() => handleRemoveOverride(a.shiftTypeCode, a.slotIndex)} disabled={!!saving} className="p-1.5 hover:bg-amber-50 rounded-lg" title="Volver a automático">
                           <RotateCcw className="w-3.5 h-3.5 text-amber-500" />
                         </button>
                       )}
