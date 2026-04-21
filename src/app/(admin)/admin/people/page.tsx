@@ -1,6 +1,8 @@
 import { prisma } from "@/lib/prisma";
 import { PeopleManagement } from "./people-management";
 
+export const dynamic = "force-dynamic";
+
 export default async function PeoplePage() {
   const people = await prisma.person.findMany({
     orderBy: { code: "asc" },

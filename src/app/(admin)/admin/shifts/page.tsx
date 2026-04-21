@@ -1,6 +1,8 @@
 import { prisma } from "@/lib/prisma";
 import { ShiftManagement } from "./shift-management";
 
+export const dynamic = "force-dynamic";
+
 export default async function ShiftsPage() {
   const shifts = await prisma.shiftType.findMany({
     orderBy: { code: "asc" },

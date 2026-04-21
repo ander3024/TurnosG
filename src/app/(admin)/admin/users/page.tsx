@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { UserManagement } from "./user-management";
+
+export const dynamic = "force-dynamic";
 
 export default async function UsersPage() {
   const users = await prisma.user.findMany({

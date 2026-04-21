@@ -1,6 +1,8 @@
 import { prisma } from "@/lib/prisma";
 import { ExtraHoursManagement } from "./extra-hours-management";
 
+export const dynamic = "force-dynamic";
+
 export default async function ExtraHoursPage() {
   const entries = await prisma.extraHours.findMany({
     orderBy: { date: "desc" },
