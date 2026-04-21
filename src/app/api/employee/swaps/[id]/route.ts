@@ -88,6 +88,25 @@ export async function PATCH(
         data: { status: "rechazado", resolvedAt: new Date() },
       });
 
+      await prisma.auditLog.create({
+        data: {
+          actorId: user.id,
+          action: "swap:rejected",
+          entity: "schedule",
+          entityId: `swap-${swapId}`,
+          details: JSON.stringify({
+            swapId,
+            fromPerson: swap.fromPerson.name,
+            toPerson: swap.toPerson.name,
+            fromDate: swap.fromDate,
+            toDate: swap.toDate,
+            fromShift: swap.fromShiftLabel,
+            toShift: swap.toShiftLabel,
+            rejectedBy: swap.toPerson.name,
+          }),
+        },
+      });
+
       try {
         await notify({
           eventType: "swap_rejected",
@@ -265,6 +284,23 @@ export async function PATCH(
         });
       } catch {}
 
+      await prisma.auditLog.create({
+        data: {
+          actorId: user.id,
+          action: "swap:accepted-pending-admin",
+          entity: "schedule",
+          entityId: `swap-${swapId}`,
+          details: JSON.stringify({
+            swapId,
+            fromPerson: swap.fromPerson.name,
+            toPerson: swap.toPerson.name,
+            fromDate: swap.fromDate,
+            toDate: swap.toDate,
+            reason: validation.reason,
+          }),
+        },
+      });
+
       // Notify requester
       try {
         await notify({
@@ -323,6 +359,21 @@ export async function DELETE(
     }
 
     await prisma.swapRequest.delete({ where: { id: swapId } });
+
+    await prisma.auditLog.create({
+      data: {
+        actorId: user.id,
+        action: "swap:cancelled",
+        entity: "schedule",
+        entityId: `swap-${swapId}`,
+        details: JSON.stringify({
+          swapId,
+          fromPerson: swap.fromPerson.name,
+          toPerson: swap.toPerson.name,
+          cancelledBy: swap.fromPerson.name,
+        }),
+      },
+    });
 
     // Notify the other person that it was cancelled
     try {
