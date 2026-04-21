@@ -211,6 +211,53 @@ export function SettingsManagement({ initialSettings }: Props) {
     }
   }
 
+  // ─── Relaxed Months Component ──────────
+  function RelaxedMonthsSelector({ settingKey, currentValue, onSave, saving, saved }: {
+    settingKey: string; currentValue: string; onSave: (key: string, value: string) => void; saving: string | null; saved: string | null;
+  }) {
+    const MONTHS = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
+    let selected: number[] = [];
+    try { selected = JSON.parse(currentValue || "[]"); } catch { selected = [6, 7, 8]; }
+
+    const toggle = (month: number) => {
+      const next = selected.includes(month) ? selected.filter(m => m !== month) : [...selected, month].sort((a, b) => a - b);
+      onSave(settingKey, JSON.stringify(next));
+    };
+
+    return (
+      <div className="py-4">
+        <div className="flex items-center justify-between mb-2">
+          <div>
+            <p className="text-sm font-medium text-gray-900">Meses con equipo reducido (L-J)</p>
+            <p className="text-xs text-gray-500 mt-0.5">En estos meses solo trabajan 2 personas de lunes a jueves (sin refuerzo). El resto del año, el que libra cubre como tercera persona.</p>
+          </div>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {saving === settingKey && <div className="w-3 h-3 border-2 border-indigo-300 border-t-indigo-600 rounded-full animate-spin" />}
+            {saved === settingKey && <span className="text-xs text-emerald-600 font-medium">Guardado</span>}
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2 mt-2">
+          {MONTHS.map((label, i) => {
+            const month = i + 1;
+            const isSelected = selected.includes(month);
+            return (
+              <button key={month} onClick={() => toggle(month)} disabled={saving === settingKey}
+                className={cn(
+                  "px-3 py-2 rounded-xl text-sm font-medium transition-all border",
+                  isSelected ? "bg-indigo-600 text-white border-indigo-600 shadow-sm" : "bg-white text-gray-600 border-gray-200 hover:border-indigo-300 hover:bg-indigo-50"
+                )}>
+                {label}
+              </button>
+            );
+          })}
+        </div>
+        <p className="text-[11px] text-gray-400 mt-2">
+          Seleccionados: {selected.length > 0 ? selected.map(m => MONTHS[m - 1]).join(", ") : "Ninguno (siempre 3 personas L-J)"}
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
 
@@ -348,13 +395,16 @@ export function SettingsManagement({ initialSettings }: Props) {
           <Toggle settingKey="rebalance" label="Equilibrar horas automáticamente" description="El sistema reparte los refuerzos para que todos los empleados tengan horas similares al final del año" />
           <Toggle settingKey="applyConciliation" label="Aplicar conciliación" description="Penaliza patrones de trabajo malos (días sueltos, muchos cambios de turno, fines de semana consecutivos)" />
 
+          {/* Relaxed months selector */}
+          <RelaxedMonthsSelector settingKey="vacationRelaxedMonths" currentValue={getValue("vacationRelaxedMonths")} onSave={saveSetting} saving={saving} saved={saved} />
+
           <div className="mt-4 p-4 rounded-xl bg-blue-50 border border-blue-100">
             <div className="flex items-start gap-3">
               <Info className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
               <div className="text-sm text-blue-800">
                 <p className="font-semibold mb-1">Cómo funciona la rotación</p>
                 <ul className="space-y-1 text-xs text-blue-700">
-                  <li><strong>Lunes a Jueves:</strong> 3 personas (1 mañana + 1 tarde + 1 refuerzo mañana)</li>
+                  <li><strong>Lunes a Jueves:</strong> 3 personas (1 mañana + 1 tarde + 1 refuerzo). En meses relajados: solo 2 personas (sin refuerzo)</li>
                   <li><strong>Viernes:</strong> 2 personas (1 mañana + 1 tarde)</li>
                   <li><strong>Sábado y Domingo:</strong> 1 persona (turno de finde)</li>
                   <li><strong>Rotación:</strong> cada 4 semanas, una persona descansa la semana entera</li>

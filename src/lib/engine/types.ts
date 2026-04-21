@@ -77,6 +77,7 @@ export interface EngineSettings {
   closeOnHolidays: boolean;
   consumeVacationOnHoliday: boolean;
   applyConciliation: boolean;
+  vacationRelaxedMonths: number[]; // months (1-12) where only 2 people needed L-J
   rules: ScheduleRules;
 }
 

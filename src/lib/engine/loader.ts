@@ -89,6 +89,10 @@ export async function loadEngineContext(
     closeOnHolidays: parseSetting(settingsMap, "closeOnHolidays", "true") === "true",
     consumeVacationOnHoliday: parseSetting(settingsMap, "consumeVacationOnHoliday", "false") === "true",
     applyConciliation: parseSetting(settingsMap, "applyConciliation", "false") === "true",
+    vacationRelaxedMonths: (() => {
+      try { return JSON.parse(parseSetting(settingsMap, "vacationRelaxedMonths", "[6,7,8]")); }
+      catch { return [6, 7, 8]; }
+    })(),
     rules,
   };
 

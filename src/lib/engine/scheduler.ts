@@ -337,7 +337,10 @@ export function generateSchedule(ctx: EngineContext, from: string, to: string): 
 
       // ─── 3rd person L-J only: Friday is 2 people unless event says otherwise ───
       const isFriday = dow === 4;
-      if (dow <= 3) { // Monday(0) to Thursday(3) - 3 people
+      const currentMonth = parseInt(date.slice(5, 7));
+      const isRelaxedMonth = ctx.settings.vacationRelaxedMonths.includes(currentMonth);
+
+      if (dow <= 3 && !isRelaxedMonth) { // Monday(0) to Thursday(3) - 3 people (except relaxed months)
         const assigned = new Set(day.assignments.map((a) => a.personId).filter(Boolean));
         const refShift = refuerzoMorning || refuerzoOfi || morningShift;
 
