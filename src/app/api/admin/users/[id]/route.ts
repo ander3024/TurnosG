@@ -109,7 +109,18 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
-    await prisma.user.delete({ where: { id: userId } });
+    // Delete all related records first (foreign key constraints)
+    await prisma.$transaction([
+      prisma.notification.deleteMany({ where: { userId } }),
+      prisma.notificationPreference.deleteMany({ where: { userId } }),
+      prisma.pushSubscription.deleteMany({ where: { userId } }),
+      prisma.session.deleteMany({ where: { userId } }),
+      prisma.passwordResetToken.deleteMany({ where: { userId } }),
+      prisma.swapRequest.deleteMany({ where: { OR: [{ fromUserId: userId }, { toUserId: userId }] } }),
+      prisma.timeOffRequest.deleteMany({ where: { requesterId: userId } }),
+      prisma.auditLog.updateMany({ where: { actorId: userId }, data: { actorId: null } }),
+      prisma.user.delete({ where: { id: userId } }),
+    ]);
 
     await prisma.auditLog.create({
       data: {
