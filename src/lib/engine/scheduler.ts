@@ -290,20 +290,6 @@ export function generateSchedule(ctx: EngineContext, from: string, to: string): 
         (p) => p.id !== plan.offPerson?.id && !isBlocked(blockedDates, p.id, date)
       );
 
-      // First: compute who WOULD be assigned without overrides (to find displaced people)
-      const naturalPool = [...todayPool].sort((a, b) => realH(a.id) - realH(b.id));
-      const naturalMorning = naturalPool[0] || null;
-      const naturalAfternoon = naturalPool[1] || null;
-
-      // People displaced by overrides should NOT be auto-reassigned to other slots
-      const displaced = new Set<number>();
-      if (mOv && naturalMorning && mOvPerson?.id !== naturalMorning.id) {
-        displaced.add(naturalMorning.id);
-      }
-      if (aOv && naturalAfternoon && aOvPerson?.id !== naturalAfternoon.id) {
-        displaced.add(naturalAfternoon.id);
-      }
-
       let mp: EnginePerson | null = null;
       let ap: EnginePerson | null = null;
       let mSrc: ShiftAssignment["source"] = "rotation";
@@ -322,8 +308,6 @@ export function generateSchedule(ctx: EngineContext, from: string, to: string): 
         if (mp) used.add(mp.id);
         if (ap) used.add(ap.id);
         for (const ov of dayOverrides) { if (ov.personId) used.add(ov.personId); }
-        // Exclude displaced people
-        for (const d of displaced) used.add(d);
         const remaining = todayPool.filter((p) => !used.has(p.id));
         remaining.sort((a, b) => realH(a.id) - realH(b.id));
 
@@ -380,7 +364,7 @@ export function generateSchedule(ctx: EngineContext, from: string, to: string): 
             (to) => to.personId === pid && to.startDate <= date && to.endDate >= date
           );
           const cands = ctx.people.filter(
-            (p) => p.id !== plan.offPerson?.id && !hasTimeOffToday(p.id) && !assigned.has(p.id) && !displaced.has(p.id)
+            (p) => p.id !== plan.offPerson?.id && !hasTimeOffToday(p.id) && !assigned.has(p.id)
           );
           // Sort by real accumulated hours (lowest first = gets the refuerzo)
           cands.sort((a, b) => {

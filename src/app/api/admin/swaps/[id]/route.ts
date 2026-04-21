@@ -51,6 +51,23 @@ export async function PATCH(
       );
     }
 
+    // If reverting an approved swap, clean up overrides and timeoffs
+    if ((status === "cancelado" || status === "rechazado") && swap.status === "aprobado") {
+      await prisma.override.deleteMany({
+        where: { date: swap.fromDate, personId: swap.toPersonId },
+      });
+      if (!swap.isOneWay && swap.toDate !== swap.fromDate) {
+        await prisma.override.deleteMany({
+          where: { date: swap.toDate, personId: swap.fromPersonId },
+        });
+      }
+      if (swap.isOneWay) {
+        await prisma.timeOffRequest.deleteMany({
+          where: { personId: swap.fromPersonId, startDate: swap.fromDate, endDate: swap.fromDate, type: "intercambio" },
+        });
+      }
+    }
+
     const updated = await prisma.swapRequest.update({
       where: { id: swapId },
       data: {
@@ -230,6 +247,27 @@ export async function DELETE(
 
     if (!swap) {
       return NextResponse.json({ error: "Intercambio no encontrado" }, { status: 404 });
+    }
+
+    // If swap was approved, revert its effects: delete overrides and intercambio timeoffs
+    if (swap.status === "aprobado") {
+      // Delete overrides created for this swap's dates
+      // Find the override on fromDate that assigns toPerson
+      await prisma.override.deleteMany({
+        where: { date: swap.fromDate, personId: swap.toPersonId },
+      });
+      // For two-way swaps, also delete the reverse override
+      if (!swap.isOneWay && swap.toDate !== swap.fromDate) {
+        await prisma.override.deleteMany({
+          where: { date: swap.toDate, personId: swap.fromPersonId },
+        });
+      }
+      // Delete the intercambio timeoff that blocked fromPerson
+      if (swap.isOneWay) {
+        await prisma.timeOffRequest.deleteMany({
+          where: { personId: swap.fromPersonId, startDate: swap.fromDate, endDate: swap.fromDate, type: "intercambio" },
+        });
+      }
     }
 
     await prisma.swapRequest.delete({ where: { id: swapId } });
