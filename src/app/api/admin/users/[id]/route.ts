@@ -117,7 +117,8 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
       prisma.session.deleteMany({ where: { userId } }),
       prisma.passwordResetToken.deleteMany({ where: { userId } }),
       prisma.swapRequest.deleteMany({ where: { OR: [{ fromUserId: userId }, { toUserId: userId }] } }),
-      prisma.timeOffRequest.deleteMany({ where: { requesterId: userId } }),
+      // Don't delete timeoff requests — just reassign to admin (preserve vacation data)
+      prisma.timeOffRequest.updateMany({ where: { requesterId: userId }, data: { requesterId: 1 } }),
       prisma.extraHours.deleteMany({ where: { actorId: userId } }),
       prisma.auditLog.updateMany({ where: { actorId: userId }, data: { actorId: null } }),
       prisma.person.updateMany({ where: { userId }, data: { userId: null } }),
