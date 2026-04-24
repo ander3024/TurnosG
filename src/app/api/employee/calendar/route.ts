@@ -74,6 +74,7 @@ export async function GET(req: NextRequest) {
       isWeekend: day.isWeekend,
       isClosed: day.isClosed,
       shifts: myShifts,
+      myPersonCode: person?.code || null,
       timeOff: myTimeOff ? { type: myTimeOff.type, status: "aprobada" } : null,
       // If I have an intercambio timeoff, I'm off but NOT on vacation
       isSwapOff: person ? swapTimeOffs.some((to) => to.personId === person.id) : false,

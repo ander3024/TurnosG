@@ -13,7 +13,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 interface TeamAssignment { personCode: string | null; personName: string | null; personColor: string | null; shiftLabel: string; startTime: string; endTime: string; }
 interface OffPerson { personCode: string; personName: string; personColor: string; }
 interface TeamTimeOff { personCode: string; personName: string; personColor: string; type: string; }
-interface DayData { date: string; isWeekend: boolean; isClosed: boolean; shifts: { code: string; label: string; startTime: string; endTime: string; hours: number }[]; timeOff: { type: string; status: string } | null; isSwapOff?: boolean; holiday: { label: string } | null; teamAssignments: TeamAssignment[]; offPeople?: OffPerson[]; teamTimeOffs?: TeamTimeOff[]; }
+interface DayData { date: string; isWeekend: boolean; isClosed: boolean; shifts: { code: string; label: string; startTime: string; endTime: string; hours: number }[]; myPersonCode?: string | null; timeOff: { type: string; status: string } | null; isSwapOff?: boolean; holiday: { label: string } | null; teamAssignments: TeamAssignment[]; offPeople?: OffPerson[]; teamTimeOffs?: TeamTimeOff[]; }
 interface SwapInfo { id: number; fromPerson: { name: string; color: string }; toPerson: { name: string; color: string }; fromDate: string; toDate: string; fromShiftLabel: string; toShiftLabel: string; status: string; isOneWay?: boolean }
 
 const MONTHS = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
@@ -151,7 +151,7 @@ export default function CalendarPage() {
                 <div className="space-y-[2px]">
                   {day?.teamAssignments?.map((ta, i) => {
                     const s = si(ta.shiftLabel);
-                    const isMe = myShifts.some((ms) => ms.label === ta.shiftLabel);
+                    const isMe = !!day.myPersonCode && ta.personCode === day.myPersonCode;
                     return (
                       <div key={i} className={cn("flex items-center gap-[3px] rounded-md px-1 py-[2px]", isMe ? "ring-2 ring-indigo-400 " + s.bg : s.bg + "/50")}>
                         <s.Icon className={cn("w-[10px] h-[10px] flex-shrink-0", s.color)} />
@@ -260,7 +260,7 @@ export default function CalendarPage() {
                   )}
                   {!day.isClosed && (
                     <div className="flex flex-wrap gap-1">
-                      {day.teamAssignments?.filter((ta) => !myShifts.some((ms) => ms.label === ta.shiftLabel)).map((ta, i) => {
+                      {day.teamAssignments?.filter((ta) => !(day.myPersonCode && ta.personCode === day.myPersonCode)).map((ta, i) => {
                         const c = si(ta.shiftLabel);
                         return (
                           <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] bg-gray-50 border border-gray-100">
