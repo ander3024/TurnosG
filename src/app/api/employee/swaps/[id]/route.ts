@@ -123,13 +123,72 @@ export async function PATCH(
 
     // ── ACEPTADO: validate and possibly auto-approve ──
     const isOneWay = swap.isOneWay || swap.toShiftLabel.toLowerCase() === "libra";
-    const validation = isOneWay
-      ? { valid: true, autoApprove: true, reason: "Cobertura de turno (te deben un día)" }
+    const isPartial = typeof swap.hours === "number" && swap.hours > 0;
+    const validation = isPartial
+      ? { valid: true, autoApprove: true, reason: `Cobertura parcial de ${swap.hours}h` }
+      : isOneWay
+      ? { valid: true, autoApprove: true, reason: "Cobertura de turno completo" }
       : validateSwap(swap.fromShiftLabel, swap.toShiftLabel);
 
     if (validation.autoApprove) {
-      // Generate schedule for the FULL MONTH to match what the calendar displays
-      // (the balance algorithm produces different results for 1 day vs full month)
+      // Partial swaps: only track debt, no overrides or timeoffs needed
+      // (both people still work their shifts, one just covers extra hours)
+      if (isPartial) {
+        // Just mark as approved — debt tracking is automatic via the hours field
+        await prisma.swapRequest.update({
+          where: { id: swapId },
+          data: { status: "aprobado", resolvedAt: new Date() },
+        });
+
+        // Check if this settles an existing debt
+        const existingDebt = await prisma.swapRequest.findFirst({
+          where: {
+            fromPersonId: swap.toPersonId,
+            toPersonId: swap.fromPersonId,
+            settled: false,
+            status: "aprobado",
+            hours: { not: null },
+          },
+          orderBy: { createdAt: "asc" },
+        });
+        if (existingDebt) {
+          await prisma.swapRequest.updateMany({
+            where: { id: { in: [existingDebt.id, swapId] } },
+            data: { settled: true },
+          });
+        }
+
+        await prisma.auditLog.create({
+          data: {
+            action: "swap:partial-approved",
+            entity: "schedule",
+            details: JSON.stringify({
+              swapId, hours: swap.hours,
+              fromPerson: swap.fromPerson.name, toPerson: swap.toPerson.name,
+              fromDate: swap.fromDate, fromShift: swap.fromShiftLabel,
+            }),
+          },
+        });
+
+        try {
+          await notify({
+            eventType: "swap_approved",
+            recipientUserIds: [swap.fromUserId, swap.toUserId],
+            title: "Cobertura parcial aprobada",
+            message: `${swap.toPerson.name} cubrirá ${swap.hours}h a ${swap.fromPerson.name} el ${swap.fromDate}.`,
+            link: "/intercambios",
+            type: "success",
+          });
+        } catch {}
+
+        return NextResponse.json({
+          swap: { ...swap, status: "aprobado" },
+          autoApproved: true,
+          message: `Cobertura de ${swap.hours}h aprobada automáticamente.`,
+        });
+      }
+
+      // Full shift swap: create overrides
       const earliest = swap.fromDate < swap.toDate ? swap.fromDate : swap.toDate;
       const latest = swap.fromDate > swap.toDate ? swap.fromDate : swap.toDate;
       const monthStart = earliest.slice(0, 8) + "01";

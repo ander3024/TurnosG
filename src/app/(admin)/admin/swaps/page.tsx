@@ -111,7 +111,7 @@ export default function SwapsPage() {
                     <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: debtor.color }} />
                     <span className="font-semibold text-gray-900">{debtor.name}</span>
                     <span className="text-gray-400">debe</span>
-                    <span className="font-bold text-amber-600">{amount} turno{amount > 1 ? "s" : ""}</span>
+                    <span className="font-bold text-amber-600">{amount}h</span>
                     <span className="text-gray-400">a</span>
                     <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: creditor.color }} />
                     <span className="font-semibold text-gray-900">{creditor.name}</span>

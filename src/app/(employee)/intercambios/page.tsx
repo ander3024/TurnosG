@@ -16,8 +16,8 @@ interface OffPerson { personCode: string; personName: string; personColor: strin
 interface DayData { date: string; isClosed: boolean; shifts: { code: string; label: string; startTime: string; endTime: string; hours: number }[]; timeOff: { type: string } | null; teamAssignments: TeamAssignment[]; offPeople?: OffPerson[]; teamTimeOffs?: { personCode: string; personName: string; personColor: string; type: string }[] }
 interface Person { id: number; code: string; name: string; color: string }
 interface Swap { id: number; fromUser: { id: number; name: string }; toUser: { id: number; name: string }; fromPerson: Person; toPerson: Person; fromDate: string; toDate: string; fromShiftLabel: string; toShiftLabel: string; status: string; reason: string | null; createdAt: string; isOneWay?: boolean; settled?: boolean }
-interface SwapPair { myDate: string; myShift: string; theirDate: string; theirShift: string; person: Person }
-interface DebtBalance { person: Person; iOwe: number; theyOwe: number; net: number; details: { date: string; shift: string; direction: string }[] }
+interface SwapPair { myDate: string; myShift: string; theirDate: string; theirShift: string; person: Person; hours?: number }
+interface DebtBalance { person: Person; iOweHours: number; theyOweHours: number; netHours: number; details: { date: string; shift: string; hours: number; direction: string; isPartial: boolean }[] }
 
 const MONTHS = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
 const DAYS_S = ["L","M","X","J","V","S","D"];
@@ -46,6 +46,7 @@ export default function IntercambiosPage() {
   const [pairs, setPairs] = useState<SwapPair[]>([]);
   const [pendingShift, setPendingShift] = useState<{ date: string; shift: string } | null>(null);
   const [reason, setReason] = useState("");
+  const [swapHours, setSwapHours] = useState<string>("");
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
   const [tab, setTab] = useState<"new" | "pending" | "history" | "debts">("new");
@@ -129,7 +130,12 @@ export default function IntercambiosPage() {
         const pr = pairs[i];
         const res = await fetch("/api/employee/swaps", {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ toPersonId: pr.person.id, fromDate: pr.myDate, toDate: pr.theirDate, fromShiftLabel: pr.myShift, toShiftLabel: pr.theirShift, reason: i === 0 ? reason : undefined }),
+          body: JSON.stringify({
+            toPersonId: pr.person.id, fromDate: pr.myDate, toDate: pr.theirDate,
+            fromShiftLabel: pr.myShift, toShiftLabel: pr.theirShift,
+            reason: i === 0 ? reason : undefined,
+            hours: swapHours ? parseFloat(swapHours) : undefined,
+          }),
         });
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
@@ -140,12 +146,12 @@ export default function IntercambiosPage() {
       }
       if (!hasError) {
         toast.success("Intercambios propuestos correctamente");
-        setPairs([]); setReason(""); fetchData();
+        setPairs([]); setReason(""); setSwapHours(""); fetchData();
       }
     } catch { toast.error("Error de conexión"); } finally { setSending(false); }
   }
 
-  function clearAll() { setPairs([]); setPendingShift(null); setReason(""); }
+  function clearAll() { setPairs([]); setPendingShift(null); setReason(""); setSwapHours(""); }
 
   const pendingForMe = swaps.filter((s) => s.status === "pendiente" && s.toUser?.id === myUserId);
   const myPendingSent = swaps.filter((s) => s.status === "pendiente" && s.fromUser?.id === myUserId);
@@ -241,7 +247,7 @@ export default function IntercambiosPage() {
 
       {/* Tabs */}
       <div className="flex gap-1 bg-gray-100 rounded-xl p-1 overflow-x-auto">
-        {([["new","Nuevo"],["pending",`Pendientes${pendingForMe.length>0?` (${pendingForMe.length})`:""}`],["debts",`Deudas${debts.some(d=>d.net!==0)?" •":""}`],["history","Historial"]] as const).map(([k,l]) => (
+        {([["new","Nuevo"],["pending",`Pendientes${pendingForMe.length>0?` (${pendingForMe.length})`:""}`],["debts",`Deudas${debts.some(d=>d.netHours!==0)?" •":""}`],["history","Historial"]] as const).map(([k,l]) => (
           <button key={k} onClick={() => setTab(k)} className={cn("px-3 py-2 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap flex-shrink-0",
             tab===k ? "bg-white text-gray-900 shadow-sm" : "text-gray-500"
           )}>{l}</button>
@@ -372,11 +378,31 @@ export default function IntercambiosPage() {
                 {pairs.length > 0 && (
                   <Card className="border-emerald-200">
                     <CardContent className="!py-3 space-y-3">
+                      {/* Partial hours toggle */}
+                      <div className="flex items-center gap-2">
+                        <label className="flex items-center gap-2 text-sm cursor-pointer">
+                          <input type="checkbox" checked={!!swapHours}
+                            onChange={(e) => setSwapHours(e.target.checked ? "2" : "")}
+                            className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" />
+                          <span className="text-gray-700 font-medium">Solo unas horas</span>
+                        </label>
+                        {swapHours && (
+                          <input type="number" value={swapHours} onChange={(e) => setSwapHours(e.target.value)}
+                            min="0.5" max="12" step="0.5" placeholder="Horas"
+                            className="w-20 rounded-lg border border-gray-300 px-2 py-1 text-sm text-center font-semibold focus:ring-2 focus:ring-indigo-500 focus:outline-none" />
+                        )}
+                        {swapHours && <span className="text-xs text-gray-500">horas</span>}
+                      </div>
+                      {swapHours && (
+                        <p className="text-[11px] text-amber-600 bg-amber-50 px-2 py-1 rounded-lg">
+                          Cobertura parcial: ambos seguís trabajando, pero le deberás {swapHours}h
+                        </p>
+                      )}
                       <textarea value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Motivo (opcional)..." rows={2}
                         className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none resize-none" />
                       <div className="flex gap-2">
                         <Button onClick={submitSwaps} loading={sending} className="flex-1">
-                          <Send className="w-4 h-4" /> Proponer
+                          <Send className="w-4 h-4" /> {swapHours ? `Pedir ${swapHours}h` : "Proponer"}
                         </Button>
                         <Button variant="ghost" onClick={clearAll}><Trash2 className="w-4 h-4" /></Button>
                       </div>
@@ -431,12 +457,12 @@ export default function IntercambiosPage() {
       {tab === "debts" && (
         <div className="space-y-3">
           {debts.length === 0 ? (
-            <Card><CardContent className="py-12 text-center"><Scale className="w-12 h-12 text-gray-200 mx-auto mb-3" /><p className="text-gray-400">No hay deudas de turnos</p><p className="text-xs text-gray-300 mt-1">Cuando alguien te cubra un turno sin devolvértelo, aparecerá aquí</p></CardContent></Card>
+            <Card><CardContent className="py-12 text-center"><Scale className="w-12 h-12 text-gray-200 mx-auto mb-3" /><p className="text-gray-400">No hay deudas de turnos</p><p className="text-xs text-gray-300 mt-1">Cuando alguien te cubra un turno o unas horas, aparecerá aquí</p></CardContent></Card>
           ) : (
             <>
-              <p className="text-xs text-gray-500">Cuando alguien te cubre un turno (estando de libra), se genera una deuda. Cuando tú le cubres a esa persona, la deuda se salda.</p>
+              <p className="text-xs text-gray-500">Las deudas se miden en horas. Turno completo = 8h. Cobertura parcial = las horas acordadas.</p>
               {debts.map((d) => (
-                <Card key={d.person.id} className={cn("overflow-hidden", d.net > 0 ? "border-emerald-200" : d.net < 0 ? "border-amber-200" : "border-gray-200")}>
+                <Card key={d.person.id} className={cn("overflow-hidden", d.netHours > 0 ? "border-emerald-200" : d.netHours < 0 ? "border-amber-200" : "border-gray-200")}>
                   <CardContent className="!py-3">
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 rounded-xl flex items-center justify-center text-xs font-bold text-white" style={{ backgroundColor: d.person.color }}>
@@ -444,17 +470,17 @@ export default function IntercambiosPage() {
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-semibold text-gray-900">{d.person.name}</p>
-                        {d.net > 0 ? (
-                          <p className="text-xs text-emerald-600 font-medium">Te debe {d.net} turno{d.net > 1 ? "s" : ""}</p>
-                        ) : d.net < 0 ? (
-                          <p className="text-xs text-amber-600 font-medium">Le debes {Math.abs(d.net)} turno{Math.abs(d.net) > 1 ? "s" : ""}</p>
+                        {d.netHours > 0 ? (
+                          <p className="text-xs text-emerald-600 font-medium">Te debe {d.netHours}h</p>
+                        ) : d.netHours < 0 ? (
+                          <p className="text-xs text-amber-600 font-medium">Le debes {Math.abs(d.netHours)}h</p>
                         ) : (
                           <p className="text-xs text-gray-400">Estáis en paz</p>
                         )}
                       </div>
                       <div className="text-right flex-shrink-0">
-                        <div className={cn("text-lg font-bold", d.net > 0 ? "text-emerald-600" : d.net < 0 ? "text-amber-600" : "text-gray-400")}>
-                          {d.net > 0 ? `+${d.net}` : d.net}
+                        <div className={cn("text-lg font-bold", d.netHours > 0 ? "text-emerald-600" : d.netHours < 0 ? "text-amber-600" : "text-gray-400")}>
+                          {d.netHours > 0 ? "+" : ""}{d.netHours}h
                         </div>
                       </div>
                     </div>
@@ -466,6 +492,8 @@ export default function IntercambiosPage() {
                             <span>{fmtShort(det.date)}</span>
                             <span className="text-gray-300">·</span>
                             <span>{det.direction === "theyOwe" ? "Le cubriste" : "Te cubrió"}</span>
+                            <span className="font-semibold">{det.hours}h</span>
+                            {det.isPartial && <span className="text-amber-500">(parcial)</span>}
                           </div>
                         ))}
                       </div>

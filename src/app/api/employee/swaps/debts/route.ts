@@ -11,13 +11,17 @@ export async function GET() {
     const person = await prisma.person.findFirst({ where: { userId: user.id } });
     if (!person) return NextResponse.json({ debts: [] });
 
-    // Find all approved one-way swaps involving this person that are NOT settled
+    // Find all approved one-way/partial swaps involving this person that are NOT settled
     const unsettled = await prisma.swapRequest.findMany({
       where: {
-        isOneWay: true,
         settled: false,
         status: "aprobado",
-        OR: [{ fromPersonId: person.id }, { toPersonId: person.id }],
+        OR: [
+          { fromPersonId: person.id, isOneWay: true },
+          { toPersonId: person.id, isOneWay: true },
+          { fromPersonId: person.id, hours: { not: null } },
+          { toPersonId: person.id, hours: { not: null } },
+        ],
       },
       include: {
         fromPerson: { select: { id: true, code: true, name: true, color: true } },
@@ -26,35 +30,39 @@ export async function GET() {
       orderBy: { createdAt: "desc" },
     });
 
-    // Build balances: who owes me vs who I owe
-    // fromPerson requested → toPerson covered → fromPerson owes toPerson
-    const balanceMap = new Map<number, { person: { id: number; code: string; name: string; color: string }; iOwe: number; theyOwe: number; details: { date: string; shift: string; createdAt: Date; direction: "iOwe" | "theyOwe" }[] }>();
+    // Build balances in HOURS
+    // Full shift (hours=null) = 8h default, partial = actual hours
+    const balanceMap = new Map<number, {
+      person: { id: number; code: string; name: string; color: string };
+      iOweHours: number; theyOweHours: number;
+      details: { date: string; shift: string; hours: number; direction: "iOwe" | "theyOwe"; isPartial: boolean }[];
+    }>();
 
     for (const swap of unsettled) {
       const otherPersonId = swap.fromPersonId === person.id ? swap.toPersonId : swap.fromPersonId;
       const otherPerson = swap.fromPersonId === person.id ? swap.toPerson : swap.fromPerson;
+      const swapHours = swap.hours ?? 8; // full shift = 8h
 
       if (!balanceMap.has(otherPersonId)) {
-        balanceMap.set(otherPersonId, { person: otherPerson, iOwe: 0, theyOwe: 0, details: [] });
+        balanceMap.set(otherPersonId, { person: otherPerson, iOweHours: 0, theyOweHours: 0, details: [] });
       }
       const entry = balanceMap.get(otherPersonId)!;
+      const isPartial = swap.hours !== null;
 
       if (swap.fromPersonId === person.id) {
-        // I requested, they covered → I owe them
-        entry.iOwe++;
-        entry.details.push({ date: swap.fromDate, shift: swap.fromShiftLabel, createdAt: swap.createdAt, direction: "iOwe" });
+        entry.iOweHours += swapHours;
+        entry.details.push({ date: swap.fromDate, shift: swap.fromShiftLabel, hours: swapHours, direction: "iOwe", isPartial });
       } else {
-        // They requested, I covered → they owe me
-        entry.theyOwe++;
-        entry.details.push({ date: swap.fromDate, shift: swap.fromShiftLabel, createdAt: swap.createdAt, direction: "theyOwe" });
+        entry.theyOweHours += swapHours;
+        entry.details.push({ date: swap.fromDate, shift: swap.fromShiftLabel, hours: swapHours, direction: "theyOwe", isPartial });
       }
     }
 
     const debts = Array.from(balanceMap.values()).map((b) => ({
       person: b.person,
-      iOwe: b.iOwe,
-      theyOwe: b.theyOwe,
-      net: b.theyOwe - b.iOwe, // positive = they owe me, negative = I owe them
+      iOweHours: b.iOweHours,
+      theyOweHours: b.theyOweHours,
+      netHours: b.theyOweHours - b.iOweHours,
       details: b.details,
     }));
 

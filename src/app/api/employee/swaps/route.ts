@@ -52,7 +52,8 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { toPersonId, fromDate, toDate, fromShiftLabel, toShiftLabel, reason } = body;
+    const { toPersonId, fromDate, toDate, fromShiftLabel, toShiftLabel, reason, hours } = body;
+    const isPartial = typeof hours === "number" && hours > 0;
 
     if (!toPersonId || !fromDate || !toDate || !fromShiftLabel || !toShiftLabel) {
       return NextResponse.json(
@@ -170,6 +171,7 @@ export async function POST(req: NextRequest) {
         toShiftLabel,
         reason: reason || null,
         isOneWay,
+        hours: isPartial ? hours : null,
       },
       include: {
         fromUser: { select: { id: true, name: true, email: true } },
@@ -185,7 +187,9 @@ export async function POST(req: NextRequest) {
         eventType: "swap_requested",
         recipientUserIds: [toPerson.user.id],
         title: "Intercambio propuesto",
-        message: isOneWay
+        message: isPartial
+          ? `${person.name} te pide que le cubras ${hours}h de su turno de ${actualFromShiftLabel} el ${fromDate}.`
+          : isOneWay
           ? `${person.name} te pide que le cubras su turno de ${actualFromShiftLabel} el ${fromDate}. Estás librando ese día.`
           : `${person.name} quiere intercambiar su turno contigo (${actualFromShiftLabel} del ${fromDate} por ${toShiftLabel} del ${toDate})`,
         link: "/swaps",

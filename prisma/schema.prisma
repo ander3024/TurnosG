@@ -159,6 +159,7 @@ model SwapRequest {
   status         String    @default("pendiente")
   reason         String?
   isOneWay       Boolean   @default(false) @map("is_one_way")
+  hours          Float?    // null = full shift, number = partial hours
   settled        Boolean   @default(false)
   settledBySwapId Int?     @map("settled_by_swap_id")
   createdAt      DateTime  @default(now()) @map("created_at")
