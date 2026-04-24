@@ -143,6 +143,7 @@ export async function loadEngineContext(
       name: p.name,
       color: p.color,
       offset: p.offset,
+      scheduleType: (p.scheduleType === "fixed" ? "fixed" : "rotation") as "rotation" | "fixed",
     })),
     shiftTypes,
     shiftTypesById,

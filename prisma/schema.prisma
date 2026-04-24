@@ -41,8 +41,9 @@ model Person {
   code   String  @unique // P1, P2, P3...
   name   String
   color  String  @default("#3b82f6")
-  offset Int     @default(0)
-  active Boolean @default(true)
+  offset       Int     @default(0)
+  active       Boolean @default(true)
+  scheduleType String  @default("rotation") @map("schedule_type") // rotation | fixed
 
   userId Int?  @unique @map("user_id")
   user   User? @relation(fields: [userId], references: [id])

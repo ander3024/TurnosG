@@ -86,15 +86,17 @@ function planWeek(
   ctx: EngineContext, weekNum: number, blockedDates: Map<number, Set<string>>,
   weekStart: string, counts: { weekday: Map<number, number>; weekend: Map<number, number> }
 ): WeekPlan {
-  const offP = getOffPerson(weekNum, ctx.people);
-  const weP = getWeekendWorker(weekNum, ctx.people);
+  // Only rotation people participate in shifts
+  const rPeople = ctx.people.filter(p => p.scheduleType === "rotation");
+  const offP = getOffPerson(weekNum, rPeople);
+  const weP = getWeekendWorker(weekNum, rPeople);
 
   // Real hours for balancing (weekday*8 + weekend*12)
   const realH = (pid: number) =>
     (counts.weekday.get(pid) || 0) * 8 + (counts.weekend.get(pid) || 0) * 12;
 
-  // Available = everyone except OFF, and not blocked for the week
-  let available = ctx.people.filter(
+  // Available = rotation people except OFF, and not blocked for the week
+  let available = rPeople.filter(
     (p) => p.id !== offP?.id && !isBlocked(blockedDates, p.id, weekStart)
   );
 
@@ -144,6 +146,11 @@ export function generateSchedule(ctx: EngineContext, from: string, to: string): 
   const dates = iterateDates(from, to);
   const schedule: DaySchedule[] = [];
   const blockedDates = buildBlockedDates(ctx);
+
+  // Separate rotation people from fixed-schedule (managers)
+  const rotationPeople = ctx.people.filter(p => p.scheduleType === "rotation");
+  const fixedPeople = ctx.people.filter(p => p.scheduleType === "fixed");
+
   const counts = {
     weekday: new Map<number, number>(),
     weekend: new Map<number, number>(),
@@ -156,6 +163,8 @@ export function generateSchedule(ctx: EngineContext, from: string, to: string): 
   const refuerzoMorning = ctx.shiftTypes.get("refuerzo_morning");
   const refuerzoAfternoon = ctx.shiftTypes.get("refuerzo_afternoon");
   const refuerzoOfi = ctx.shiftTypes.get("refuerzo_ofi");
+  const officeShift = ctx.shiftTypes.get("office");
+  const officeFridayShift = ctx.shiftTypes.get("office_friday");
 
   // Refuerzo budget
   const BUFFER_HOURS = 40;
@@ -227,7 +236,7 @@ export function generateSchedule(ctx: EngineContext, from: string, to: string): 
       } else if (isSat || isWH) {
         person = plan.weekendPerson;
         if (person && isBlocked(blockedDates, person.id, date)) {
-          const avail = ctx.people.filter((p) => !isBlocked(blockedDates, p.id, date) && p.id !== plan.offPerson?.id);
+          const avail = rotationPeople.filter((p) => !isBlocked(blockedDates, p.id, date) && p.id !== plan.offPerson?.id);
           avail.sort((a, b) => (counts.weekend.get(a.id) || 0) - (counts.weekend.get(b.id) || 0));
           person = avail[0] || null; source = "balance";
         }
@@ -235,7 +244,7 @@ export function generateSchedule(ctx: EngineContext, from: string, to: string): 
       } else {
         person = saturdayPerson || plan.weekendPerson;
         if (person && isBlocked(blockedDates, person.id, date)) {
-          const avail = ctx.people.filter((p) => !isBlocked(blockedDates, p.id, date));
+          const avail = rotationPeople.filter((p) => !isBlocked(blockedDates, p.id, date));
           avail.sort((a, b) => (counts.weekend.get(a.id) || 0) - (counts.weekend.get(b.id) || 0));
           person = avail[0] || null; source = "balance";
         }
@@ -260,7 +269,7 @@ export function generateSchedule(ctx: EngineContext, from: string, to: string): 
             if (f && !assigned.has(f.id)) { ep = f; es = "event"; }
           }
           if (!ep) {
-            const avail = ctx.people.filter((p) => !isBlocked(blockedDates, p.id, date) && !assigned.has(p.id));
+            const avail = rotationPeople.filter((p) => !isBlocked(blockedDates, p.id, date) && !assigned.has(p.id));
             avail.sort((a, b) => (counts.weekend.get(a.id) || 0) - (counts.weekend.get(b.id) || 0));
             ep = avail[0] || null; es = "balance";
           }
@@ -286,7 +295,7 @@ export function generateSchedule(ctx: EngineContext, from: string, to: string): 
       const realH = (pid: number) =>
         (counts.weekday.get(pid) || 0) * 8 + (counts.weekend.get(pid) || 0) * 12;
 
-      const todayPool = ctx.people.filter(
+      const todayPool = rotationPeople.filter(
         (p) => p.id !== plan.offPerson?.id && !isBlocked(blockedDates, p.id, date)
       );
 
@@ -366,7 +375,7 @@ export function generateSchedule(ctx: EngineContext, from: string, to: string): 
           const hasTimeOffToday = (pid: number) => ctx.timeOffs.some(
             (to) => to.personId === pid && to.startDate <= date && to.endDate >= date
           );
-          const cands = ctx.people.filter(
+          const cands = rotationPeople.filter(
             (p) => p.id !== plan.offPerson?.id && !hasTimeOffToday(p.id) && !assigned.has(p.id)
           );
           // Sort by real accumulated hours (lowest first = gets the refuerzo)
@@ -411,7 +420,7 @@ export function generateSchedule(ctx: EngineContext, from: string, to: string): 
             }
           }
           if (!ep) {
-            const avail = ctx.people.filter(
+            const avail = rotationPeople.filter(
               (p) => !isBlocked(blockedDates, p.id, date) && !assigned.has(p.id) &&
                 (refUsed.get(p.id) || 0) + refH <= (refBudget.get(p.id) || 0)
             );
@@ -428,11 +437,27 @@ export function generateSchedule(ctx: EngineContext, from: string, to: string): 
       }
     }
 
-    // Compute offPeople
+    // ═══ FIXED SCHEDULE (managers) ═══
+    if (!closed && !isWe) {
+      const isFri = dow === 4;
+      const fixedShift = isFri ? (officeFridayShift || officeShift) : officeShift;
+      if (fixedShift) {
+        for (const fp of fixedPeople) {
+          if (isBlocked(blockedDates, fp.id, date)) continue;
+          // Check if manager has timeoff today
+          const hasTimeOff = day.timeOffs.some(t => t.personId === fp.id);
+          if (hasTimeOff) continue;
+          day.assignments.push(makeAssignment(date, fixedShift, fp, 0, "rotation"));
+          counts.weekday.set(fp.id, (counts.weekday.get(fp.id) || 0) + 1);
+        }
+      }
+    }
+
+    // Compute offPeople (only rotation people — managers are either assigned or on timeoff)
     if (!closed) {
       const assignedIds = new Set(day.assignments.map((a) => a.personId).filter(Boolean));
       const timeOffIds = new Set(day.timeOffs.map((t) => t.personId));
-      day.offPeople = ctx.people
+      day.offPeople = rotationPeople
         .filter((p) => !assignedIds.has(p.id) && !timeOffIds.has(p.id))
         .map((p) => ({ personId: p.id, personCode: p.code, personName: p.name, personColor: p.color }));
     }

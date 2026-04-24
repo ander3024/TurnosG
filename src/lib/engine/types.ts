@@ -6,6 +6,7 @@ export interface EnginePerson {
   name: string;
   color: string;
   offset: number;
+  scheduleType: "rotation" | "fixed";
 }
 
 export interface EngineShiftType {
