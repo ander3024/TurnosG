@@ -3,8 +3,9 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { loadEngineContext, generateSchedule, buildHoursSummary } from "@/lib/engine";
 import {
-  BarChart3, Clock, ArrowLeftRight, Palmtree, Users, TrendingUp, Sun, Moon, Sunrise,
+  BarChart3, Clock, ArrowLeftRight, Palmtree, Users, TrendingUp, Sun, Moon, Sunrise, Download,
 } from "lucide-react";
+import { ReportButtons } from "./report-buttons";
 
 export const dynamic = "force-dynamic";
 
@@ -87,9 +88,12 @@ export default async function StatsPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">Estadísticas</h1>
-        <p className="text-gray-500 text-sm mt-1">Análisis del año {year} hasta hoy ({today})</p>
+      <div className="flex items-start justify-between flex-wrap gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Estadísticas</h1>
+          <p className="text-gray-500 text-sm mt-1">Análisis del año {year} hasta hoy ({today})</p>
+        </div>
+        <ReportButtons year={year} />
       </div>
 
       {/* Summary cards */}
