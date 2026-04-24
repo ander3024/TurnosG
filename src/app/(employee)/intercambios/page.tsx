@@ -15,7 +15,7 @@ interface TeamAssignment { personCode: string | null; personName: string | null;
 interface OffPerson { personCode: string; personName: string; personColor: string }
 interface DayData { date: string; isClosed: boolean; shifts: { code: string; label: string; startTime: string; endTime: string; hours: number }[]; timeOff: { type: string } | null; teamAssignments: TeamAssignment[]; offPeople?: OffPerson[]; teamTimeOffs?: { personCode: string; personName: string; personColor: string; type: string }[] }
 interface Person { id: number; code: string; name: string; color: string }
-interface Swap { id: number; fromUser: { id: number; name: string }; toUser: { id: number; name: string }; fromPerson: Person; toPerson: Person; fromDate: string; toDate: string; fromShiftLabel: string; toShiftLabel: string; status: string; reason: string | null; createdAt: string; isOneWay?: boolean; settled?: boolean }
+interface Swap { id: number; fromUser: { id: number; name: string }; toUser: { id: number; name: string }; fromPerson: Person; toPerson: Person; fromDate: string; toDate: string; fromShiftLabel: string; toShiftLabel: string; status: string; reason: string | null; createdAt: string; isOneWay?: boolean; hours?: number | null; settled?: boolean }
 interface SwapPair { myDate: string; myShift: string; theirDate: string; theirShift: string; person: Person; hours?: number }
 interface DebtBalance { person: Person; iOweHours: number; theyOweHours: number; netHours: number; details: { date: string; shift: string; hours: number; direction: string; isPartial: boolean }[] }
 
@@ -520,9 +520,22 @@ export default function IntercambiosPage() {
 
 // ─── Swap Card ──────────────────────────────────────────
 function SwapCard({ swap, actions }: { swap: Swap; actions?: React.ReactNode }) {
+  const isPartial = typeof swap.hours === "number" && swap.hours > 0;
+  const isOneWay = swap.isOneWay || swap.toShiftLabel?.toLowerCase() === "libra";
+
   return (
     <Card className="overflow-hidden">
       <CardContent className="!py-3">
+        {/* Type badge */}
+        <div className="flex items-center gap-2 mb-2">
+          <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold",
+            isPartial ? "bg-amber-100 text-amber-700" : isOneWay ? "bg-cyan-100 text-cyan-700" : "bg-indigo-100 text-indigo-700"
+          )}>
+            {isPartial ? `${swap.hours}h parcial` : isOneWay ? "Turno completo" : "Intercambio"}
+          </span>
+          <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold", statusColor(swap.status))}>{statusLabel(swap.status)}</span>
+        </div>
+        {/* People */}
         <div className="flex items-start gap-3">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-1.5">
@@ -534,10 +547,15 @@ function SwapCard({ swap, actions }: { swap: Swap; actions?: React.ReactNode }) 
               <ArrowLeftRight className="w-3 h-3 text-gray-300 flex-shrink-0" />
               <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: swap.toPerson.color }} />
               <span className="text-sm font-semibold text-gray-900 truncate">{swap.toPerson.name}</span>
-              <span className="text-xs text-gray-400 truncate">{swap.toShiftLabel} · {fmtShort(swap.toDate)}</span>
+              {isPartial ? (
+                <span className="text-xs text-amber-600 font-semibold">{swap.hours}h de cobertura</span>
+              ) : isOneWay ? (
+                <span className="text-xs text-cyan-600">cubre el turno</span>
+              ) : (
+                <span className="text-xs text-gray-400 truncate">{swap.toShiftLabel} · {fmtShort(swap.toDate)}</span>
+              )}
             </div>
           </div>
-          <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold flex-shrink-0", statusColor(swap.status))}>{statusLabel(swap.status)}</span>
         </div>
         {(actions || swap.reason) && (
           <div className="mt-2 pt-2 border-t border-gray-100 flex items-center gap-2 flex-wrap">
