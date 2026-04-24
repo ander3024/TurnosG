@@ -68,7 +68,7 @@ export async function POST(request: NextRequest) {
     await requireAdmin();
 
     const body = await request.json();
-    const { title, message, userIds, type, link } = body;
+    const { title, message, userIds, userId, target, type, link } = body;
 
     if (!title || !message) {
       return NextResponse.json(
@@ -79,7 +79,10 @@ export async function POST(request: NextRequest) {
 
     let recipientIds: number[];
 
-    if (Array.isArray(userIds) && userIds.length > 0) {
+    if (target === "specific" && userId) {
+      // Single user from frontend
+      recipientIds = [userId];
+    } else if (Array.isArray(userIds) && userIds.length > 0) {
       recipientIds = userIds;
     } else {
       // Send to all active users
