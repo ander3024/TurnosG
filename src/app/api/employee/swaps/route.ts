@@ -186,12 +186,12 @@ export async function POST(req: NextRequest) {
       await notify({
         eventType: "swap_requested",
         recipientUserIds: [toPerson.user.id],
-        title: "Intercambio propuesto",
+        title: isPartial ? `Cobertura de ${hours}h propuesta` : isOneWay ? "Cobertura de turno propuesta" : "Intercambio de turno propuesto",
         message: isPartial
-          ? `${person.name} te pide que le cubras ${hours}h de su turno de ${actualFromShiftLabel} el ${fromDate}.`
+          ? `${person.name} te pide que le cubras ${hours} horas de su turno de ${actualFromShiftLabel} el ${fromDate}.`
           : isOneWay
-          ? `${person.name} te pide que le cubras su turno de ${actualFromShiftLabel} el ${fromDate}. Estás librando ese día.`
-          : `${person.name} quiere intercambiar su turno contigo (${actualFromShiftLabel} del ${fromDate} por ${toShiftLabel} del ${toDate})`,
+          ? `${person.name} te pide que le cubras su turno completo (${actualFromShiftLabel}) el ${fromDate}. Estás librando ese día.`
+          : `${person.name} quiere intercambiar su turno contigo: su ${actualFromShiftLabel} del ${fromDate} por tu ${toShiftLabel} del ${toDate}.`,
         link: "/swaps",
         type: "info",
       });

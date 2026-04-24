@@ -307,8 +307,10 @@ export async function PATCH(
         await notify({
           eventType: "swap_approved",
           recipientUserIds: [swap.fromUserId, swap.toUserId],
-          title: "Intercambio aprobado automáticamente",
-          message: `El intercambio entre ${swap.fromPerson.name} y ${swap.toPerson.name} ha sido aprobado. ${validation.reason}`,
+          title: isOneWay ? "Cobertura de turno aprobada" : "Intercambio de turno aprobado",
+          message: isOneWay
+            ? `${swap.toPerson.name} cubrirá el turno completo de ${swap.fromPerson.name} el ${swap.fromDate}.`
+            : `Intercambio entre ${swap.fromPerson.name} y ${swap.toPerson.name} aprobado. ${validation.reason}`,
           link: "/intercambios",
           type: "success",
         });
