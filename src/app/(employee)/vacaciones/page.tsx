@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { formatDate, statusColor, statusLabel } from "@/lib/utils";
-import { Plus, X, Palmtree, Send } from "lucide-react";
+import { Plus, X, Palmtree, Send, Upload, Stethoscope } from "lucide-react";
 import { useToast } from "@/components/ui/toast";
 
 interface TimeOffRequest {
@@ -39,6 +39,14 @@ export default function VacacionesPage() {
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [note, setNote] = useState("");
+
+  // Sick leave form
+  const [showSick, setShowSick] = useState(false);
+  const [sickStart, setSickStart] = useState("");
+  const [sickEnd, setSickEnd] = useState("");
+  const [sickNote, setSickNote] = useState("");
+  const [sickFile, setSickFile] = useState<File | null>(null);
+  const [sickSubmitting, setSickSubmitting] = useState(false);
 
   useEffect(() => {
     fetchRequests();
@@ -95,6 +103,30 @@ export default function VacacionesPage() {
     setSubmitting(false);
   }
 
+  async function handleSickSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!sickStart || !sickEnd) { toast.warning("Selecciona las fechas"); return; }
+    setSickSubmitting(true);
+    try {
+      const fd = new FormData();
+      fd.append("startDate", sickStart);
+      fd.append("endDate", sickEnd);
+      if (sickNote) fd.append("note", sickNote);
+      if (sickFile) fd.append("file", sickFile);
+
+      const res = await fetch("/api/employee/timeoff/sick", { method: "POST", body: fd });
+      if (res.ok) {
+        toast.success("Baja médica reportada");
+        setShowSick(false); setSickStart(""); setSickEnd(""); setSickNote(""); setSickFile(null);
+        fetchRequests();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        toast.error(data.error || "Error al reportar baja");
+      }
+    } catch { toast.error("Error de conexión"); }
+    setSickSubmitting(false);
+  }
+
   function resetForm() {
     setShowForm(false);
     setError("");
@@ -113,12 +145,18 @@ export default function VacacionesPage() {
             Gestiona tus solicitudes de tiempo libre
           </p>
         </div>
-        {!showForm && (
-          <Button onClick={() => setShowForm(true)} size="sm">
-            <Plus className="w-4 h-4" />
-            Nueva solicitud
-          </Button>
-        )}
+        <div className="flex gap-2">
+          {!showForm && !showSick && (
+            <>
+              <Button onClick={() => setShowForm(true)} size="sm">
+                <Plus className="w-4 h-4" /> Solicitar ausencia
+              </Button>
+              <Button onClick={() => setShowSick(true)} size="sm" variant="danger">
+                <Stethoscope className="w-4 h-4" /> Baja médica
+              </Button>
+            </>
+          )}
+        </div>
       </div>
 
       {/* New request form */}
@@ -203,6 +241,57 @@ export default function VacacionesPage() {
                 <Button type="submit" loading={submitting}>
                   <Send className="w-4 h-4" />
                   Enviar solicitud
+                </Button>
+              </div>
+            </form>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Sick leave form */}
+      {showSick && (
+        <Card className="border-red-200">
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Stethoscope className="w-5 h-5 text-red-500" />
+                <h2 className="font-semibold text-gray-900">Reportar baja médica</h2>
+              </div>
+              <button onClick={() => setShowSick(false)} className="text-gray-400 hover:text-gray-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handleSickSubmit} className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <Input id="sickStart" label="Fecha inicio" type="date" value={sickStart}
+                  onChange={(e) => setSickStart(e.target.value)} required />
+                <Input id="sickEnd" label="Fecha fin" type="date" value={sickEnd}
+                  onChange={(e) => setSickEnd(e.target.value)} required />
+              </div>
+              <div className="space-y-1.5">
+                <label className="block text-sm font-medium text-gray-700">Justificante médico</label>
+                <div className="flex items-center gap-3">
+                  <label className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-dashed border-gray-300 cursor-pointer hover:border-indigo-400 hover:bg-indigo-50/30 transition-colors text-sm text-gray-600">
+                    <Upload className="w-4 h-4" />
+                    {sickFile ? sickFile.name : "Subir foto o archivo"}
+                    <input type="file" accept="image/*,.pdf,.doc,.docx" className="hidden"
+                      onChange={(e) => setSickFile(e.target.files?.[0] || null)} />
+                  </label>
+                  {sickFile && (
+                    <button type="button" onClick={() => setSickFile(null)} className="text-xs text-red-500">Quitar</button>
+                  )}
+                </div>
+                <p className="text-[11px] text-gray-400">Puedes hacer una foto del justificante desde el móvil o subir un PDF</p>
+              </div>
+              <textarea value={sickNote} onChange={(e) => setSickNote(e.target.value)}
+                placeholder="Notas adicionales (opcional)..." rows={2}
+                className="block w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-red-500 resize-none" />
+              <div className="flex justify-end gap-3">
+                <Button variant="secondary" type="button" onClick={() => setShowSick(false)}>Cancelar</Button>
+                <Button type="submit" loading={sickSubmitting} className="!bg-red-600 hover:!bg-red-700">
+                  <Stethoscope className="w-4 h-4" /> Reportar baja
                 </Button>
               </div>
             </form>

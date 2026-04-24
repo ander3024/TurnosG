@@ -104,6 +104,7 @@ model TimeOffRequest {
   hoursPerDay Float     @default(8) @map("hours_per_day")
   status      String    @default("pendiente")
   note        String?
+  attachmentPath String?  @map("attachment_path") // medical certificate file
   reviewedAt  DateTime? @map("reviewed_at")
   reviewedBy  String?   @map("reviewed_by")
   createdAt   DateTime  @default(now()) @map("created_at")

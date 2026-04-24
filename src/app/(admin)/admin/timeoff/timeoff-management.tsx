@@ -13,6 +13,7 @@ import {
   Trash2,
   X,
   Check,
+  Paperclip,
 } from "lucide-react";
 import { cn, formatDate, formatDateTime, statusColor, statusLabel } from "@/lib/utils";
 import { useToast } from "@/components/ui/toast";
@@ -29,6 +30,7 @@ interface TimeOffData {
   hoursPerDay: number;
   status: string;
   note: string | null;
+  attachmentPath: string | null;
   reviewedAt: Date | null;
   reviewedBy: string | null;
   createdAt: Date;
@@ -416,9 +418,16 @@ export function TimeOffManagement({ initialRequests }: Props) {
                         <p className="text-xs text-gray-400 font-mono">{req.person.code}</p>
                       </div>
                     </div>
-                    <Badge variant="info">
+                    <Badge variant={req.type === "enfermedad" ? "danger" : "info"}>
                       {typeLabels[req.type] || req.type}
                     </Badge>
+                    {req.attachmentPath && (
+                      <a href={`/api/admin/timeoff/attachment?id=${req.id}`} target="_blank" rel="noopener"
+                        className="p-1 rounded-lg hover:bg-indigo-50 text-indigo-500" title="Ver justificante"
+                        onClick={(e) => e.stopPropagation()}>
+                        <Paperclip className="w-3.5 h-3.5" />
+                      </a>
+                    )}
                     <div className="hidden sm:block text-sm text-gray-600">
                       {formatDate(req.startDate)}
                       <span className="text-gray-300 mx-1">-</span>

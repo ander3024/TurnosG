@@ -295,9 +295,19 @@ export function generateSchedule(ctx: EngineContext, from: string, to: string): 
       const realH = (pid: number) =>
         (counts.weekday.get(pid) || 0) * 8 + (counts.weekend.get(pid) || 0) * 12;
 
-      const todayPool = rotationPeople.filter(
+      // Base pool: rotation people who aren't the off person and aren't blocked
+      let todayPool = rotationPeople.filter(
         (p) => p.id !== plan.offPerson?.id && !isBlocked(blockedDates, p.id, date)
       );
+
+      // If someone is sick (blocked but not on vacation), pull in the off person to cover
+      const hasSickPerson = rotationPeople.some(
+        (p) => p.id !== plan.offPerson?.id && isBlocked(blockedDates, p.id, date)
+          && ctx.timeOffs.some(t => t.personId === p.id && t.type === "enfermedad" && t.startDate <= date && t.endDate >= date)
+      );
+      if (hasSickPerson && plan.offPerson && !isBlocked(blockedDates, plan.offPerson.id, date)) {
+        todayPool = [...todayPool, plan.offPerson];
+      }
 
       let mp: EnginePerson | null = null;
       let ap: EnginePerson | null = null;
