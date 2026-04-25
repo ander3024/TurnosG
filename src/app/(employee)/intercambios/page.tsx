@@ -379,7 +379,7 @@ export default function IntercambiosPage() {
                   <Card className="border-emerald-200">
                     <CardContent className="!py-3 space-y-3">
                       {/* Partial hours toggle */}
-                      <div className="flex items-center gap-2">
+                      <div>
                         <label className="flex items-center gap-2 text-sm cursor-pointer">
                           <input type="checkbox" checked={!!swapHours}
                             onChange={(e) => setSwapHours(e.target.checked ? "2" : "")}
@@ -387,11 +387,17 @@ export default function IntercambiosPage() {
                           <span className="text-gray-700 font-medium">Solo unas horas</span>
                         </label>
                         {swapHours && (
-                          <input type="number" value={swapHours} onChange={(e) => setSwapHours(e.target.value)}
-                            min="0.5" max="12" step="0.5" placeholder="Horas"
-                            className="w-20 rounded-lg border border-gray-300 px-2 py-1 text-sm text-center font-semibold focus:ring-2 focus:ring-indigo-500 focus:outline-none" />
+                          <div className="flex items-center gap-2 mt-2" onClick={(e) => e.stopPropagation()} onTouchStart={(e) => e.stopPropagation()}>
+                            <button type="button" onClick={() => setSwapHours(String(Math.max(0.5, parseFloat(swapHours) - 0.5)))}
+                              className="w-10 h-10 rounded-xl bg-gray-100 text-gray-700 text-lg font-bold flex items-center justify-center active:bg-gray-200">−</button>
+                            <div className="flex-1 text-center">
+                              <span className="text-2xl font-bold text-gray-900">{swapHours}</span>
+                              <span className="text-sm text-gray-500 ml-1">horas</span>
+                            </div>
+                            <button type="button" onClick={() => setSwapHours(String(Math.min(12, parseFloat(swapHours) + 0.5)))}
+                              className="w-10 h-10 rounded-xl bg-gray-100 text-gray-700 text-lg font-bold flex items-center justify-center active:bg-gray-200">+</button>
+                          </div>
                         )}
-                        {swapHours && <span className="text-xs text-gray-500">horas</span>}
                       </div>
                       {swapHours && (
                         <p className="text-[11px] text-amber-600 bg-amber-50 px-2 py-1 rounded-lg">
