@@ -23,9 +23,10 @@ interface Props {
 }
 
 const categoryConfig: Record<string, { label: string; icon: typeof Clock; color: string; bg: string; border: string }> = {
-  regular: { label: "Regular", icon: Clock, color: "text-indigo-700", bg: "bg-indigo-50", border: "border-indigo-200" },
+  regular: { label: "Turnos rotación", icon: Clock, color: "text-indigo-700", bg: "bg-indigo-50", border: "border-indigo-200" },
   weekend: { label: "Fin de semana", icon: Sun, color: "text-amber-700", bg: "bg-amber-50", border: "border-amber-200" },
   refuerzo: { label: "Refuerzo", icon: Zap, color: "text-emerald-700", bg: "bg-emerald-50", border: "border-emerald-200" },
+  office: { label: "Managers (horario fijo)", icon: Coffee, color: "text-purple-700", bg: "bg-purple-50", border: "border-purple-200" },
 };
 
 function calcNetHours(start: string, end: string, lunch: number): string {
@@ -122,7 +123,7 @@ export function ShiftManagement({ initialShifts }: Props) {
     return acc;
   }, {} as Record<string, ShiftData[]>);
 
-  const categoryOrder = ["regular", "weekend", "refuerzo"];
+  const categoryOrder = ["regular", "weekend", "refuerzo", "office"];
 
   return (
     <div className="space-y-6">
@@ -184,6 +185,7 @@ export function ShiftManagement({ initialShifts }: Props) {
                     <option value="regular">Regular (entre semana)</option>
                     <option value="weekend">Fin de semana</option>
                     <option value="refuerzo">Refuerzo / apoyo</option>
+                    <option value="office">Manager (horario fijo)</option>
                   </select>
                 </div>
               </div>
