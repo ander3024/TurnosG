@@ -409,15 +409,11 @@ export function TimeOffManagement({ initialRequests }: Props) {
                 </div>
               ) : (
                 /* Display Mode */
-                <div className="flex items-center justify-between gap-4">
-                  <div className="flex items-center gap-4 flex-1 min-w-0">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className="w-2.5 h-2.5 rounded-full bg-indigo-500 shrink-0" />
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium text-gray-900 truncate">{req.person.name}</p>
-                        <p className="text-xs text-gray-400 font-mono">{req.person.code}</p>
-                      </div>
-                    </div>
+                <div className="space-y-2">
+                  {/* Top: person + type + dates */}
+                  <div className="flex items-center gap-2 flex-wrap min-w-0">
+                    <span className="w-2.5 h-2.5 rounded-full bg-indigo-500 shrink-0" />
+                    <span className="text-sm font-medium text-gray-900 truncate">{req.person.name}</span>
                     <Badge variant={req.type === "enfermedad" ? "danger" : "info"}>
                       {typeLabels[req.type] || req.type}
                     </Badge>
@@ -428,60 +424,35 @@ export function TimeOffManagement({ initialRequests }: Props) {
                         <Paperclip className="w-3.5 h-3.5" />
                       </a>
                     )}
-                    <div className="hidden sm:block text-sm text-gray-600">
-                      {formatDate(req.startDate)}
-                      <span className="text-gray-300 mx-1">-</span>
-                      {formatDate(req.endDate)}
-                    </div>
-                    <span
-                      className={cn(
-                        "inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium shrink-0",
-                        statusColor(req.status)
-                      )}
-                    >
+                    <span className={cn("inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium shrink-0", statusColor(req.status))}>
                       {statusLabel(req.status)}
                     </span>
-                    <span className="hidden lg:block text-xs text-gray-400 shrink-0">
-                      por {req.requester.name}
-                    </span>
                   </div>
-                  <div className="flex items-center gap-1 shrink-0">
+                  {/* Dates */}
+                  <p className="text-xs text-gray-500">
+                    {formatDate(req.startDate)} - {formatDate(req.endDate)}
+                    <span className="text-gray-300 mx-2">·</span>
+                    por {req.requester.name}
+                  </p>
+                  {/* Actions */}
+                  <div className="flex items-center gap-1 flex-wrap">
                     {req.status === "pendiente" && (
                       <>
-                        <Button
-                          variant="primary"
-                          size="sm"
-                          loading={processing === req.id}
-                          onClick={() => handleAction(req.id, "aprobada")}
-                        >
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                          Aprobar
+                        <Button variant="primary" size="sm" loading={processing === req.id}
+                          onClick={() => handleAction(req.id, "aprobada")}>
+                          <CheckCircle2 className="w-3.5 h-3.5" /> Aprobar
                         </Button>
-                        <Button
-                          variant="danger"
-                          size="sm"
-                          loading={processing === req.id}
-                          onClick={() => handleAction(req.id, "rechazada")}
-                        >
-                          <XCircle className="w-3.5 h-3.5" />
-                          Rechazar
+                        <Button variant="danger" size="sm" loading={processing === req.id}
+                          onClick={() => handleAction(req.id, "rechazada")}>
+                          <XCircle className="w-3.5 h-3.5" /> Rechazar
                         </Button>
                       </>
                     )}
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => startEdit(req)}
-                    >
+                    <Button variant="ghost" size="sm" onClick={() => startEdit(req)}>
                       <Pencil className="w-3.5 h-3.5" />
                     </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      loading={deleting === req.id}
-                      onClick={() => handleDelete(req.id)}
-                      className="text-red-500 hover:text-red-700 hover:bg-red-50"
-                    >
+                    <Button variant="ghost" size="sm" loading={deleting === req.id}
+                      onClick={() => handleDelete(req.id)} className="text-red-500 hover:text-red-700 hover:bg-red-50">
                       <Trash2 className="w-3.5 h-3.5" />
                     </Button>
                   </div>
