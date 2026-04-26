@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -47,6 +47,7 @@ export function ShiftManagement({ initialShifts }: Props) {
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const toast = useToast();
+  const formRef = useRef<HTMLDivElement>(null);
 
   function startEdit(shift: ShiftData) {
     setEditingId(shift.id);
@@ -59,6 +60,7 @@ export function ShiftManagement({ initialShifts }: Props) {
       lunchMinutes: shift.lunchMinutes,
       category: shift.category,
     });
+    setTimeout(() => formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 100);
   }
 
   function cancelEdit() {
@@ -137,7 +139,7 @@ export function ShiftManagement({ initialShifts }: Props) {
 
       {/* Create / Edit Form */}
       {(showCreate || editingId !== null) && (
-        <Card className="border-indigo-200 shadow-md">
+        <div ref={formRef}><Card className="border-indigo-200 shadow-md">
           <CardHeader>
             <h3 className="font-semibold text-gray-900">
               {editingId ? "Editar tipo de turno" : "Crear nuevo tipo de turno"}
@@ -255,7 +257,7 @@ export function ShiftManagement({ initialShifts }: Props) {
               </div>
             </form>
           </CardContent>
-        </Card>
+        </Card></div>
       )}
 
       {/* Shift cards grouped by category */}
