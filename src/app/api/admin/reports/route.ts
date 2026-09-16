@@ -147,7 +147,18 @@ async function buildVacacionesReport(
         const c = col + d - 1;
 
         if (day) {
-          const timeOff = day.timeOffs.find((t: any) => t.personId === person.id);
+          const dow = getDow(dateStr);
+          const isWeekend = dow >= 5;
+          const isHoliday = holidayMap.has(dateStr);
+
+          // cita_medica is informative (partial hours) — doesn't replace the shift in report
+          // Vacaciones on weekends/holidays are hidden to match the "días usados" counter
+          const timeOff = day.timeOffs.find((t: any) => {
+            if (t.personId !== person.id) return false;
+            if (t.type === "cita_medica") return false;
+            if (t.type === "vacaciones" && (isWeekend || isHoliday)) return false;
+            return true;
+          });
           if (timeOff) {
             const cell = ws.getCell(row, c);
             if (timeOff.type === "vacaciones") {
@@ -168,10 +179,8 @@ async function buildVacacionesReport(
             }
             cell.font = { size: 7, bold: true };
             cell.alignment = { horizontal: "center" };
-          }
-
-          // Mark holidays with "F"
-          if (holidayMap.has(dateStr) && !day.timeOffs.find((t: any) => t.personId === person.id)) {
+          } else if (isHoliday) {
+            // Mark holidays with "F" when no other timeoff is painted
             const cell = ws.getCell(row, c);
             cell.value = "F";
             cell.font = { size: 7, color: { argb: "FFCC0000" } };
@@ -339,9 +348,9 @@ async function buildHorariosReport(
         const c = col + d - 1;
 
         if (day) {
-          // Check if person has a shift
+          // Check if person has a shift (cita_medica is informative, not a real timeoff for the report)
           const assignment = day.assignments.find((a: any) => a.personId === person.id);
-          const timeOff = day.timeOffs.find((t: any) => t.personId === person.id);
+          const timeOff = day.timeOffs.find((t: any) => t.personId === person.id && t.type !== "cita_medica");
           const isOff = day.offPeople?.some((o: any) => o.personId === person.id);
 
           const cell = ws.getCell(row, c);
