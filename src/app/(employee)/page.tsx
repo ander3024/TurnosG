@@ -4,10 +4,10 @@ import { redirect } from "next/navigation";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { formatDate, statusColor, statusLabel } from "@/lib/utils";
-import { loadEngineContext, generateSchedule } from "@/lib/engine";
+import { loadEngineContext, generateSchedule, buildHoursSummary } from "@/lib/engine";
 import {
   Sunrise, Moon, Sun, BedDouble, Palmtree, ArrowLeftRight,
-  ArrowRight, Bell, Scale, Calendar,
+  ArrowRight, Bell, Scale, Calendar, Clock,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -98,6 +98,37 @@ export default async function EmployeeDashboard() {
     }
   }
 
+  // Annual hours summary (full year, past + planned)
+  let myHours: { total: number; target: number; delta: number; pct: number; pctToDate: number; targetToDate: number } | null = null;
+  if (person) {
+    const yearStart = today.slice(0, 4) + "-01-01";
+    const yearEnd = today.slice(0, 4) + "-12-31";
+    const yearCtx = await loadEngineContext(yearStart, yearEnd);
+    const yearSchedule = generateSchedule(yearCtx, yearStart, yearEnd);
+    const summary = buildHoursSummary(
+      yearSchedule.flatMap(d => d.assignments),
+      yearCtx.extraHours,
+      yearCtx.timeOffs,
+      yearCtx.settings.annualTargetHours,
+      yearCtx.settings.vacationDaysNatural,
+      yearCtx.people,
+      holidayDates,
+    );
+    const mine = summary.find(h => h.personId === person.id);
+    if (mine) {
+      const monthsWorked = todayDate.getMonth() + 1;
+      const targetToDate = Math.round(mine.targetHours * monthsWorked / 12);
+      myHours = {
+        total: Math.round(mine.totalHours),
+        target: mine.targetHours,
+        delta: Math.round(mine.delta),
+        pct: Math.min(100, Math.round((mine.totalHours / mine.targetHours) * 100)),
+        pctToDate: targetToDate > 0 ? Math.min(100, Math.round((mine.totalHours / targetToDate) * 100)) : 0,
+        targetToDate,
+      };
+    }
+  }
+
   function shiftInfo(code: string) {
     if (code === "weekend") return { Icon: Sun, color: "text-amber-600", bg: "bg-amber-50", label: "Finde" };
     if (code.includes("afternoon")) return { Icon: Moon, color: "text-indigo-600", bg: "bg-indigo-50", label: "Tarde" };
@@ -165,6 +196,37 @@ export default async function EmployeeDashboard() {
           )}
         </CardContent>
       </Card>
+
+      {/* Annual hours progress */}
+      {myHours && (
+        <Card>
+          <CardContent className="!py-4">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <Clock className="w-4 h-4 text-indigo-600" />
+                <p className="text-xs font-bold text-gray-500 uppercase tracking-wider">Jornada anual</p>
+              </div>
+              <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${myHours.pctToDate >= 95 ? "bg-emerald-100 text-emerald-700" : myHours.pctToDate >= 80 ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-700"}`}>
+                {myHours.pctToDate}% al día
+              </span>
+            </div>
+            <div className="flex items-baseline justify-between mb-2">
+              <div>
+                <span className="text-2xl font-bold text-gray-900">{myHours.total}h</span>
+                <span className="text-sm text-gray-500"> / {myHours.target}h</span>
+              </div>
+              <div className={`text-sm font-bold ${myHours.delta >= 0 ? "text-emerald-600" : "text-amber-600"}`}>
+                {myHours.delta >= 0 ? `+${myHours.delta}h de sobra` : `Te faltan ${Math.abs(myHours.delta)}h`}
+              </div>
+            </div>
+            <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden relative">
+              <div className="absolute inset-y-0 border-r-2 border-dashed border-gray-400 z-10" style={{ left: `${Math.round((todayDate.getMonth() + 1) / 12 * 100)}%` }} title="Hoy" />
+              <div className={`h-full rounded-full transition-all ${myHours.delta >= 0 ? "bg-emerald-500" : "bg-indigo-500"}`} style={{ width: `${myHours.pct}%` }} />
+            </div>
+            <p className="text-[10px] text-gray-400 mt-1.5">Incluye turnos ya trabajados y los planificados hasta fin de año. La línea marca el progreso esperado a día de hoy.</p>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Quick stats row */}
       <div className="grid grid-cols-3 gap-3">
