@@ -6,6 +6,7 @@ import {
   BarChart3, Clock, ArrowLeftRight, Palmtree, Users, TrendingUp, Sun, Moon, Sunrise, Download,
 } from "lucide-react";
 import { ReportButtons } from "./report-buttons";
+import { InfoTooltip } from "@/components/ui/info-tooltip";
 
 export const dynamic = "force-dynamic";
 
@@ -134,6 +135,25 @@ export default async function StatsPage() {
           <div className="flex items-center gap-2">
             <TrendingUp className="w-5 h-5 text-indigo-600" />
             <h2 className="text-lg font-semibold text-gray-900">Horas trabajadas vs objetivo</h2>
+            <InfoTooltip
+              side="bottom"
+              content={
+                <div className="space-y-2">
+                  <p className="font-bold text-white">Cálculo según convenio</p>
+                  <p><span className="text-indigo-300 font-semibold">Convenio:</span> Industria textil y confección 2024-2026 (BOE-A-2025-20177)</p>
+                  <p><span className="text-indigo-300 font-semibold">Jornada anual:</span> {ctx.settings.annualTargetHours}h efectivas (incluye reducción de 20h por jornada intensiva de verano ya descontada)</p>
+                  <p><span className="text-indigo-300 font-semibold">Vacaciones:</span> {ctx.settings.vacationDaysNatural} días laborables/año (Lu-Vi, excluyendo festivos)</p>
+                  <p className="pt-1 border-t border-gray-700"><span className="text-indigo-300 font-semibold">Horas contadas:</span></p>
+                  <ul className="list-disc list-inside space-y-0.5 text-gray-200">
+                    <li>Turnos titulares (Mañana 8h, Tarde 8h, Finde 12h)</li>
+                    <li>Refuerzos asignados por admin</li>
+                    <li>Turnos de oficina (managers: Lu-Ju 8h, Vi 7h)</li>
+                    <li>Horas extra registradas manualmente</li>
+                  </ul>
+                  <p className="pt-1 border-t border-gray-700 text-gray-300">Cada turno descuenta la hora de comida (90 min en jornadas partidas). Días de vacaciones aprobadas no cuentan como trabajados.</p>
+                </div>
+              }
+            />
           </div>
         </CardHeader>
         <CardContent>
@@ -160,7 +180,8 @@ export default async function StatsPage() {
                       </Badge>
                     </div>
                   </div>
-                  <div className="h-3 bg-gray-100 rounded-full overflow-hidden relative">
+                  <div className="h-3 bg-gray-100 rounded-full overflow-hidden relative cursor-help"
+                    title={`${h.personName} — Cálculo según convenio textil 2024-2026\n\nHoras acumuladas ${h.totalHours}h / Objetivo ${h.targetHours}h (${h.delta >= 0 ? "+" : ""}${Math.round(h.delta)}h)\n\nDesglose:\n  • Turnos L-V (Mañana/Tarde/Oficina): ${Math.round(h.weekdayHours)}h\n  • Turnos de finde (12h/día): ${Math.round(h.weekendHours)}h\n  • Refuerzos asignados: ${Math.round(h.refuerzoHours)}h\n  • Horas extra registradas: ${Math.round(h.extraHoursLogged)}h\n\nVacaciones consumidas: ${h.vacationDaysUsed}/${h.vacationDaysTotal} días laborables\n\nCada turno descuenta la hora de comida (90 min en jornadas partidas). Días de vacaciones aprobadas no se cuentan como trabajados. La línea punteada marca el % del año transcurrido.`}>
                     <div className="absolute inset-y-0 border-r-2 border-dashed border-gray-400" style={{ left: `${Math.round(monthsWorked / 12 * 100)}%` }} title="Hoy" />
                     <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, backgroundColor: h.personColor }} />
                   </div>
