@@ -475,6 +475,26 @@ export function generateSchedule(ctx: EngineContext, from: string, to: string): 
       }
     }
 
+    // Pick up any admin overrides at slots that the regular logic didn't consume.
+    // This lets the admin add extra people to any shift (e.g. Mario as 2nd morning).
+    if (!closed) {
+      const assignedKeys = new Set(day.assignments.map(a => `${a.shiftTypeCode}-${a.slotIndex}`));
+      for (const ov of dayOverrides) {
+        const key = `${ov.shiftTypeCode}-${ov.slotIndex}`;
+        if (assignedKeys.has(key)) continue;
+        if (!ov.personId) continue; // admin explicitly emptied — skip
+        const person = findPerson(ctx, ov.personId);
+        const shift = ctx.shiftTypesById.get(ov.shiftTypeId);
+        if (!person || !shift) continue;
+        day.assignments.push(makeAssignment(date, shift, person, ov.slotIndex, "override"));
+        if (shift.category === "weekend") {
+          counts.weekend.set(person.id, (counts.weekend.get(person.id) || 0) + 1);
+        } else {
+          counts.weekday.set(person.id, (counts.weekday.get(person.id) || 0) + 1);
+        }
+      }
+    }
+
     // Compute offPeople (only rotation people — managers are either assigned or on timeoff)
     if (!closed) {
       const assignedIds = new Set(day.assignments.map((a) => a.personId).filter(Boolean));

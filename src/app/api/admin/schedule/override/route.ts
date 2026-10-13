@@ -33,6 +33,15 @@ export async function POST(request: NextRequest) {
     }
 
     // Upsert override
+    // Detect no-op writes (same person already assigned) to skip duplicate audit logs and notifications
+    const existing = await prisma.override.findUnique({
+      where: {
+        date_shiftTypeId_slotIndex: { date, shiftTypeId, slotIndex: slotIndex ?? 0 },
+      },
+    });
+    const newPersonId = personId || null;
+    const isNoOp = existing && existing.personId === newPersonId;
+
     const override = await prisma.override.upsert({
       where: {
         date_shiftTypeId_slotIndex: {
@@ -41,11 +50,11 @@ export async function POST(request: NextRequest) {
           slotIndex: slotIndex ?? 0,
         },
       },
-      update: { personId: personId || null },
+      update: { personId: newPersonId },
       create: {
         date,
         shiftTypeId,
-        personId: personId || null,
+        personId: newPersonId,
         slotIndex: slotIndex ?? 0,
       },
       include: {
@@ -54,29 +63,30 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // Get person name for audit log
-    const personName = personId
-      ? (await prisma.person.findUnique({ where: { id: personId }, select: { name: true } }))?.name || `#${personId}`
-      : "vacío";
+    if (!isNoOp) {
+      const personName = personId
+        ? (await prisma.person.findUnique({ where: { id: personId }, select: { name: true } }))?.name || `#${personId}`
+        : "vacío";
 
-    await prisma.auditLog.create({
-      data: {
-        actorId: admin.id,
-        action: "override",
-        entity: "schedule",
-        entityId: `${date}-${shiftType.code}-${slotIndex ?? 0}`,
-        details: JSON.stringify({
-          date,
-          shiftType: shiftType.label,
-          personId,
-          personName,
-          slotIndex: slotIndex ?? 0,
-        }),
-      },
-    });
+      await prisma.auditLog.create({
+        data: {
+          actorId: admin.id,
+          action: "override",
+          entity: "schedule",
+          entityId: `${date}-${shiftType.code}-${slotIndex ?? 0}`,
+          details: JSON.stringify({
+            date,
+            shiftType: shiftType.label,
+            personId,
+            personName,
+            slotIndex: slotIndex ?? 0,
+          }),
+        },
+      });
+    }
 
-    // Notify the affected employee
-    if (personId) {
+    // Notify the affected employee (only on real change)
+    if (personId && !isNoOp) {
       try {
         const { notify } = await import("@/lib/notifications");
         const person = await prisma.person.findUnique({ where: { id: personId }, include: { user: true } });
