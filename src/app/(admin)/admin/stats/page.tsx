@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { ReportButtons } from "./report-buttons";
 import { InfoTooltip } from "@/components/ui/info-tooltip";
+import { formatHours, formatHoursSigned } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -171,9 +172,9 @@ export default async function StatsPage() {
                       <span className="font-semibold text-gray-900">{h.personName}</span>
                     </div>
                     <div className="flex items-center gap-4 text-xs">
-                      <span className="text-gray-500">{Math.round(h.totalHours)}h / {h.targetHours}h</span>
+                      <span className="text-gray-500">{formatHours(h.totalHours)} / {formatHours(h.targetHours)}</span>
                       <span className={h.delta >= 0 ? "text-emerald-600 font-bold" : "text-amber-600 font-bold"}>
-                        {h.delta >= 0 ? "+" : ""}{Math.round(h.delta)}h
+                        {formatHoursSigned(h.delta)}
                       </span>
                       <Badge variant={pctToDate >= 95 ? "success" : pctToDate >= 80 ? "warning" : "danger"}>
                         {pctToDate}%
@@ -181,7 +182,7 @@ export default async function StatsPage() {
                     </div>
                   </div>
                   <div className="h-3 bg-gray-100 rounded-full overflow-hidden relative cursor-help"
-                    title={`${h.personName} — Cálculo según convenio textil 2024-2026\n\nHoras acumuladas ${h.totalHours}h / Objetivo ${h.targetHours}h (${h.delta >= 0 ? "+" : ""}${Math.round(h.delta)}h)\n\nDesglose:\n  • Turnos L-V (Mañana/Tarde/Oficina): ${Math.round(h.weekdayHours)}h\n  • Turnos de finde (12h/día): ${Math.round(h.weekendHours)}h\n  • Refuerzos asignados: ${Math.round(h.refuerzoHours)}h\n  • Horas extra registradas: ${Math.round(h.extraHoursLogged)}h\n\nVacaciones consumidas: ${h.vacationDaysUsed}/${h.vacationDaysTotal} días laborables\n\nCada turno descuenta la hora de comida (90 min en jornadas partidas). Días de vacaciones aprobadas no se cuentan como trabajados. La línea punteada marca el % del año transcurrido.`}>
+                    title={`${h.personName} — Cálculo según convenio textil 2024-2026\n\nHoras acumuladas ${formatHours(h.totalHours)} / Objetivo ${formatHours(h.targetHours)} (${formatHoursSigned(h.delta)})\n\nDesglose:\n  • Turnos L-V (Mañana/Tarde/Oficina): ${formatHours(h.weekdayHours)}\n  • Turnos de finde (12h/día): ${formatHours(h.weekendHours)}\n  • Refuerzos asignados: ${formatHours(h.refuerzoHours)}\n  • Horas extra registradas: ${formatHours(h.extraHoursLogged)}\n\nVacaciones consumidas: ${h.vacationDaysUsed}/${h.vacationDaysTotal} días laborables\n\nCada turno descuenta la hora de comida (90 min en jornadas partidas). Días de vacaciones aprobadas no se cuentan como trabajados. La línea punteada marca el % del año transcurrido.`}>
                     <div className="absolute inset-y-0 border-r-2 border-dashed border-gray-400" style={{ left: `${Math.round(monthsWorked / 12 * 100)}%` }} title="Hoy" />
                     <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, backgroundColor: h.personColor }} />
                   </div>

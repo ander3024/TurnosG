@@ -44,6 +44,23 @@ export function statusColor(status: string): string {
   }
 }
 
+/** Formatea horas: si es entero → "8h", si tiene decimales → "8h 30m" (o "0h 15m") */
+export function formatHours(h: number): string {
+  const sign = h < 0 ? "-" : "";
+  const abs = Math.abs(h);
+  const whole = Math.floor(abs);
+  const mins = Math.round((abs - whole) * 60);
+  if (mins === 0) return `${sign}${whole}h`;
+  if (whole === 0) return `${sign}${mins}m`;
+  return `${sign}${whole}h ${mins}m`;
+}
+
+/** Como formatHours pero con signo "+" también para positivos (para deltas) */
+export function formatHoursSigned(h: number): string {
+  if (h === 0) return "0h";
+  return (h > 0 ? "+" : "") + formatHours(h);
+}
+
 export function statusLabel(status: string): string {
   const labels: Record<string, string> = {
     pendiente: "Pendiente",

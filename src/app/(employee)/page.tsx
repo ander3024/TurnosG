@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { redirect } from "next/navigation";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { formatDate, statusColor, statusLabel } from "@/lib/utils";
+import { formatDate, statusColor, statusLabel, formatHours, formatHoursSigned } from "@/lib/utils";
 import { loadEngineContext, generateSchedule, buildHoursSummary } from "@/lib/engine";
 import { InfoTooltip } from "@/components/ui/info-tooltip";
 import {
@@ -120,16 +120,16 @@ export default async function EmployeeDashboard() {
       const monthsWorked = todayDate.getMonth() + 1;
       const targetToDate = Math.round(mine.targetHours * monthsWorked / 12);
       myHours = {
-        total: Math.round(mine.totalHours),
+        total: mine.totalHours,
         target: mine.targetHours,
-        delta: Math.round(mine.delta),
+        delta: mine.delta,
         pct: Math.min(100, Math.round((mine.totalHours / mine.targetHours) * 100)),
         pctToDate: targetToDate > 0 ? Math.min(100, Math.round((mine.totalHours / targetToDate) * 100)) : 0,
         targetToDate,
-        weekday: Math.round(mine.weekdayHours),
-        weekend: Math.round(mine.weekendHours),
-        refuerzo: Math.round(mine.refuerzoHours),
-        extra: Math.round(mine.extraHoursLogged),
+        weekday: mine.weekdayHours,
+        weekend: mine.weekendHours,
+        refuerzo: mine.refuerzoHours,
+        extra: mine.extraHoursLogged,
         vacUsed: mine.vacationDaysUsed,
         vacTotal: mine.vacationDaysTotal,
       };
@@ -218,14 +218,14 @@ export default async function EmployeeDashboard() {
                     <div className="space-y-2">
                       <p className="font-bold text-white">Cálculo según convenio</p>
                       <p><span className="text-indigo-300 font-semibold">Convenio:</span> Industria textil y confección 2024-2026 (BOE-A-2025-20177)</p>
-                      <p><span className="text-indigo-300 font-semibold">Jornada anual:</span> {myHours.target}h efectivas (incluye reducción por jornada intensiva de verano ya descontada)</p>
+                      <p><span className="text-indigo-300 font-semibold">Jornada anual:</span> {formatHours(myHours.target)} efectivas (incluye reducción por jornada intensiva de verano ya descontada)</p>
                       <p><span className="text-indigo-300 font-semibold">Vacaciones:</span> {myHours.vacTotal} días laborables/año</p>
                       <p className="pt-1 border-t border-gray-700"><span className="text-indigo-300 font-semibold">Tu desglose:</span></p>
                       <ul className="list-none space-y-0.5 text-gray-200 text-[11px]">
-                        <li>• Turnos L-V: <b>{myHours.weekday}h</b></li>
-                        <li>• Turnos de finde (12h/día): <b>{myHours.weekend}h</b></li>
-                        <li>• Refuerzos: <b>{myHours.refuerzo}h</b></li>
-                        <li>• Horas extra registradas: <b>{myHours.extra}h</b></li>
+                        <li>• Turnos L-V: <b>{formatHours(myHours.weekday)}</b></li>
+                        <li>• Turnos de finde (12h/día): <b>{formatHours(myHours.weekend)}</b></li>
+                        <li>• Refuerzos: <b>{formatHours(myHours.refuerzo)}</b></li>
+                        <li>• Horas extra registradas: <b>{formatHours(myHours.extra)}</b></li>
                         <li>• Vacaciones consumidas: <b>{myHours.vacUsed}/{myHours.vacTotal} días</b></li>
                       </ul>
                       <p className="pt-1 border-t border-gray-700 text-gray-300 text-[11px]">Incluye turnos ya trabajados y los planificados hasta 31-dic. Cada turno descuenta la hora de comida (90 min en jornadas partidas).</p>
@@ -239,15 +239,15 @@ export default async function EmployeeDashboard() {
             </div>
             <div className="flex items-baseline justify-between mb-2">
               <div>
-                <span className="text-2xl font-bold text-gray-900">{myHours.total}h</span>
-                <span className="text-sm text-gray-500"> / {myHours.target}h</span>
+                <span className="text-2xl font-bold text-gray-900">{formatHours(myHours.total)}</span>
+                <span className="text-sm text-gray-500"> / {formatHours(myHours.target)}</span>
               </div>
               <div className={`text-sm font-bold ${myHours.delta >= 0 ? "text-emerald-600" : "text-amber-600"}`}>
-                {myHours.delta >= 0 ? `+${myHours.delta}h de sobra` : `Te faltan ${Math.abs(myHours.delta)}h`}
+                {myHours.delta >= 0 ? `+${formatHours(myHours.delta)} de sobra` : `Te faltan ${formatHours(Math.abs(myHours.delta))}`}
               </div>
             </div>
             <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden relative cursor-help"
-              title={`Tu jornada según convenio textil 2024-2026\n\nHoras: ${myHours.total}h / ${myHours.target}h (${myHours.delta >= 0 ? "+" : ""}${myHours.delta}h)\n\nDesglose:\n  • L-V: ${myHours.weekday}h\n  • Finde: ${myHours.weekend}h\n  • Refuerzos: ${myHours.refuerzo}h\n  • Extra: ${myHours.extra}h\n\nVacaciones: ${myHours.vacUsed}/${myHours.vacTotal} días`}>
+              title={`Tu jornada según convenio textil 2024-2026\n\nHoras: ${formatHours(myHours.total)} / ${formatHours(myHours.target)} (${formatHoursSigned(myHours.delta)})\n\nDesglose:\n  • L-V: ${formatHours(myHours.weekday)}\n  • Finde: ${formatHours(myHours.weekend)}\n  • Refuerzos: ${formatHours(myHours.refuerzo)}\n  • Extra: ${formatHours(myHours.extra)}\n\nVacaciones: ${myHours.vacUsed}/${myHours.vacTotal} días`}>
               <div className="absolute inset-y-0 border-r-2 border-dashed border-gray-400 z-10" style={{ left: `${Math.round((todayDate.getMonth() + 1) / 12 * 100)}%` }} title="Hoy" />
               <div className={`h-full rounded-full transition-all ${myHours.delta >= 0 ? "bg-emerald-500" : "bg-indigo-500"}`} style={{ width: `${myHours.pct}%` }} />
             </div>
