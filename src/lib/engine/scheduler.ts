@@ -172,6 +172,10 @@ export function generateSchedule(ctx: EngineContext, from: string, to: string): 
   const BUFFER_HOURS = 40;
   const refUsed = new Map<number, number>();
   for (const p of ctx.people) refUsed.set(p.id, 0);
+  // Holidays covered so far, to spread them evenly instead of letting them fall
+  // on whoever happens to be the week's weekend worker.
+  const holidaysWorked = new Map<number, number>();
+  for (const p of ctx.people) holidaysWorked.set(p.id, 0);
   // Rough budget per person: target - estimated base - extra - buffer
   const refBudget = new Map<number, number>();
   for (const p of ctx.people) {
@@ -246,11 +250,29 @@ export function generateSchedule(ctx: EngineContext, from: string, to: string): 
         person = ov.personId ? findPerson(ctx, ov.personId) || null : null;
         source = "override";
       } else if (isSat || isWH) {
-        person = plan.weekendPerson;
-        if (person && isBlocked(blockedDates, person.id, date)) {
-          const avail = rotationPeople.filter((p) => !isBlocked(blockedDates, p.id, date) && p.id !== plan.offPerson?.id);
-          avail.sort((a, b) => (counts.weekend.get(a.id) || 0) - (counts.weekend.get(b.id) || 0));
-          person = avail[0] || null; source = "balance";
+        if (isWH && !isWe) {
+          // Weekday holiday: the shop opens with a single person, so pick whoever
+          // has covered the fewest holidays this year. Using the week's weekend
+          // worker spread them very unevenly (6/3/2/0 across four people).
+          // A holiday falling on a weekend is left to the weekend worker, who is
+          // already working that weekend anyway.
+          const avail = rotationPeople.filter(
+            (p) => !isBlocked(blockedDates, p.id, date) && p.id !== plan.offPerson?.id
+          );
+          avail.sort((a, b) =>
+            (holidaysWorked.get(a.id) || 0) - (holidaysWorked.get(b.id) || 0) ||
+            (counts.weekend.get(a.id) || 0) - (counts.weekend.get(b.id) || 0) ||
+            (counts.weekday.get(a.id) || 0) - (counts.weekday.get(b.id) || 0)
+          );
+          person = avail[0] || plan.weekendPerson;
+          source = "balance";
+        } else {
+          person = plan.weekendPerson;
+          if (person && isBlocked(blockedDates, person.id, date)) {
+            const avail = rotationPeople.filter((p) => !isBlocked(blockedDates, p.id, date) && p.id !== plan.offPerson?.id);
+            avail.sort((a, b) => (counts.weekend.get(a.id) || 0) - (counts.weekend.get(b.id) || 0));
+            person = avail[0] || null; source = "balance";
+          }
         }
         if (!isWH) saturdayPerson = person;
       } else {
@@ -265,6 +287,7 @@ export function generateSchedule(ctx: EngineContext, from: string, to: string): 
       if (person) {
         day.assignments.push(makeAssignment(date, weekendShift, person, 0, source));
         counts.weekend.set(person.id, (counts.weekend.get(person.id) || 0) + 1);
+        if (isWH) holidaysWorked.set(person.id, (holidaysWorked.get(person.id) || 0) + 1);
       }
 
       // Weekend extra slots from events
