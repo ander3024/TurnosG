@@ -41,6 +41,8 @@ function buildBlockedDates(ctx: EngineContext): Map<number, Set<string>> {
   const blocked = new Map<number, Set<string>>();
   for (const p of ctx.people) blocked.set(p.id, new Set());
   for (const to of ctx.timeOffs) {
+    // cita_medica is partial hours within a day → informational only, do not block
+    if (to.type === "cita_medica") continue;
     let d = to.startDate;
     while (d <= to.endDate) {
       const dow = getDayOfWeek(d);
@@ -205,9 +207,19 @@ export function generateSchedule(ctx: EngineContext, from: string, to: string): 
       .filter((to) => to.startDate <= date && to.endDate >= date)
       .map((to) => {
         const p = ctx.people.find((pp) => pp.id === to.personId);
-        return { personId: to.personId, personCode: p?.code || "?", personName: p?.name || "?", personColor: p?.color || "#9ca3af", type: to.type };
+        return {
+          personId: to.personId,
+          personCode: p?.code || "?",
+          personName: p?.name || "?",
+          personColor: p?.color || "#9ca3af",
+          type: to.type,
+          startTime: to.startTime ?? null,
+          endTime: to.endTime ?? null,
+        };
       })
       .filter((to) => {
+        // Allow multiple cita_medica entries on the same day, but dedupe other types per person
+        if (to.type === "cita_medica") return true;
         if (seenTimeOff.has(to.personId)) return false;
         seenTimeOff.add(to.personId);
         return true;
@@ -383,7 +395,7 @@ export function generateSchedule(ctx: EngineContext, from: string, to: string): 
           // For refuerzos, only block on EXACT vacation days (not whole week)
           // This allows the person to do refuerzos on non-vacation days of their vacation week
           const hasTimeOffToday = (pid: number) => ctx.timeOffs.some(
-            (to) => to.personId === pid && to.startDate <= date && to.endDate >= date
+            (to) => to.personId === pid && to.type !== "cita_medica" && to.startDate <= date && to.endDate >= date
           );
           const cands = rotationPeople.filter(
             (p) => p.id !== plan.offPerson?.id && !hasTimeOffToday(p.id) && !assigned.has(p.id)
@@ -454,8 +466,8 @@ export function generateSchedule(ctx: EngineContext, from: string, to: string): 
       if (fixedShift) {
         for (const fp of fixedPeople) {
           if (isBlocked(blockedDates, fp.id, date)) continue;
-          // Check if manager has timeoff today
-          const hasTimeOff = day.timeOffs.some(t => t.personId === fp.id);
+          // Check if manager has timeoff today (cita_medica is informative, doesn't block)
+          const hasTimeOff = day.timeOffs.some(t => t.personId === fp.id && t.type !== "cita_medica");
           if (hasTimeOff) continue;
           day.assignments.push(makeAssignment(date, fixedShift, fp, 0, "rotation"));
           counts.weekday.set(fp.id, (counts.weekday.get(fp.id) || 0) + 1);
@@ -466,7 +478,7 @@ export function generateSchedule(ctx: EngineContext, from: string, to: string): 
     // Compute offPeople (only rotation people — managers are either assigned or on timeoff)
     if (!closed) {
       const assignedIds = new Set(day.assignments.map((a) => a.personId).filter(Boolean));
-      const timeOffIds = new Set(day.timeOffs.map((t) => t.personId));
+      const timeOffIds = new Set(day.timeOffs.filter(t => t.type !== "cita_medica").map((t) => t.personId));
       day.offPeople = rotationPeople
         .filter((p) => !assignedIds.has(p.id) && !timeOffIds.has(p.id))
         .map((p) => ({ personId: p.id, personCode: p.code, personName: p.name, personColor: p.color }));

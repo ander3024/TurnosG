@@ -18,9 +18,20 @@ export async function POST(req: NextRequest) {
     const endDate = formData.get("endDate") as string;
     const note = formData.get("note") as string | null;
     const file = formData.get("file") as File | null;
+    const startTime = (formData.get("startTime") as string | null) || null;
+    const endTime = (formData.get("endTime") as string | null) || null;
+    const isAppointment = !!(startTime && endTime);
 
     if (!startDate || !endDate) {
       return NextResponse.json({ error: "Fecha inicio y fin son obligatorias" }, { status: 400 });
+    }
+    if (isAppointment) {
+      if (startDate !== endDate) {
+        return NextResponse.json({ error: "Una cita médica debe ser en un solo día" }, { status: 400 });
+      }
+      if (endTime <= startTime) {
+        return NextResponse.json({ error: "La hora de fin debe ser posterior a la de inicio" }, { status: 400 });
+      }
     }
 
     // Save attachment if provided
@@ -38,19 +49,21 @@ export async function POST(req: NextRequest) {
       attachmentPath = `medical/${filename}`;
     }
 
-    // Create sick leave — auto-approved (no admin approval needed)
+    // Create sick leave or medical appointment — both auto-approved (no admin approval needed)
     const request = await prisma.timeOffRequest.create({
       data: {
         personId: person.id,
         requesterId: user.id,
-        type: "enfermedad",
+        type: isAppointment ? "cita_medica" : "enfermedad",
         startDate,
         endDate,
+        startTime: isAppointment ? startTime : null,
+        endTime: isAppointment ? endTime : null,
         note: note || null,
         attachmentPath,
-        status: "aprobada", // sick leave is auto-approved
+        status: "aprobada",
         reviewedAt: new Date(),
-        reviewedBy: "Auto (baja médica)",
+        reviewedBy: isAppointment ? "Auto (cita médica)" : "Auto (baja médica)",
       },
     });
 
@@ -58,11 +71,15 @@ export async function POST(req: NextRequest) {
     try {
       const { notify } = await import("@/lib/notifications");
       const admins = await prisma.user.findMany({ where: { role: "admin", active: true }, select: { id: true } });
+      const title = isAppointment ? "Cita médica reportada" : "Baja médica reportada";
+      const dateRangeMsg = isAppointment
+        ? `el ${startDate} de ${startTime} a ${endTime}`
+        : `del ${startDate} al ${endDate}`;
       await notify({
         eventType: "timeoff_requested",
         recipientUserIds: admins.map(a => a.id),
-        title: "Baja médica reportada",
-        message: `${person.name} ha reportado baja médica del ${startDate} al ${endDate}.${attachmentPath ? " Justificante adjunto." : ""}`,
+        title,
+        message: `${person.name} ha reportado ${isAppointment ? "cita médica" : "baja médica"} ${dateRangeMsg}.${attachmentPath ? " Justificante adjunto." : ""}`,
         link: "/admin/timeoff",
         type: "warning",
       });

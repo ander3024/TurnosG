@@ -28,6 +28,8 @@ interface TimeOffData {
   startDate: string;
   endDate: string;
   hoursPerDay: number;
+  startTime: string | null;
+  endTime: string | null;
   status: string;
   note: string | null;
   attachmentPath: string | null;
@@ -50,7 +52,8 @@ interface Props {
 const typeLabels: Record<string, string> = {
   vacaciones: "Vacaciones",
   asuntos_propios: "Asuntos propios",
-  enfermedad: "Enfermedad",
+  enfermedad: "Baja médica",
+  cita_medica: "Cita médica",
   otro: "Otro",
 };
 
@@ -414,7 +417,7 @@ export function TimeOffManagement({ initialRequests }: Props) {
                   <div className="flex items-center gap-2 flex-wrap min-w-0">
                     <span className="w-2.5 h-2.5 rounded-full bg-indigo-500 shrink-0" />
                     <span className="text-sm font-medium text-gray-900 truncate">{req.person.name}</span>
-                    <Badge variant={req.type === "enfermedad" ? "danger" : "info"}>
+                    <Badge variant={req.type === "enfermedad" || req.type === "cita_medica" ? "danger" : "info"}>
                       {typeLabels[req.type] || req.type}
                     </Badge>
                     {req.attachmentPath && (
@@ -430,7 +433,9 @@ export function TimeOffManagement({ initialRequests }: Props) {
                   </div>
                   {/* Dates */}
                   <p className="text-xs text-gray-500">
-                    {formatDate(req.startDate)} - {formatDate(req.endDate)}
+                    {req.type === "cita_medica" && req.startTime && req.endTime
+                      ? <>{formatDate(req.startDate)} · <span className="font-medium text-rose-600">{req.startTime}–{req.endTime}</span></>
+                      : <>{formatDate(req.startDate)} - {formatDate(req.endDate)}</>}
                     <span className="text-gray-300 mx-2">·</span>
                     por {req.requester.name}
                   </p>

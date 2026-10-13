@@ -163,6 +163,8 @@ export async function loadEngineContext(
       startDate: t.startDate,
       endDate: t.endDate,
       type: t.type,
+      startTime: t.startTime,
+      endTime: t.endTime,
     })),
     holidays,
     overrides,

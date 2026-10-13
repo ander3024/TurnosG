@@ -20,7 +20,7 @@ interface DaySchedule {
   date: string; isWeekend: boolean; isHoliday: boolean; isClosed: boolean;
   holidayLabel: string | null; assignments: ShiftAssignment[];
   events: { label: string }[];
-  timeOffs: { personId: number; personCode: string; personName: string; personColor: string; type: string }[];
+  timeOffs: { personId: number; personCode: string; personName: string; personColor: string; type: string; startTime?: string | null; endTime?: string | null }[];
   offPeople: { personId: number; personCode: string; personName: string; personColor: string }[];
 }
 interface HoursSummary {
@@ -192,13 +192,16 @@ export default function AdminCalendarPage() {
                         <span className={cn("text-[8px] ml-auto flex-shrink-0 font-bold", si.color)}>{si.shortLabel}</span>
                       </div>
                     ); })}
-                    {day?.timeOffs.filter(t => t.type !== "intercambio").map((to, i) => (
-                      <div key={`v${i}`} className="flex items-center gap-[3px] rounded-md px-1 py-[2px] bg-emerald-50">
-                        <Palmtree className="w-[10px] h-[10px] text-emerald-500 flex-shrink-0" />
-                        <span className="text-[10px] font-semibold text-emerald-700 truncate">{to.personName}</span>
-                        <span className="text-[8px] ml-auto text-emerald-500 font-bold flex-shrink-0">VAC</span>
-                      </div>
-                    ))}
+                    {day?.timeOffs.filter(t => t.type !== "intercambio").map((to, i) => {
+                      const isCita = to.type === "cita_medica";
+                      return (
+                        <div key={`v${i}`} className={cn("flex items-center gap-[3px] rounded-md px-1 py-[2px]", isCita ? "bg-rose-50" : "bg-emerald-50")}>
+                          <Palmtree className={cn("w-[10px] h-[10px] flex-shrink-0", isCita ? "text-rose-500" : "text-emerald-500")} />
+                          <span className={cn("text-[10px] font-semibold truncate", isCita ? "text-rose-700" : "text-emerald-700")}>{to.personName}</span>
+                          <span className={cn("text-[8px] ml-auto font-bold flex-shrink-0", isCita ? "text-rose-500" : "text-emerald-500")}>{isCita ? "CM" : "VAC"}</span>
+                        </div>
+                      );
+                    })}
                     {day?.timeOffs.filter(t => t.type === "intercambio").map((to, i) => (
                       <div key={`si${i}`} className="flex items-center gap-[3px] rounded-md px-1 py-[2px] bg-cyan-50">
                         <ArrowLeftRight className="w-[10px] h-[10px] text-cyan-500 flex-shrink-0" />
@@ -270,11 +273,14 @@ export default function AdminCalendarPage() {
                         </span>
                       );
                     })}
-                    {day.timeOffs.filter(t => t.type !== "intercambio").map((to, i) => (
-                      <span key={`v${i}`} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-700">
-                        <Palmtree className="w-3 h-3" /> {to.personName}
-                      </span>
-                    ))}
+                    {day.timeOffs.filter(t => t.type !== "intercambio").map((to, i) => {
+                      const isCita = to.type === "cita_medica";
+                      return (
+                        <span key={`v${i}`} className={cn("inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold", isCita ? "bg-rose-50 text-rose-700" : "bg-emerald-50 text-emerald-700")}>
+                          <Palmtree className="w-3 h-3" /> {to.personName}{isCita && to.startTime && to.endTime ? ` ${to.startTime}-${to.endTime}` : ""}
+                        </span>
+                      );
+                    })}
                     {day.timeOffs.filter(t => t.type === "intercambio").map((to, i) => (
                       <span key={`si${i}`} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-cyan-50 text-cyan-700">
                         <ArrowLeftRight className="w-3 h-3" /> {to.personName} (intercambio)
@@ -469,15 +475,21 @@ function DayEditModal({ day, people, shiftTypes, onClose, onSaved }: {
                     <Badge className="ml-auto">Libra</Badge>
                   </div>
                 ))}
-                {day.timeOffs.map((to, i) => (
-                  <div key={`v${i}`} className={cn("flex items-center gap-3 p-2.5 rounded-xl", to.type === "intercambio" ? "bg-cyan-50" : "bg-emerald-50")}>
-                    {to.type === "intercambio" ? <ArrowLeftRight className="w-4 h-4 text-cyan-500" /> : <Palmtree className="w-4 h-4 text-emerald-500" />}
-                    <span className={cn("text-sm font-medium", to.type === "intercambio" ? "text-cyan-700" : "text-emerald-700")}>{to.personName}</span>
-                    <Badge variant={to.type === "intercambio" ? "info" : "success"} className="ml-auto">
-                      {to.type === "intercambio" ? "Intercambio" : to.type === "vacaciones" ? "Vacaciones" : to.type === "enfermedad" ? "Baja" : "Ausencia"}
-                    </Badge>
-                  </div>
-                ))}
+                {day.timeOffs.map((to, i) => {
+                  const isCita = to.type === "cita_medica";
+                  const isInter = to.type === "intercambio";
+                  const bg = isInter ? "bg-cyan-50" : isCita ? "bg-rose-50" : "bg-emerald-50";
+                  const txt = isInter ? "text-cyan-700" : isCita ? "text-rose-700" : "text-emerald-700";
+                  const icon = isInter ? <ArrowLeftRight className="w-4 h-4 text-cyan-500" /> : <Palmtree className={cn("w-4 h-4", isCita ? "text-rose-500" : "text-emerald-500")} />;
+                  const label = isInter ? "Intercambio" : to.type === "vacaciones" ? "Vacaciones" : to.type === "enfermedad" ? "Baja" : isCita ? `Cita ${to.startTime || ""}-${to.endTime || ""}` : "Ausencia";
+                  return (
+                    <div key={`v${i}`} className={cn("flex items-center gap-3 p-2.5 rounded-xl", bg)}>
+                      {icon}
+                      <span className={cn("text-sm font-medium", txt)}>{to.personName}</span>
+                      <Badge variant={isInter ? "info" : isCita ? "danger" : "success"} className="ml-auto">{label}</Badge>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}

@@ -98,10 +98,12 @@ model TimeOffRequest {
   person      Person    @relation(fields: [personId], references: [id])
   requesterId Int       @map("requester_id")
   requester   User      @relation(fields: [requesterId], references: [id])
-  type        String    // vacaciones | asuntos_propios | enfermedad | otro
+  type        String    // vacaciones | asuntos_propios | enfermedad | cita_medica | intercambio | otro
   startDate   String    @map("start_date")
   endDate     String    @map("end_date")
   hoursPerDay Float     @default(8) @map("hours_per_day")
+  startTime   String?   @map("start_time") // "HH:mm" — only for cita_medica (partial hours)
+  endTime     String?   @map("end_time")   // "HH:mm" — only for cita_medica
   status      String    @default("pendiente")
   note        String?
   attachmentPath String?  @map("attachment_path") // medical certificate file

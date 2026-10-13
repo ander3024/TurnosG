@@ -75,7 +75,7 @@ export async function GET(req: NextRequest) {
       isClosed: day.isClosed,
       shifts: myShifts,
       myPersonCode: person?.code || null,
-      timeOff: myTimeOff ? { type: myTimeOff.type, status: "aprobada" } : null,
+      timeOff: myTimeOff ? { type: myTimeOff.type, status: "aprobada", startTime: myTimeOff.startTime ?? null, endTime: myTimeOff.endTime ?? null } : null,
       // If I have an intercambio timeoff, I'm off but NOT on vacation
       isSwapOff: person ? swapTimeOffs.some((to) => to.personId === person.id) : false,
       holiday: day.isHoliday ? { label: day.holidayLabel || "Festivo" } : null,
@@ -100,6 +100,8 @@ export async function GET(req: NextRequest) {
           personName: to.personName,
           personColor: to.personColor,
           type: to.type,
+          startTime: to.startTime ?? null,
+          endTime: to.endTime ?? null,
         })),
     };
   });

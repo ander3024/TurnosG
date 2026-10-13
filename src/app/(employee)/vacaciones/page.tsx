@@ -14,6 +14,8 @@ interface TimeOffRequest {
   type: string;
   startDate: string;
   endDate: string;
+  startTime: string | null;
+  endTime: string | null;
   status: string;
   note: string | null;
   createdAt: string;
@@ -42,8 +44,12 @@ export default function VacacionesPage() {
 
   // Sick leave form
   const [showSick, setShowSick] = useState(false);
+  const [sickMode, setSickMode] = useState<"baja" | "cita">("baja");
   const [sickStart, setSickStart] = useState("");
   const [sickEnd, setSickEnd] = useState("");
+  const [sickAppointmentDate, setSickAppointmentDate] = useState("");
+  const [sickStartTime, setSickStartTime] = useState("");
+  const [sickEndTime, setSickEndTime] = useState("");
   const [sickNote, setSickNote] = useState("");
   const [sickFile, setSickFile] = useState<File | null>(null);
   const [sickSubmitting, setSickSubmitting] = useState(false);
@@ -105,23 +111,39 @@ export default function VacacionesPage() {
 
   async function handleSickSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!sickStart || !sickEnd) { toast.warning("Selecciona las fechas"); return; }
+    const isAppointment = sickMode === "cita";
+    if (isAppointment) {
+      if (!sickAppointmentDate || !sickStartTime || !sickEndTime) { toast.warning("Completa fecha y horas"); return; }
+      if (sickEndTime <= sickStartTime) { toast.warning("La hora de fin debe ser posterior"); return; }
+    } else {
+      if (!sickStart || !sickEnd) { toast.warning("Selecciona las fechas"); return; }
+    }
     setSickSubmitting(true);
     try {
       const fd = new FormData();
-      fd.append("startDate", sickStart);
-      fd.append("endDate", sickEnd);
+      if (isAppointment) {
+        fd.append("startDate", sickAppointmentDate);
+        fd.append("endDate", sickAppointmentDate);
+        fd.append("startTime", sickStartTime);
+        fd.append("endTime", sickEndTime);
+      } else {
+        fd.append("startDate", sickStart);
+        fd.append("endDate", sickEnd);
+      }
       if (sickNote) fd.append("note", sickNote);
       if (sickFile) fd.append("file", sickFile);
 
       const res = await fetch("/api/employee/timeoff/sick", { method: "POST", body: fd });
       if (res.ok) {
-        toast.success("Baja médica reportada");
-        setShowSick(false); setSickStart(""); setSickEnd(""); setSickNote(""); setSickFile(null);
+        toast.success(isAppointment ? "Cita médica registrada" : "Baja médica reportada");
+        setShowSick(false); setSickMode("baja");
+        setSickStart(""); setSickEnd("");
+        setSickAppointmentDate(""); setSickStartTime(""); setSickEndTime("");
+        setSickNote(""); setSickFile(null);
         fetchRequests();
       } else {
         const data = await res.json().catch(() => ({}));
-        toast.error(data.error || "Error al reportar baja");
+        toast.error(data.error || "Error al enviar");
       }
     } catch { toast.error("Error de conexión"); }
     setSickSubmitting(false);
@@ -152,7 +174,7 @@ export default function VacacionesPage() {
                 <Plus className="w-4 h-4" /> Solicitar ausencia
               </Button>
               <Button onClick={() => setShowSick(true)} size="sm" variant="danger">
-                <Stethoscope className="w-4 h-4" /> Baja médica
+                <Stethoscope className="w-4 h-4" /> Baja / cita médica
               </Button>
             </>
           )}
@@ -255,7 +277,7 @@ export default function VacacionesPage() {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Stethoscope className="w-5 h-5 text-red-500" />
-                <h2 className="font-semibold text-gray-900">Reportar baja médica</h2>
+                <h2 className="font-semibold text-gray-900">{sickMode === "cita" ? "Registrar cita médica" : "Reportar baja médica"}</h2>
               </div>
               <button onClick={() => setShowSick(false)} className="text-gray-400 hover:text-gray-600">
                 <X className="w-5 h-5" />
@@ -264,12 +286,35 @@ export default function VacacionesPage() {
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSickSubmit} className="space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <Input id="sickStart" label="Fecha inicio" type="date" value={sickStart}
-                  onChange={(e) => setSickStart(e.target.value)} required />
-                <Input id="sickEnd" label="Fecha fin" type="date" value={sickEnd}
-                  onChange={(e) => setSickEnd(e.target.value)} required />
+              {/* Mode toggle */}
+              <div className="grid grid-cols-2 gap-2 bg-gray-50 p-1 rounded-xl">
+                <button type="button" onClick={() => setSickMode("baja")}
+                  className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${sickMode === "baja" ? "bg-white shadow-sm text-red-600" : "text-gray-500"}`}>
+                  Día/s completos
+                </button>
+                <button type="button" onClick={() => setSickMode("cita")}
+                  className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${sickMode === "cita" ? "bg-white shadow-sm text-red-600" : "text-gray-500"}`}>
+                  Solo unas horas
+                </button>
               </div>
+
+              {sickMode === "baja" ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <Input id="sickStart" label="Fecha inicio" type="date" value={sickStart}
+                    onChange={(e) => setSickStart(e.target.value)} required />
+                  <Input id="sickEnd" label="Fecha fin" type="date" value={sickEnd}
+                    onChange={(e) => setSickEnd(e.target.value)} required />
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <Input id="sickAppDate" label="Día" type="date" value={sickAppointmentDate}
+                    onChange={(e) => setSickAppointmentDate(e.target.value)} required />
+                  <Input id="sickStartTime" label="Desde" type="time" value={sickStartTime}
+                    onChange={(e) => setSickStartTime(e.target.value)} required />
+                  <Input id="sickEndTime" label="Hasta" type="time" value={sickEndTime}
+                    onChange={(e) => setSickEndTime(e.target.value)} required />
+                </div>
+              )}
               <div className="space-y-1.5">
                 <label className="block text-sm font-medium text-gray-700">Justificante médico</label>
                 <div className="flex items-center gap-3">
@@ -291,7 +336,7 @@ export default function VacacionesPage() {
               <div className="flex justify-end gap-3">
                 <Button variant="secondary" type="button" onClick={() => setShowSick(false)}>Cancelar</Button>
                 <Button type="submit" loading={sickSubmitting} className="!bg-red-600 hover:!bg-red-700">
-                  <Stethoscope className="w-4 h-4" /> Reportar baja
+                  <Stethoscope className="w-4 h-4" /> {sickMode === "cita" ? "Registrar cita" : "Reportar baja"}
                 </Button>
               </div>
             </form>
@@ -329,14 +374,16 @@ export default function VacacionesPage() {
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
                       <p className="text-sm font-medium text-gray-900">
-                        {formatDate(req.startDate)} - {formatDate(req.endDate)}
+                        {req.type === "cita_medica" && req.startTime && req.endTime
+                          ? <>{formatDate(req.startDate)} · <span className="text-rose-600">{req.startTime}–{req.endTime}</span></>
+                          : <>{formatDate(req.startDate)} - {formatDate(req.endDate)}</>}
                       </p>
                       <Badge className={statusColor(req.status)}>
                         {statusLabel(req.status)}
                       </Badge>
                     </div>
                     <p className="text-xs text-gray-500 capitalize">
-                      {req.type.replace("_", " ")}
+                      {req.type === "cita_medica" ? "Cita médica" : req.type === "enfermedad" ? "Baja médica" : req.type.replace("_", " ")}
                       {req.note && ` — ${req.note}`}
                     </p>
                   </div>

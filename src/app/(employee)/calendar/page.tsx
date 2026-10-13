@@ -12,8 +12,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 interface TeamAssignment { personCode: string | null; personName: string | null; personColor: string | null; shiftLabel: string; startTime: string; endTime: string; }
 interface OffPerson { personCode: string; personName: string; personColor: string; }
-interface TeamTimeOff { personCode: string; personName: string; personColor: string; type: string; }
-interface DayData { date: string; isWeekend: boolean; isClosed: boolean; shifts: { code: string; label: string; startTime: string; endTime: string; hours: number }[]; myPersonCode?: string | null; timeOff: { type: string; status: string } | null; isSwapOff?: boolean; holiday: { label: string } | null; teamAssignments: TeamAssignment[]; offPeople?: OffPerson[]; teamTimeOffs?: TeamTimeOff[]; }
+interface TeamTimeOff { personCode: string; personName: string; personColor: string; type: string; startTime?: string | null; endTime?: string | null; }
+interface DayData { date: string; isWeekend: boolean; isClosed: boolean; shifts: { code: string; label: string; startTime: string; endTime: string; hours: number }[]; myPersonCode?: string | null; timeOff: { type: string; status: string; startTime?: string | null; endTime?: string | null } | null; isSwapOff?: boolean; holiday: { label: string } | null; teamAssignments: TeamAssignment[]; offPeople?: OffPerson[]; teamTimeOffs?: TeamTimeOff[]; }
 interface SwapInfo { id: number; fromPerson: { name: string; color: string }; toPerson: { name: string; color: string }; fromDate: string; toDate: string; fromShiftLabel: string; toShiftLabel: string; status: string; isOneWay?: boolean }
 
 const MONTHS = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
@@ -162,27 +162,36 @@ export default function CalendarPage() {
                       </div>
                     );
                   })}
-                  {day?.timeOff && (
+                  {day?.timeOff && day.timeOff.type !== "cita_medica" && (
                     <div className="flex items-center gap-[3px] rounded-md px-1 py-[2px] bg-emerald-50 ring-2 ring-emerald-300">
                       <Palmtree className="w-[10px] h-[10px] text-emerald-500" />
                       <span className="text-[10px] font-bold text-emerald-700">Tú</span>
                       <span className="text-[8px] ml-auto text-emerald-500 font-bold">VAC</span>
                     </div>
                   )}
-                  {!day?.timeOff && day?.isSwapOff && (
+                  {day?.timeOff?.type === "cita_medica" && (
+                    <div className="flex items-center gap-[3px] rounded-md px-1 py-[2px] bg-rose-50 ring-2 ring-rose-300">
+                      <span className="text-[10px] font-bold text-rose-700">Tú</span>
+                      <span className="text-[8px] ml-auto text-rose-500 font-bold">CM</span>
+                    </div>
+                  )}
+                  {(!day?.timeOff || day?.timeOff.type === "cita_medica") && day?.isSwapOff && (
                     <div className="flex items-center gap-[3px] rounded-md px-1 py-[2px] bg-cyan-50 ring-2 ring-cyan-300">
                       <ArrowLeftRight className="w-[10px] h-[10px] text-cyan-500" />
                       <span className="text-[10px] font-bold text-cyan-700">Tú</span>
                       <span className="text-[8px] ml-auto text-cyan-500 font-bold">LIB</span>
                     </div>
                   )}
-                  {day?.teamTimeOffs?.map((tt, i) => (
-                    <div key={`tt${i}`} className="flex items-center gap-[3px] rounded-md px-1 py-[2px] bg-emerald-50/50">
-                      <Palmtree className="w-[10px] h-[10px] text-emerald-400" />
-                      <span className="text-[10px] font-medium text-emerald-600 truncate">{tt.personName}</span>
-                      <span className="text-[8px] ml-auto text-emerald-400 font-bold">VAC</span>
-                    </div>
-                  ))}
+                  {day?.teamTimeOffs?.map((tt, i) => {
+                    const isCita = tt.type === "cita_medica";
+                    return (
+                      <div key={`tt${i}`} className={cn("flex items-center gap-[3px] rounded-md px-1 py-[2px]", isCita ? "bg-rose-50/60" : "bg-emerald-50/50")}>
+                        <Palmtree className={cn("w-[10px] h-[10px]", isCita ? "text-rose-400" : "text-emerald-400")} />
+                        <span className={cn("text-[10px] font-medium truncate", isCita ? "text-rose-600" : "text-emerald-600")}>{tt.personName}</span>
+                        <span className={cn("text-[8px] ml-auto font-bold", isCita ? "text-rose-400" : "text-emerald-400")}>{isCita ? "CM" : "VAC"}</span>
+                      </div>
+                    );
+                  })}
                   {day?.offPeople?.map((op, i) => (
                     <div key={`op${i}`} className="flex items-center gap-[3px] rounded-md px-1 py-[2px] bg-gray-50">
                       <BedDouble className="w-[10px] h-[10px] text-gray-400" />
@@ -236,12 +245,17 @@ export default function CalendarPage() {
                 </div>
                 <div className="flex-1 min-w-0 space-y-1.5">
                   {day.holiday && <div className="text-xs font-semibold text-rose-600">{day.holiday.label}{day.isClosed ? " (cerrado)" : ""}</div>}
-                  {day.timeOff && (
+                  {day.timeOff && day.timeOff.type !== "cita_medica" && (
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-emerald-100 text-emerald-700 text-xs font-semibold">
-                      <Palmtree className="w-3 h-3" /> Vacaciones
+                      <Palmtree className="w-3 h-3" /> {day.timeOff.type === "enfermedad" ? "Baja médica" : "Vacaciones"}
                     </span>
                   )}
-                  {!day.timeOff && day.isSwapOff && (
+                  {day.timeOff?.type === "cita_medica" && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-rose-100 text-rose-700 text-xs font-semibold">
+                      Cita médica {day.timeOff.startTime}-{day.timeOff.endTime}
+                    </span>
+                  )}
+                  {(!day.timeOff || day.timeOff.type === "cita_medica") && day.isSwapOff && (
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-cyan-100 text-cyan-700 text-xs font-semibold">
                       <ArrowLeftRight className="w-3 h-3" /> Libras (intercambio)
                     </span>
@@ -255,7 +269,7 @@ export default function CalendarPage() {
                       </div>
                     );
                   })}
-                  {!hasMyShift && !day.timeOff && !day.isSwapOff && !day.isClosed && (
+                  {!hasMyShift && (!day.timeOff || day.timeOff.type === "cita_medica") && !day.isSwapOff && !day.isClosed && (
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-gray-100 text-gray-400 text-xs"><BedDouble className="w-3 h-3" /> Libras</span>
                   )}
                   {!day.isClosed && (
@@ -270,11 +284,14 @@ export default function CalendarPage() {
                           </span>
                         );
                       })}
-                      {day.teamTimeOffs?.map((tt, i) => (
-                        <span key={`tt${i}`} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] bg-emerald-50 text-emerald-600 border border-emerald-100">
-                          <Palmtree className="w-3 h-3" /> {tt.personName}
-                        </span>
-                      ))}
+                      {day.teamTimeOffs?.map((tt, i) => {
+                        const isCita = tt.type === "cita_medica";
+                        return (
+                          <span key={`tt${i}`} className={cn("inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] border", isCita ? "bg-rose-50 text-rose-600 border-rose-100" : "bg-emerald-50 text-emerald-600 border-emerald-100")}>
+                            <Palmtree className="w-3 h-3" /> {tt.personName}{isCita && tt.startTime && tt.endTime ? ` ${tt.startTime}-${tt.endTime}` : ""}
+                          </span>
+                        );
+                      })}
                       {day.offPeople?.map((op, i) => (
                         <span key={`op${i}`} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] bg-gray-100 text-gray-400">
                           <BedDouble className="w-3 h-3" /> {op.personName}
@@ -319,13 +336,18 @@ export default function CalendarPage() {
             </div>
             <div className="px-5 py-4 space-y-4">
               {selectedDay.holiday && <Badge variant="warning">{selectedDay.holiday.label}</Badge>}
-              {selectedDay.timeOff && (
+              {selectedDay.timeOff && selectedDay.timeOff.type !== "cita_medica" && (
                 <div className="p-3 rounded-xl bg-emerald-50 flex items-center gap-3">
                   <Palmtree className="w-5 h-5 text-emerald-600" />
-                  <p className="text-sm font-semibold text-emerald-800">Estás de vacaciones</p>
+                  <p className="text-sm font-semibold text-emerald-800">{selectedDay.timeOff.type === "enfermedad" ? "Estás de baja médica" : "Estás de vacaciones"}</p>
                 </div>
               )}
-              {!selectedDay.timeOff && selectedDay.isSwapOff && (
+              {selectedDay.timeOff?.type === "cita_medica" && (
+                <div className="p-3 rounded-xl bg-rose-50 flex items-center gap-3">
+                  <p className="text-sm font-semibold text-rose-800">Cita médica de {selectedDay.timeOff.startTime} a {selectedDay.timeOff.endTime}</p>
+                </div>
+              )}
+              {(!selectedDay.timeOff || selectedDay.timeOff.type === "cita_medica") && selectedDay.isSwapOff && (
                 <div className="p-3 rounded-xl bg-cyan-50 flex items-center gap-3">
                   <ArrowLeftRight className="w-5 h-5 text-cyan-600" />
                   <p className="text-sm font-semibold text-cyan-800">Libras por intercambio de turno</p>
@@ -377,7 +399,7 @@ export default function CalendarPage() {
                         </div>
                         <div className="flex-1">
                           <p className="text-sm font-semibold text-emerald-700">{tt.personName}</p>
-                          <p className="text-xs text-emerald-500">{tt.type === "vacaciones" ? "Vacaciones" : tt.type === "enfermedad" ? "Baja" : "Ausencia"}</p>
+                          <p className="text-xs text-emerald-500">{tt.type === "vacaciones" ? "Vacaciones" : tt.type === "enfermedad" ? "Baja" : tt.type === "cita_medica" ? `Cita médica ${tt.startTime || ""}-${tt.endTime || ""}` : "Ausencia"}</p>
                         </div>
                         <Palmtree className="w-4 h-4 text-emerald-400" />
                       </div>

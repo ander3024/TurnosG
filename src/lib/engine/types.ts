@@ -36,6 +36,8 @@ export interface EngineTimeOff {
   startDate: string;
   endDate: string;
   type: string;
+  startTime?: string | null; // HH:mm — only for cita_medica
+  endTime?: string | null;
 }
 
 export interface EngineHoliday {
@@ -117,7 +119,7 @@ export interface DaySchedule {
   holidayLabel: string | null;
   assignments: ShiftAssignment[];
   events: { label: string; color: string | null }[];
-  timeOffs: { personId: number; personCode: string; personName: string; personColor: string; type: string }[];
+  timeOffs: { personId: number; personCode: string; personName: string; personColor: string; type: string; startTime?: string | null; endTime?: string | null }[];
   offPeople: { personId: number; personCode: string; personName: string; personColor: string }[];
 }
 
