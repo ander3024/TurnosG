@@ -47,3 +47,9 @@ prisma/dev.db
 
 # Original assets
 logo-elganso-original.jpg
+
+# Local SQLite copy at repo root (live DB is prisma/dev.db)
+/dev.db
+
+# User uploads — medical certificates, personal health data. Never commit.
+/uploads/
