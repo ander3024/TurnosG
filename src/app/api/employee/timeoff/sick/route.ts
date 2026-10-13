@@ -37,7 +37,8 @@ export async function POST(req: NextRequest) {
     // Save attachment if provided
     let attachmentPath: string | null = null;
     if (file && file.size > 0) {
-      const uploadDir = path.join(process.cwd(), "uploads", "medical");
+      const uploadsRoot = process.env.UPLOADS_DIR || path.join(process.cwd(), "uploads");
+      const uploadDir = path.join(uploadsRoot, "medical");
       await mkdir(uploadDir, { recursive: true });
 
       const ext = file.name.split(".").pop() || "bin";

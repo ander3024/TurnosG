@@ -1,8 +1,8 @@
-// El Ganso Turnos - Service Worker v11
+// El Ganso Turnos - Service Worker v12
 // Network-first for everything, cache only for offline fallback
 // Push notifications
 
-var CACHE = "eg-turnos-v11";
+var CACHE = "eg-turnos-v12";
 var OFFLINE = "/offline.html";
 
 self.addEventListener("install", function(e) {

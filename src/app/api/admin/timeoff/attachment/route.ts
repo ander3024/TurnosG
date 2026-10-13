@@ -16,7 +16,8 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "No attachment" }, { status: 404 });
     }
 
-    const filePath = path.join(process.cwd(), "uploads", timeoff.attachmentPath);
+    const uploadsRoot = process.env.UPLOADS_DIR || path.join(process.cwd(), "uploads");
+    const filePath = path.join(uploadsRoot, timeoff.attachmentPath);
     const buffer = await readFile(filePath);
     const ext = filePath.split(".").pop()?.toLowerCase() || "";
 
