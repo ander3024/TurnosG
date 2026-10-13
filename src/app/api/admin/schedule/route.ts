@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth";
-import { loadEngineContext, generateSchedule } from "@/lib/engine";
+import { loadEngineContextForRange, generateScheduleSlice } from "@/lib/engine";
 
 export async function GET(request: NextRequest) {
   try {
@@ -17,8 +17,8 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const ctx = await loadEngineContext(from, to);
-    const schedule = generateSchedule(ctx, from, to);
+    const ctx = await loadEngineContextForRange(from, to);
+    const schedule = generateScheduleSlice(ctx, from, to);
 
     return NextResponse.json({ schedule, settings: ctx.settings });
   } catch (error: any) {

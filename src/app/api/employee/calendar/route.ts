@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { loadEngineContext, generateSchedule } from "@/lib/engine";
+import { loadEngineContextForRange, generateScheduleSlice } from "@/lib/engine";
 
 // GET /api/employee/calendar?start=YYYY-MM-DD&end=YYYY-MM-DD
 export async function GET(req: NextRequest) {
@@ -27,8 +27,8 @@ export async function GET(req: NextRequest) {
   });
 
   // Use the engine to compute the full schedule
-  const ctx = await loadEngineContext(start, end);
-  const schedule = generateSchedule(ctx, start, end);
+  const ctx = await loadEngineContextForRange(start, end);
+  const schedule = generateScheduleSlice(ctx, start, end);
 
   // Build response with employee's shifts highlighted
   const days = schedule.map((day) => {

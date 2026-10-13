@@ -682,3 +682,34 @@ export function generateScheduleToTarget(
     maxConsecutiveDays: opts?.maxConsecutiveDays,
   });
 }
+
+/**
+ * Genera el cuadrante de un rango cualquiera **calculandolo siempre sobre el ano
+ * completo** y devolviendo solo los dias pedidos.
+ *
+ * Sin esto el cuadrante depende del rango que se pida, porque el reparto elige
+ * "quien menos horas lleva" con contadores que arrancan en el primer dia del
+ * rango. Pedir un solo dia, una semana, un mes o el ano entero daba hasta tres
+ * respuestas distintas para la misma fecha: el 6-nov-2026 salia Tarde=Edu pidiendo
+ * el mes y Tarde=Mario pidiendo el ano. El calendario que ve la gente y las horas
+ * de la pantalla de estadisticas eran, literalmente, dos cuadrantes diferentes.
+ *
+ * El `ctx` debe venir cargado con el ano completo: usa `loadEngineContextForRange`.
+ */
+export function generateScheduleSlice(
+  ctx: EngineContext,
+  from: string,
+  to: string
+): DaySchedule[] {
+  const firstYear = parseInt(from.slice(0, 4), 10);
+  const lastYear = parseInt(to.slice(0, 4), 10);
+  const out: DaySchedule[] = [];
+  for (let y = firstYear; y <= lastYear; y++) {
+    const full = generateSchedule(ctx, `${y}-01-01`, `${y}-12-31`);
+    for (const day of full) {
+      if (day.date >= from && day.date <= to) out.push(day);
+    }
+  }
+  return out;
+}
+

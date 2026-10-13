@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { formatDate, statusColor, statusLabel, formatHours, formatHoursSigned } from "@/lib/utils";
-import { loadEngineContext, generateSchedule, buildHoursSummary } from "@/lib/engine";
+import { loadEngineContextForRange, generateScheduleSlice, buildHoursSummary } from "@/lib/engine";
 import { InfoTooltip } from "@/components/ui/info-tooltip";
 import {
   Sunrise, Moon, Sun, BedDouble, Palmtree, ArrowLeftRight,
@@ -28,8 +28,13 @@ export default async function EmployeeDashboard() {
   const ym = today.slice(0, 7).split("-");
   const monthEnd = today.slice(0, 8) + String(new Date(parseInt(ym[0]), parseInt(ym[1]), 0).getDate()).padStart(2, "0");
 
-  const ctx = await loadEngineContext(monthStart, monthEnd);
-  const schedule = generateSchedule(ctx, monthStart, monthEnd);
+  // El cuadrante se calcula sobre el ano completo (el objetivo anual solo tiene
+  // sentido asi) y se reutiliza para el mes y para el resumen de horas de abajo.
+  const yearStart = today.slice(0, 4) + "-01-01";
+  const yearEnd = today.slice(0, 4) + "-12-31";
+  const ctx = await loadEngineContextForRange(yearStart, yearEnd);
+  const yearSchedule = generateScheduleSlice(ctx, yearStart, yearEnd);
+  const schedule = yearSchedule.filter(d => d.date >= monthStart && d.date <= monthEnd);
   const todaySchedule = schedule.find(d => d.date === today);
 
   // My shift today
@@ -102,17 +107,14 @@ export default async function EmployeeDashboard() {
   // Annual hours summary (full year, past + planned)
   let myHours: { total: number; target: number; delta: number; pct: number; pctToDate: number; targetToDate: number; weekday: number; weekend: number; refuerzo: number; extra: number; vacUsed: number; vacTotal: number } | null = null;
   if (person) {
-    const yearStart = today.slice(0, 4) + "-01-01";
-    const yearEnd = today.slice(0, 4) + "-12-31";
-    const yearCtx = await loadEngineContext(yearStart, yearEnd);
-    const yearSchedule = generateSchedule(yearCtx, yearStart, yearEnd);
+
     const summary = buildHoursSummary(
       yearSchedule.flatMap(d => d.assignments),
-      yearCtx.extraHours,
-      yearCtx.timeOffs,
-      yearCtx.settings.annualTargetHours,
-      yearCtx.settings.vacationDaysNatural,
-      yearCtx.people,
+      ctx.extraHours,
+      ctx.timeOffs,
+      ctx.settings.annualTargetHours,
+      ctx.settings.vacationDaysNatural,
+      ctx.people,
       holidayDates,
     );
     const mine = summary.find(h => h.personId === person.id);

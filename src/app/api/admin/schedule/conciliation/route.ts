@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth";
 import {
-  loadEngineContext,
-  generateSchedule,
+  loadEngineContextForRange,
+  generateScheduleSlice,
   calculateConciliation,
 } from "@/lib/engine";
 
@@ -21,8 +21,8 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const ctx = await loadEngineContext(from, to);
-    const schedule = generateSchedule(ctx, from, to);
+    const ctx = await loadEngineContextForRange(from, to);
+    const schedule = generateScheduleSlice(ctx, from, to);
     const scores = calculateConciliation(schedule, ctx.people);
 
     return NextResponse.json({ scores });
