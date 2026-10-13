@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { notify } from "@/lib/notifications";
-import { loadEngineContextForRange, generateScheduleSlice } from "@/lib/engine";
+import { loadEngineContext, generateSchedule } from "@/lib/engine";
 
 // Validate if a swap can be auto-approved
 function validateSwap(fromShift: string, toShift: string): {
@@ -195,8 +195,8 @@ export async function PATCH(
       const ym = latest.slice(0, 7).split("-");
       const monthEnd = latest.slice(0, 8) + String(new Date(parseInt(ym[0]), parseInt(ym[1]), 0).getDate()).padStart(2, "0");
 
-      const ctx = await loadEngineContextForRange(monthStart, monthEnd);
-      const schedule = generateScheduleSlice(ctx, monthStart, monthEnd);
+      const ctx = await loadEngineContext(monthStart, monthEnd);
+      const schedule = generateSchedule(ctx, monthStart, monthEnd);
 
       // Find fromPerson's ACTUAL assignment on fromDate (whatever shift they really have)
       const fromDay = schedule.find(d => d.date === swap.fromDate);

@@ -682,32 +682,3 @@ export function generateScheduleToTarget(
     maxConsecutiveDays: opts?.maxConsecutiveDays,
   });
 }
-
-/**
- * Genera el cuadrante de un rango cualquiera **calculandolo siempre sobre el ano
- * completo** y devolviendo solo los dias pedidos.
- *
- * Esto es lo que hace que una vista de mes y una de ano coincidan: el objetivo
- * anual solo significa algo sobre el ano entero, asi que si cada llamador generase
- * su propio rango, el calendario del empleado (un mes) y el del admin (el ano)
- * mostrarian turnos distintos. El `ctx` debe venir cargado con el ano completo:
- * usa `loadEngineContextForRange`.
- */
-export function generateScheduleSlice(
-  ctx: EngineContext,
-  from: string,
-  to: string,
-  opts?: { maxConsecutiveDays?: number }
-): DaySchedule[] {
-  const firstYear = parseInt(from.slice(0, 4), 10);
-  const lastYear = parseInt(to.slice(0, 4), 10);
-  const out: DaySchedule[] = [];
-  for (let y = firstYear; y <= lastYear; y++) {
-    const full = generateScheduleToTarget(ctx, `${y}-01-01`, `${y}-12-31`, opts);
-    for (const day of full) {
-      if (day.date >= from && day.date <= to) out.push(day);
-    }
-  }
-  return out;
-}
-

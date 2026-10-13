@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Users, Calendar, Palmtree, Clock, AlertCircle, CheckCircle2, ArrowRight, TrendingUp } from "lucide-react";
 import Link from "next/link";
-import { loadEngineContextForRange, generateScheduleSlice, buildHoursSummary } from "@/lib/engine";
+import { loadEngineContext, generateSchedule, buildHoursSummary } from "@/lib/engine";
 import { requireAdminPage } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
@@ -188,8 +188,8 @@ async function HoursOverview() {
     const year = now.getFullYear();
     const from = `${year}-01-01`;
     const to = `${year}-12-31`;
-    const ctx = await loadEngineContextForRange(from, to);
-    const schedule = generateScheduleSlice(ctx, from, to);
+    const ctx = await loadEngineContext(from, to);
+    const schedule = generateSchedule(ctx, from, to);
     const allAssignments = schedule.flatMap((d) => d.assignments);
     const holidayDates = new Set<string>();
     for (const [date, h] of ctx.holidays) {

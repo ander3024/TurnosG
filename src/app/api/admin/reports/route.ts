@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { loadEngineContextForRange, generateScheduleSlice } from "@/lib/engine";
+import { loadEngineContext, generateSchedule } from "@/lib/engine";
 import ExcelJS from "exceljs";
 
 const MONTH_NAMES = ["ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"];
@@ -29,8 +29,8 @@ export async function GET(req: NextRequest) {
     const holidays = await prisma.holiday.findMany({ where: { year } });
     const holidayMap = new Map(holidays.map(h => [h.date, h]));
 
-    const ctx = await loadEngineContextForRange(from, to);
-    const schedule = generateScheduleSlice(ctx, from, to);
+    const ctx = await loadEngineContext(from, to);
+    const schedule = generateSchedule(ctx, from, to);
     const scheduleMap = new Map(schedule.map(d => [d.date, d]));
 
     const wb = new ExcelJS.Workbook();

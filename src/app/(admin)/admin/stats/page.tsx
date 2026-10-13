@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { loadEngineContextForRange, generateScheduleSlice, buildHoursSummary } from "@/lib/engine";
+import { loadEngineContext, generateSchedule, buildHoursSummary } from "@/lib/engine";
 import {
   BarChart3, Clock, ArrowLeftRight, Palmtree, Users, TrendingUp, Sun, Moon, Sunrise, Download,
 } from "lucide-react";
@@ -33,8 +33,8 @@ export default async function StatsPage() {
   const holidayDates = new Set(holidays.map(h => h.date));
 
   // Generate full year schedule
-  const ctx = await loadEngineContextForRange(from, to);
-  const schedule = generateScheduleSlice(ctx, from, to);
+  const ctx = await loadEngineContext(from, to);
+  const schedule = generateSchedule(ctx, from, to);
   const allAssignments = schedule.flatMap(d => d.assignments);
 
   const hours = buildHoursSummary(
