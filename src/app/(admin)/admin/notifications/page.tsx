@@ -28,7 +28,11 @@ interface Notification {
   message: string;
   type: string;
   read: boolean;
+  readAt: string | null;
   createdAt: string;
+  pushedAt: string | null;
+  pushDevices: number | null;
+  pushError: string | null;
   user: { name: string; email: string };
 }
 
@@ -459,7 +463,7 @@ export default function AdminNotificationsPage() {
                       )}
                     </div>
                     <p className="text-sm text-gray-500 mt-0.5">{n.message}</p>
-                    <div className="flex items-center gap-3 mt-1">
+                    <div className="flex items-center gap-3 mt-1 flex-wrap">
                       <span className="text-xs text-gray-400">
                         {new Date(n.createdAt).toLocaleString("es-ES")}
                       </span>
@@ -467,6 +471,27 @@ export default function AdminNotificationsPage() {
                         <span className="text-xs text-gray-400">
                           Para: {n.user.name}
                         </span>
+                      )}
+                      {/* Trazabilidad del envio: para poder demostrar que salio y que la abrieron */}
+                      {n.pushError ? (
+                        <span className="text-xs font-medium text-rose-600" title={n.pushError}>
+                          Push falló
+                        </span>
+                      ) : n.pushedAt && (n.pushDevices ?? 0) > 0 ? (
+                        <span className="text-xs text-emerald-600">
+                          Enviada a {n.pushDevices} {n.pushDevices === 1 ? "dispositivo" : "dispositivos"}
+                        </span>
+                      ) : n.pushedAt ? (
+                        <span className="text-xs text-gray-400">Sin dispositivos</span>
+                      ) : null}
+                      {n.read && n.readAt ? (
+                        <span className="text-xs font-medium text-emerald-700">
+                          Leída {new Date(n.readAt).toLocaleString("es-ES")}
+                        </span>
+                      ) : n.read ? (
+                        <span className="text-xs text-emerald-700">Leída</span>
+                      ) : (
+                        <span className="text-xs text-amber-600">Sin leer</span>
                       )}
                     </div>
                   </div>

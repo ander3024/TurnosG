@@ -232,8 +232,14 @@ model Notification {
   message   String
   type      String   @default("info")
   read      Boolean  @default(false)
+  readAt    DateTime? @map("read_at")      // cuando la abrio, no solo si la abrio
   link      String?
   createdAt DateTime @default(now()) @map("created_at")
+
+  // Resultado del envio push, para poder demostrar que salio
+  pushedAt    DateTime? @map("pushed_at")
+  pushDevices Int?      @map("push_devices")  // a cuantos dispositivos
+  pushError   String?   @map("push_error")
 
   @@map("notifications")
 }

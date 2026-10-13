@@ -32,7 +32,7 @@ export async function PATCH(req: NextRequest) {
     // Mark all as read
     await prisma.notification.updateMany({
       where: { userId: user.id, read: false },
-      data: { read: true },
+      data: { read: true, readAt: new Date() },
     });
   } else if (Array.isArray(ids) && ids.length > 0) {
     // Mark specific ones as read
@@ -40,8 +40,9 @@ export async function PATCH(req: NextRequest) {
       where: {
         id: { in: ids },
         userId: user.id,
+        read: false,
       },
-      data: { read: true },
+      data: { read: true, readAt: new Date() },
     });
   } else {
     return NextResponse.json(

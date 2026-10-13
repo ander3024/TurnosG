@@ -100,83 +100,84 @@ export async function notify({
     // If config fails, just skip email
   }
 
+  // ─── Paso 1 (se espera): dejar la prueba escrita en disco ───
+  // La notificacion in-app es el registro que queda para siempre, con su hora y
+  // su marca de leida. Se espera a propósito: cuando quien guarda ve "hecho", el
+  // registro ya existe. Son milisegundos, es base de datos local.
+  const creadas: { userId: number; notificationId: number | null; push: boolean; email: boolean }[] = [];
   for (const userId of recipientUserIds) {
-    // Check user preference for this event type
     const pref = await prisma.notificationPreference.findUnique({
       where: { userId_eventType: { userId, eventType } },
     });
-
     // Defaults: inApp = true, push = true, email = false (when no preference record exists)
     const inApp = pref ? pref.inApp : true;
     const push = pref ? pref.push : true;
     const emailPref = pref ? pref.email : false;
 
-    // Create in-app notification if enabled
+    let notificationId: number | null = null;
     if (inApp) {
-      await prisma.notification.create({
-        data: {
-          userId,
-          title,
-          message,
-          type,
-          link: link || null,
-        },
+      const n = await prisma.notification.create({
+        data: { userId, title, message, type, link: link || null },
       });
+      notificationId = n.id;
     }
+    creadas.push({ userId, notificationId, push, email: emailPref && emailEnabled });
+  }
 
-    // Send web push if enabled
-    if (push) {
-      const subscriptions = await prisma.pushSubscription.findMany({
-        where: { userId },
-      });
-
-      const payload = JSON.stringify({ title, body: message, url: link });
-
-      for (const sub of subscriptions) {
-        try {
-          await webpush.sendNotification(
-            {
-              endpoint: sub.endpoint,
-              keys: { p256dh: sub.p256dh, auth: sub.auth },
-            },
-            payload
-          );
-        } catch (err: any) {
-          // If subscription is expired or invalid, remove it
-          if (err.statusCode === 404 || err.statusCode === 410) {
-            await prisma.pushSubscription.delete({ where: { id: sub.id } });
-          } else {
-            console.error(
-              `Error enviando push a usuario ${userId}:`,
-              err.message
+  // ─── Paso 2 (NO se espera): push y email ───
+  // Son llamadas de red a Apple/Google y a SMTP2GO: cientos de milisegundos cada
+  // una, y una suscripcion muerta se queda esperando hasta agotar el tiempo. Se
+  // lanzan en segundo plano y el resultado se apunta en la propia notificacion,
+  // asi que no se pierde la trazabilidad por no esperar.
+  void (async () => {
+    for (const r of creadas) {
+      if (r.push) {
+        const subscriptions = await prisma.pushSubscription.findMany({ where: { userId: r.userId } });
+        const payload = JSON.stringify({ title, body: message, url: link });
+        let enviados = 0;
+        const errores: string[] = [];
+        for (const sub of subscriptions) {
+          try {
+            await webpush.sendNotification(
+              { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
+              payload
             );
+            enviados++;
+          } catch (err: any) {
+            if (err.statusCode === 404 || err.statusCode === 410) {
+              // Suscripcion caducada (movil reinstalado, app borrada)
+              await prisma.pushSubscription.delete({ where: { id: sub.id } }).catch(() => {});
+              errores.push(`dispositivo dado de baja (${err.statusCode})`);
+            } else {
+              errores.push(err.message || "error desconocido");
+            }
           }
         }
-      }
-    }
-
-    // Send email notification if enabled
-    if (emailPref && emailEnabled) {
-      try {
-        const user = await prisma.user.findUnique({
-          where: { id: userId },
-          select: { name: true, email: true },
-        });
-
-        if (user && user.email) {
-          await sendNotificationEmail(
-            { name: user.name, email: user.email },
-            title,
-            message,
-            link
-          );
+        if (r.notificationId) {
+          await prisma.notification.update({
+            where: { id: r.notificationId },
+            data: {
+              pushedAt: new Date(),
+              pushDevices: enviados,
+              pushError: errores.length ? errores.join("; ").slice(0, 500) : null,
+            },
+          }).catch(() => {});
         }
-      } catch (err) {
-        console.error(
-          `Error enviando email a usuario ${userId}:`,
-          err
-        );
+      }
+
+      if (r.email) {
+        try {
+          const user = await prisma.user.findUnique({
+            where: { id: r.userId },
+            select: { name: true, email: true },
+          });
+          if (user?.email) {
+            await sendNotificationEmail({ name: user.name, email: user.email }, title, message, link);
+          }
+        } catch (err) {
+          console.error(`Error enviando email a usuario ${r.userId}:`, err);
+        }
       }
     }
-  }
+  })().catch((err) => console.error("Error en el envio en segundo plano:", err));
 }
