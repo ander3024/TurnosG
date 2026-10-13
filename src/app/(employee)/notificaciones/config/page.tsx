@@ -85,23 +85,43 @@ export default function NotificacionesConfigPage() {
     fetchPreferences();
   }, [fetchPreferences]);
 
-  // Check push support
+  // Check push support y RE-SINCRONIZAR con el servidor.
+  // El navegador puede tener una suscripcion que el servidor ya no tiene (el alta
+  // fallo en su dia, o el envio la dio de baja al caducar). Antes el interruptor
+  // mostraba "activo" mirando solo el navegador, asi que la persona creia estar
+  // suscrita y no le llegaba nada. Al abrir esta pantalla reenviamos siempre la
+  // suscripcion del navegador: la ruta hace upsert, asi que es idempotente y
+  // repara cualquier desajuste.
   useEffect(() => {
-    if ("Notification" in window && "serviceWorker" in navigator) {
-      setPushSupported(true);
-      navigator.serviceWorker.ready.then((reg) => {
-        reg.pushManager.getSubscription().then((sub) => {
-          setPushSubscribed(!!sub);
+    if (!("Notification" in window) || !("serviceWorker" in navigator)) return;
+    setPushSupported(true);
+    (async () => {
+      try {
+        const reg = await navigator.serviceWorker.ready;
+        const sub = await reg.pushManager.getSubscription();
+        if (!sub) {
+          setPushSubscribed(false);
+          return;
+        }
+        const res = await fetch("/api/push/subscribe", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(sub.toJSON()),
         });
-      });
-    }
-  }, []);
+        setPushSubscribed(res.ok);
+        if (!res.ok) toast.error("Tus avisos al móvil no están registrados. Desactiva y vuelve a activar.");
+      } catch {
+        setPushSubscribed(false);
+      }
+    })();
+  }, [toast]);
 
   const subscribePush = async () => {
     setPushLoading(true);
     try {
       const permission = await Notification.requestPermission();
       if (permission !== "granted") {
+        toast.error("Tienes los avisos bloqueados en el navegador. Actívalos en los ajustes del sitio.");
         setPushLoading(false);
         return;
       }
@@ -109,7 +129,7 @@ export default function NotificacionesConfigPage() {
       const reg = await navigator.serviceWorker.ready;
       const vapidKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
       if (!vapidKey) {
-        console.error("VAPID key not configured");
+        toast.error("Falta configuración del servidor para los avisos. Avisa al administrador.");
         setPushLoading(false);
         return;
       }
@@ -119,15 +139,24 @@ export default function NotificacionesConfigPage() {
         applicationServerKey: urlBase64ToUint8Array(vapidKey) as BufferSource,
       });
 
-      await fetch("/api/push/subscribe", {
+      const res = await fetch("/api/push/subscribe", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(subscription.toJSON()),
       });
+      if (!res.ok) {
+        // No damos por bueno el alta si el servidor no la guardo.
+        toast.error("No se ha podido registrar este dispositivo. Inténtalo de nuevo.");
+        setPushSubscribed(false);
+        setPushLoading(false);
+        return;
+      }
 
       setPushSubscribed(true);
+      toast.success("Avisos al móvil activados");
     } catch (err) {
       console.error("Push subscription failed:", err);
+      toast.error("No se han podido activar los avisos en este dispositivo.");
     } finally {
       setPushLoading(false);
     }
