@@ -1,9 +1,11 @@
 import { prisma } from "@/lib/prisma";
 import { HolidayManagement } from "./holiday-management";
+import { requireAdminPage } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
 export default async function HolidaysPage() {
+  await requireAdminPage();
   const holidays = await prisma.holiday.findMany({
     orderBy: [{ year: "desc" }, { date: "asc" }],
   });

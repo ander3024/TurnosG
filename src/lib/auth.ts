@@ -1,4 +1,5 @@
 import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 import { prisma } from "./prisma";
 import { createToken, verifyToken } from "./jwt";
 import type { JWTPayload } from "./jwt";
@@ -33,5 +34,18 @@ export async function requireUser() {
 export async function requireAdmin() {
   const user = await requireUser();
   if (user.role !== "admin") throw new Error("Forbidden");
+  return user;
+}
+
+/**
+ * Admin gate for server pages. requireAdmin() throws, which suits API routes;
+ * a page needs a redirect instead. Call it at the top of the page itself, not
+ * in a layout: Partial Rendering means layouts don't re-run on navigation, so
+ * a layout check would not run on every route change.
+ */
+export async function requireAdminPage() {
+  const user = await getCurrentUser();
+  if (!user) redirect("/login");
+  if (user.role !== "admin") redirect("/");
   return user;
 }

@@ -1,9 +1,11 @@
 import { prisma } from "@/lib/prisma";
 import { SettingsManagement } from "./settings-management";
+import { requireAdminPage } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
+  await requireAdminPage();
   const settings = await prisma.setting.findMany({
     orderBy: { key: "asc" },
   });

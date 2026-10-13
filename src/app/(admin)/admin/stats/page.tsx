@@ -8,10 +8,12 @@ import {
 import { ReportButtons } from "./report-buttons";
 import { InfoTooltip } from "@/components/ui/info-tooltip";
 import { formatHours, formatHoursSigned } from "@/lib/utils";
+import { requireAdminPage } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
 export default async function StatsPage() {
+  await requireAdminPage();
   const now = new Date();
   const year = now.getFullYear();
   const from = `${year}-01-01`;

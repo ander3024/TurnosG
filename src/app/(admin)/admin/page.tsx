@@ -4,10 +4,12 @@ import { Badge } from "@/components/ui/badge";
 import { Users, Calendar, Palmtree, Clock, AlertCircle, CheckCircle2, ArrowRight, TrendingUp } from "lucide-react";
 import Link from "next/link";
 import { loadEngineContext, generateSchedule, buildHoursSummary } from "@/lib/engine";
+import { requireAdminPage } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
 export default async function AdminDashboard() {
+  await requireAdminPage();
   const [
     userCount,
     personCount,

@@ -1,10 +1,12 @@
 import { prisma } from "@/lib/prisma";
 import { EventManagement } from "./event-management";
 import Link from "next/link";
+import { requireAdminPage } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
 export default async function EventsPage() {
+  await requireAdminPage();
   const events = await prisma.event.findMany({
     orderBy: { startDate: "desc" },
   });
