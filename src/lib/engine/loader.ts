@@ -184,3 +184,15 @@ export async function loadEngineContext(
     settings,
   };
 }
+
+/**
+ * Carga el contexto ampliando el rango al ano o anos completos que lo cubren.
+ * Necesario para `generateScheduleSlice`, que calcula el objetivo anual.
+ */
+export async function loadEngineContextForRange(
+  from: string,
+  to: string
+): Promise<EngineContext> {
+  return loadEngineContext(`${from.slice(0, 4)}-01-01`, `${to.slice(0, 4)}-12-31`);
+}
+

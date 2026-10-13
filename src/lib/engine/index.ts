@@ -1,6 +1,6 @@
 // ─── Engine Public API ────────────────────────────────────
-export { loadEngineContext } from "./loader";
-export { generateSchedule, generateScheduleToTarget } from "./scheduler";
+export { loadEngineContext, loadEngineContextForRange } from "./loader";
+export { generateSchedule, generateScheduleToTarget, generateScheduleSlice } from "./scheduler";
 export { buildHoursSummary, shiftHours } from "./hours";
 export { calculateConciliation } from "./conciliation";
 export { validateAssignments } from "./rules";

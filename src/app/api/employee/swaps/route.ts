@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { notify } from "@/lib/notifications";
-import { loadEngineContext, generateSchedule } from "@/lib/engine";
+import { loadEngineContextForRange, generateScheduleSlice } from "@/lib/engine";
 
 // GET /api/employee/swaps — list current user's swaps (sent and received)
 export async function GET() {
@@ -98,8 +98,8 @@ export async function POST(req: NextRequest) {
     const monthStart = earliest.slice(0, 8) + "01";
     const ym = latest.slice(0, 7).split("-");
     const monthEnd = latest.slice(0, 8) + String(new Date(parseInt(ym[0]), parseInt(ym[1]), 0).getDate()).padStart(2, "0");
-    const ctx = await loadEngineContext(monthStart, monthEnd);
-    const schedule = generateSchedule(ctx, monthStart, monthEnd);
+    const ctx = await loadEngineContextForRange(monthStart, monthEnd);
+    const schedule = generateScheduleSlice(ctx, monthStart, monthEnd);
     const fromDay = schedule.find(d => d.date === fromDate);
     const myAssignments = fromDay?.assignments.filter(a => a.personId === person.id) || [];
 
