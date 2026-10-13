@@ -460,7 +460,9 @@ export function generateSchedule(ctx: EngineContext, from: string, to: string): 
     }
 
     // ═══ FIXED SCHEDULE (managers) ═══
-    if (!closed && !isWe) {
+    // Managers never work holidays, not even the ones the shop opens on
+    // (those are covered by a single rotation person on the weekend shift).
+    if (!closed && !isWe && !holiday) {
       const isFri = dow === 4;
       const fixedShift = isFri ? (officeFridayShift || officeShift) : officeShift;
       if (fixedShift) {
