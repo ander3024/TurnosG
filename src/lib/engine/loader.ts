@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import type {
   EngineContext,
   EngineSettings,
+  RefuerzoPolicy,
   ScheduleRules,
   EngineShiftType,
   EngineOverride,
@@ -94,6 +95,13 @@ export async function loadEngineContext(
       catch { return [6, 7, 8]; }
     })(),
     rules,
+    refuerzoPolicy: (() => {
+      const pol = parseJSON<Partial<RefuerzoPolicy>>(settingsMap, "refuerzoPolicy", {});
+      return {
+        maxPerWeekPerPerson: pol.maxPerWeekPerPerson ?? 4,
+        maxPerMonthPerPerson: pol.maxPerMonthPerPerson ?? 16,
+      };
+    })(),
   };
 
   // Build shift type maps

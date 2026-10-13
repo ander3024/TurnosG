@@ -82,6 +82,12 @@ export interface EngineSettings {
   applyConciliation: boolean;
   vacationRelaxedMonths: number[]; // months (1-12) where only 2 people needed L-J
   rules: ScheduleRules;
+  refuerzoPolicy: RefuerzoPolicy;
+}
+
+export interface RefuerzoPolicy {
+  maxPerWeekPerPerson: number;
+  maxPerMonthPerPerson: number;
 }
 
 export interface EngineContext {

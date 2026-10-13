@@ -1,6 +1,6 @@
 // ─── Engine Public API ────────────────────────────────────
 export { loadEngineContext } from "./loader";
-export { generateSchedule } from "./scheduler";
+export { generateSchedule, generateScheduleToTarget } from "./scheduler";
 export { buildHoursSummary, shiftHours } from "./hours";
 export { calculateConciliation } from "./conciliation";
 export { validateAssignments } from "./rules";
@@ -9,6 +9,7 @@ export {
   getWeekendWorker,
   getWeekdayWorkers,
 } from "./rotation";
+export type { GoalFillOptions } from "./scheduler";
 export type {
   EngineContext,
   EnginePerson,

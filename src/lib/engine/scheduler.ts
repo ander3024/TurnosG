@@ -144,7 +144,19 @@ function planWeek(
 
 // ─── Main ─────────────────────────────────────────────────
 
-export function generateSchedule(ctx: EngineContext, from: string, to: string): DaySchedule[] {
+export interface GoalFillOptions {
+  /** personId -> horas de refuerzo a ANADIR a esa persona en el periodo */
+  fillHours: Map<number, number>;
+  /** maximo de dias consecutivos trabajados que el relleno puede provocar */
+  maxConsecutiveDays?: number;
+}
+
+export function generateSchedule(
+  ctx: EngineContext,
+  from: string,
+  to: string,
+  goals?: GoalFillOptions
+): DaySchedule[] {
   const dates = iterateDates(from, to);
   const schedule: DaySchedule[] = [];
   const blockedDates = buildBlockedDates(ctx);
@@ -168,27 +180,78 @@ export function generateSchedule(ctx: EngineContext, from: string, to: string): 
   const officeShift = ctx.shiftTypes.get("office");
   const officeFridayShift = ctx.shiftTypes.get("office_friday");
 
-  // Refuerzo budget
   const BUFFER_HOURS = 40;
   const refUsed = new Map<number, number>();
   for (const p of ctx.people) refUsed.set(p.id, 0);
+  // Presupuesto aproximado por persona para los refuerzos de evento. Solo se usa
+  // cuando NO hay objetivos: con `goals` manda el control proporcional, que mide
+  // el retraso real de cada uno en vez de estimarlo con una constante.
+  const refBudget = new Map<number, number>();
+  for (const p of ctx.people) {
+    const extra = ctx.extraHours.filter((e) => e.personId === p.id).reduce((t, e) => t + e.hours, 0);
+    refBudget.set(p.id, Math.max(0, ctx.settings.annualTargetHours - 1400 - extra - BUFFER_HOURS));
+  }
+  const refuerzoAllowed = (pid: number, refH: number) =>
+    (refUsed.get(pid) || 0) + refH <= (refBudget.get(pid) || 0);
+
   // Holidays covered so far, to spread them evenly instead of letting them fall
   // on whoever happens to be the week's weekend worker.
   const holidaysWorked = new Map<number, number>();
   for (const p of ctx.people) holidaysWorked.set(p.id, 0);
-  // Rough budget per person: target - estimated base - extra - buffer
-  const refBudget = new Map<number, number>();
+
+  // ─── Goal fill: refuerzos extra para llegar al objetivo anual ───
+  // Clave del diseno: estos refuerzos NO entran en `counts`, asi que el algoritmo
+  // base elige exactamente igual que sin ellos. Eso permite calcular el hueco de
+  // cada persona en una primera pasada y gastarlo en la segunda sin que el reparto
+  // base se mueva por debajo. Sin `goals` nada de esto actua.
+  const fillBudget = new Map<number, number>();
+  const fillSpent = new Map<number, number>();
   for (const p of ctx.people) {
-    const extra = ctx.extraHours.filter((e) => e.personId === p.id).reduce((s, e) => s + e.hours, 0);
-    // ~200 weekday shifts * 8h + ~26 weekends * 12h ≈ 1912h base (will cap with budget)
-    refBudget.set(p.id, Math.max(0, ctx.settings.annualTargetHours - 1400 - extra - BUFFER_HOURS));
+    fillBudget.set(p.id, Math.max(0, goals?.fillHours.get(p.id) ?? 0));
+    fillSpent.set(p.id, 0);
   }
+  const maxRun = goals?.maxConsecutiveDays ?? 7;
+  const workedOn = new Map<number, Set<string>>();
+  for (const p of ctx.people) workedOn.set(p.id, new Set());
+  const refWeek = new Map<string, number>();
+  const refMonth = new Map<string, number>();
+  let dayIdx = 0;
+  const totalDays = dates.length;
+  /** Cabe otro refuerzo de relleno para esta persona hoy? */
+  const fillFits = (pid: number, refH: number) => {
+    const budget = fillBudget.get(pid) || 0;
+    const spent = fillSpent.get(pid) || 0;
+    if (spent + refH > budget) return false;              // nunca pasarse del hueco
+    return spent < budget * (dayIdx / totalDays);         // repartido a lo largo del periodo
+  };
+  /** Tercero de L-J: por horas reales acumuladas (el relleno no cuenta aqui). */
+  const byHours = (a: EnginePerson, b: EnginePerson) =>
+    ((counts.weekday.get(a.id) || 0) * 8 + (counts.weekend.get(a.id) || 0) * 12) -
+    ((counts.weekday.get(b.id) || 0) * 8 + (counts.weekend.get(b.id) || 0) * 12);
+  /** Refuerzos de evento en laborable: por turnos de laborable. */
+  const byWeekday = (a: EnginePerson, b: EnginePerson) =>
+    (counts.weekday.get(a.id) || 0) - (counts.weekday.get(b.id) || 0);
+  /** Slots extra de finde: por turnos de finde. */
+  const byWeekend = (a: EnginePerson, b: EnginePerson) =>
+    (counts.weekend.get(a.id) || 0) - (counts.weekend.get(b.id) || 0);
+  /** A quien le queda mas hueco por rellenar. */
+  const byFillLeft = (a: EnginePerson, b: EnginePerson) =>
+    ((fillBudget.get(b.id) || 0) - (fillSpent.get(b.id) || 0)) -
+    ((fillBudget.get(a.id) || 0) - (fillSpent.get(a.id) || 0));
+  const runIfAdded = (pid: number, date: string) => {
+    const w = workedOn.get(pid)!;
+    let b = 0, f = 0;
+    for (let d = addDays(date, -1); w.has(d); d = addDays(d, -1)) b++;
+    for (let d = addDays(date, 1); w.has(d); d = addDays(d, 1)) f++;
+    return b + 1 + f;
+  };
 
   // Cache week plans
   const weekPlans = new Map<number, WeekPlan>();
   let saturdayPerson: EnginePerson | null = null;
 
   for (const date of dates) {
+    dayIdx++;   // al principio: los dias cerrados salen por `continue` mas abajo
     const isWe = isWeekend(date);
     const isSat = isSaturday(date);
     const closed = isClosed(ctx, date);
@@ -305,7 +368,7 @@ export function generateSchedule(ctx: EngineContext, from: string, to: string): 
           }
           if (!ep) {
             const avail = rotationPeople.filter((p) => !isBlocked(blockedDates, p.id, date) && !assigned.has(p.id));
-            avail.sort((a, b) => (counts.weekend.get(a.id) || 0) - (counts.weekend.get(b.id) || 0));
+            avail.sort(byWeekend);
             ep = avail[0] || null; es = "balance";
           }
           if (ep) {
@@ -423,12 +486,8 @@ export function generateSchedule(ctx: EngineContext, from: string, to: string): 
           const cands = rotationPeople.filter(
             (p) => p.id !== plan.offPerson?.id && !hasTimeOffToday(p.id) && !assigned.has(p.id)
           );
-          // Sort by real accumulated hours (lowest first = gets the refuerzo)
-          cands.sort((a, b) => {
-            const ha = (counts.weekday.get(a.id) || 0) * 8 + (counts.weekend.get(a.id) || 0) * 12;
-            const hb = (counts.weekday.get(b.id) || 0) * 8 + (counts.weekend.get(b.id) || 0) * 12;
-            return ha - hb;
-          });
+          // Con objetivos: el que mas lejos esta del suyo. Sin ellos: el que menos horas lleva.
+          cands.sort(byHours);
           tp = cands[0] || null;
           tSrc = "balance";
         }
@@ -460,16 +519,16 @@ export function generateSchedule(ctx: EngineContext, from: string, to: string): 
             if (ovP && !assigned.has(ovP.id)) { ep = ovP; es = "override"; }
           } else if (evt.assigneeForced && evt.assigneePersonId) {
             const f = findPerson(ctx, evt.assigneePersonId);
-            if (f && !assigned.has(f.id) && (refUsed.get(f.id) || 0) + refH <= (refBudget.get(f.id) || 0)) {
+            if (f && !assigned.has(f.id) && refuerzoAllowed(f.id, refH)) {
               ep = f; es = "event";
             }
           }
           if (!ep) {
             const avail = rotationPeople.filter(
               (p) => !isBlocked(blockedDates, p.id, date) && !assigned.has(p.id) &&
-                (refUsed.get(p.id) || 0) + refH <= (refBudget.get(p.id) || 0)
+                refuerzoAllowed(p.id, refH)
             );
-            avail.sort((a, b) => (counts.weekday.get(a.id) || 0) - (counts.weekday.get(b.id) || 0));
+            avail.sort(byWeekday);
             ep = avail[0] || null; es = "balance";
           }
           if (ep) {
@@ -520,6 +579,52 @@ export function generateSchedule(ctx: EngineContext, from: string, to: string): 
       }
     }
 
+    // ─── GOAL FILL: refuerzos extra para acercar a cada uno a su objetivo ───
+    // Solo con `goals`. No toca festivos abiertos (llevan 1 sola persona) ni dias
+    // cerrados, respeta los topes de refuerzoPolicy y no encadena mas de maxRun dias.
+    if (goals && !closed && !isWH) {
+      const refShift = isWe ? weekendShift : (refuerzoMorning || refuerzoOfi);
+      if (refShift) {
+        const refH = shiftHours(refShift);
+        const pol = ctx.settings.refuerzoPolicy;
+        let guard = 0;
+        for (;;) {
+          if (guard++ > rotationPeople.length) break;
+          const assigned = new Set(day.assignments.map((a) => a.personId).filter(Boolean));
+          const cand = rotationPeople
+            .filter((p) => {
+              if (assigned.has(p.id)) return false;
+              if (isBlocked(blockedDates, p.id, date)) return false;
+              if (!fillFits(p.id, refH)) return false;
+              if (runIfAdded(p.id, date) > maxRun) return false;
+              const wk = `${p.id}|${ws}`, mo = `${p.id}|${date.slice(0, 7)}`;
+              if ((refWeek.get(wk) || 0) >= (pol.maxPerWeekPerPerson ?? 4)) return false;
+              if ((refMonth.get(mo) || 0) >= (pol.maxPerMonthPerPerson ?? 16)) return false;
+              return true;
+            })
+            .sort(byFillLeft)[0];
+          if (!cand) break;
+          let slot = isWe ? 1 : 2;
+          const taken = new Set(
+            day.assignments.filter((a) => a.shiftTypeCode === refShift.code).map((a) => a.slotIndex)
+          );
+          while (taken.has(slot)) slot++;
+          // Ojo: a proposito NO se incrementa `counts`, para que el algoritmo base
+          // siga eligiendo igual que sin relleno.
+          day.assignments.push(makeAssignment(date, refShift, cand, slot, "balance"));
+          fillSpent.set(cand.id, (fillSpent.get(cand.id) || 0) + refH);
+          refWeek.set(`${cand.id}|${ws}`, (refWeek.get(`${cand.id}|${ws}`) || 0) + 1);
+          refMonth.set(`${cand.id}|${date.slice(0, 7)}`, (refMonth.get(`${cand.id}|${date.slice(0, 7)}`) || 0) + 1);
+        }
+      }
+    }
+
+    // Cierre del dia: registrar lo asignado (para rachas y para el control).
+    for (const a of day.assignments) {
+      if (!a.personId) continue;
+      workedOn.get(a.personId)?.add(date);
+    }
+
     // Compute offPeople (only rotation people — managers are either assigned or on timeoff)
     if (!closed) {
       const assignedIds = new Set(day.assignments.map((a) => a.personId).filter(Boolean));
@@ -533,4 +638,47 @@ export function generateSchedule(ctx: EngineContext, from: string, to: string): 
   }
 
   return schedule;
+}
+
+/**
+ * Genera el cuadrante persiguiendo el objetivo anual de cada persona.
+ *
+ * Dos pasadas:
+ *  1. El cuadrante normal, para saber con cuantas horas acaba cada uno.
+ *  2. El mismo cuadrante mas refuerzos de relleno por el hueco que le falte.
+ *
+ * Es exacto porque los refuerzos de relleno no entran en los contadores del
+ * algoritmo base: la segunda pasada reparte los turnos base igual que la primera,
+ * asi que el total final es el de la primera mas el hueco. El periodo debe ser el
+ * ano completo; con un rango menor el objetivo no significa nada.
+ */
+export function generateScheduleToTarget(
+  ctx: EngineContext,
+  from: string,
+  to: string,
+  opts?: { maxConsecutiveDays?: number }
+): DaySchedule[] {
+  const base = generateSchedule(ctx, from, to);
+
+  const worked = new Map<number, number>();
+  for (const p of ctx.people) worked.set(p.id, 0);
+  for (const day of base) {
+    for (const a of day.assignments) {
+      if (a.personId) worked.set(a.personId, (worked.get(a.personId) || 0) + a.hours);
+    }
+  }
+
+  const fillHours = new Map<number, number>();
+  for (const p of ctx.people) {
+    if (p.scheduleType === "fixed") continue;           // los responsables no entran
+    const extra = ctx.extraHours.filter((e) => e.personId === p.id).reduce((t, e) => t + e.hours, 0);
+    const gap = ctx.settings.annualTargetHours - (worked.get(p.id) || 0) - extra;
+    if (gap > 0) fillHours.set(p.id, gap);
+  }
+  if (!fillHours.size) return base;
+
+  return generateSchedule(ctx, from, to, {
+    fillHours,
+    maxConsecutiveDays: opts?.maxConsecutiveDays,
+  });
 }
