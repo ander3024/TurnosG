@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   ChevronLeft, ChevronRight, Calendar as CalIcon, X, User, Save,
   RotateCcw, Plus, Clock, Sun, Moon, Sunrise, Coffee, Palmtree, BedDouble, ArrowLeftRight,
+  AlertTriangle, Check,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/components/ui/toast";
@@ -27,6 +28,29 @@ interface HoursSummary {
   personId: number; personCode: string; personName: string; personColor: string;
   totalHours: number; targetHours: number; delta: number;
   vacationDaysUsed: number; vacationDaysTotal: number;
+}
+interface OverridePreview {
+  date: string;
+  dayChanges: { label: string; before: string; after: string }[];
+  hourDeltas: { personId: number; personName: string; personColor: string; before: number; after: number; delta: number }[];
+  otherDaysChanged: number;
+  otherDaysSample: string[];
+  noEffect: boolean;
+}
+interface ScheduleState { schedule: DaySchedule[]; hours: HoursSummary[] }
+/** Cambio propuesto, pendiente de que el admin lo confirme. */
+interface ProposedChange {
+  key: string;
+  action: "set" | "remove";
+  label: string;
+  shiftTypeId: number;
+  slotIndex: number;
+  personId: number | null;
+  personName: string;
+  loading: boolean;
+  preview: OverridePreview | null;
+  error: string | null;
+  saving: boolean;
 }
 interface PersonOption { id: number; code: string; name: string; color: string; }
 interface ShiftTypeOption { id: number; code: string; label: string; }
@@ -53,6 +77,7 @@ export default function AdminCalendarPage() {
   const [loading, setLoading] = useState(true);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [swaps, setSwaps] = useState<SwapInfo[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const from = `${year}-${String(month + 1).padStart(2, "0")}-01`;
   const lastDay = new Date(year, month + 1, 0).getDate();
@@ -74,7 +99,14 @@ export default function AdminCalendarPage() {
       setPeople(Array.isArray(p) ? p : []);
       setShiftTypes(Array.isArray(st) ? st : []);
       setSwaps(sw.items || []);
-    } catch { /* errors handled by empty state */ } finally { setLoading(false); }
+      setLoadError(null);
+      return true;
+    } catch {
+      // Un fallo al refrescar deja la pantalla con los datos de antes, que es
+      // justo lo que parece un cambio que no se ha guardado: hay que decirlo.
+      setLoadError("No he podido leer el cuadrante del servidor. Lo que ves puede estar desactualizado: recarga la página.");
+      return false;
+    } finally { setLoading(false); }
   }, [from, to, year]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
@@ -99,7 +131,17 @@ export default function AdminCalendarPage() {
   // open modal re-renders with the new assignments instead of the ones it opened with.
   const selectedDay = selectedDate ? schedMap.get(selectedDate) ?? null : null;
 
-  async function onScheduleChanged() { await fetchData(); }
+  // El guardado ya devuelve el cuadrante recalculado: un solo viaje y sin
+  // ventana en la que la pantalla y el servidor puedan no coincidir.
+  async function onScheduleChanged(state?: ScheduleState | null) {
+    if (state?.schedule && state?.hours) {
+      setSchedule(state.schedule);
+      setHours(state.hours);
+      setLoadError(null);
+      return true;
+    }
+    return await fetchData();
+  }
 
   return (
     <div className="space-y-5">
@@ -111,6 +153,17 @@ export default function AdminCalendarPage() {
         </div>
         <Button variant="outline" size="sm" onClick={goToday}>Hoy</Button>
       </div>
+
+      {loadError && (
+        <div className="flex items-start gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3">
+          <AlertTriangle className="w-5 h-5 text-rose-500 flex-shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <p className="text-sm font-semibold text-rose-900">Datos sin refrescar</p>
+            <p className="text-xs text-rose-700 mt-0.5">{loadError}</p>
+          </div>
+          <Button variant="outline" size="sm" onClick={() => fetchData()}>Reintentar</Button>
+        </div>
+      )}
 
       {/* Hours Summary - compact horizontal */}
       {hours.length > 0 && (
@@ -324,7 +377,7 @@ export default function AdminCalendarPage() {
       {/* Day Detail Modal */}
       {selectedDay && (
         <DayEditModal
-          day={selectedDay} people={people} shiftTypes={shiftTypes}
+          day={selectedDay} range={{ from, to }} people={people} shiftTypes={shiftTypes}
           onClose={() => setSelectedDate(null)} onSaved={onScheduleChanged}
         />
       )}
@@ -333,14 +386,15 @@ export default function AdminCalendarPage() {
 }
 
 // ─── DAY EDIT MODAL ────────────────────────────────────────
-function DayEditModal({ day, people, shiftTypes, onClose, onSaved }: {
-  day: DaySchedule; people: PersonOption[]; shiftTypes: ShiftTypeOption[];
-  onClose: () => void; onSaved: () => void | Promise<void>;
+function DayEditModal({ day, range, people, shiftTypes, onClose, onSaved }: {
+  day: DaySchedule; range: { from: string; to: string };
+  people: PersonOption[]; shiftTypes: ShiftTypeOption[];
+  onClose: () => void; onSaved: (state?: ScheduleState | null) => Promise<boolean>;
 }) {
   const [saving, setSaving] = useState<string | null>(null);
-  // Person just picked, shown until the refreshed schedule arrives, so the controlled
-  // <select> never snaps back to the previous one while the save is in flight.
-  const [pending, setPending] = useState<Record<string, string>>({});
+  // Cambio elegido pero no confirmado: mientras existe, el <select> muestra la
+  // persona elegida y el panel de abajo explica lo que va a pasar.
+  const [change, setChange] = useState<ProposedChange | null>(null);
   const [showExtraHours, setShowExtraHours] = useState(false);
   const [ehForm, setEhForm] = useState({ personId: "", hours: "", comment: "" });
   const [ehSaving, setEhSaving] = useState(false);
@@ -348,35 +402,68 @@ function DayEditModal({ day, people, shiftTypes, onClose, onSaved }: {
   const [addForm, setAddForm] = useState({ shiftTypeId: "", personId: "" });
   const toast = useToast();
 
-  function clearPending(key: string) {
-    setPending((p) => { const next = { ...p }; delete next[key]; return next; });
-  }
-
-  async function handleOverride(shiftTypeCode: string, slotIndex: number, newPersonId: number | null) {
-    const st = shiftTypes.find((s) => s.code === shiftTypeCode);
-    if (!st) return;
-    const key = `${shiftTypeCode}-${slotIndex}`;
-    setSaving(key);
-    setPending((p) => ({ ...p, [key]: newPersonId === null ? "" : String(newPersonId) }));
+  /**
+   * Nada se guarda al elegir: primero se le pide al motor que simule el cambio
+   * sobre el año completo, porque un turno arrastra a los demás (quien lo
+   * pierde, quien hereda el refuerzo, las horas de todos).
+   */
+  async function proposeChange(opts: {
+    action: "set" | "remove"; label: string; shiftTypeId: number;
+    slotIndex: number; personId: number | null; personName: string;
+  }) {
+    const key = `${opts.shiftTypeId}-${opts.slotIndex}-${opts.action}`;
+    setChange({ ...opts, key, loading: true, preview: null, error: null, saving: false });
     try {
-      const res = await fetch("/api/admin/schedule/override", {
+      const res = await fetch("/api/admin/schedule/preview", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ date: day.date, shiftTypeId: st.id, personId: newPersonId, slotIndex }),
+        body: JSON.stringify({
+          action: opts.action, date: day.date,
+          shiftTypeId: opts.shiftTypeId, slotIndex: opts.slotIndex, personId: opts.personId,
+        }),
       });
-      if (res.ok) { toast.success("Asignación guardada"); await onSaved(); }
-      else { const err = await res.json().catch(() => ({})); toast.error(err.error || "Error al guardar"); }
-    } catch { toast.error("Error de conexión"); } finally { setSaving(null); clearPending(key); }
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        setChange((c) => c && c.key === key ? { ...c, loading: false, error: err.error || "No he podido calcular el efecto del cambio." } : c);
+        return;
+      }
+      const preview: OverridePreview = await res.json();
+      setChange((c) => c && c.key === key ? { ...c, loading: false, preview } : c);
+    } catch {
+      setChange((c) => c && c.key === key ? { ...c, loading: false, error: "Error de conexión al calcular el cambio." } : c);
+    }
   }
 
-  async function handleRemoveOverride(shiftTypeCode: string, slotIndex: number) {
-    const st = shiftTypes.find((s) => s.code === shiftTypeCode);
-    if (!st || !confirm("¿Eliminar override y volver a rotación automática?")) return;
-    setSaving(`del-${shiftTypeCode}-${slotIndex}`);
+  /** Confirmado: se escribe y se pinta el cuadrante que devuelve el guardado. */
+  async function commitChange() {
+    if (!change || change.saving) return;
+    setChange({ ...change, saving: true });
+    setSaving(change.key);
+    const q = `from=${range.from}&to=${range.to}`;
     try {
-      const res = await fetch(`/api/admin/schedule/override?date=${day.date}&shiftTypeId=${st.id}&slotIndex=${slotIndex}`, { method: "DELETE" });
-      if (res.ok) { toast.success("Override eliminado"); await onSaved(); }
-      else toast.error("Error al eliminar override");
-    } catch { toast.error("Error de conexión"); } finally { setSaving(null); }
+      const res = change.action === "remove"
+        ? await fetch(`/api/admin/schedule/override?date=${day.date}&shiftTypeId=${change.shiftTypeId}&slotIndex=${change.slotIndex}&${q}`, { method: "DELETE" })
+        : await fetch("/api/admin/schedule/override", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              date: day.date, shiftTypeId: change.shiftTypeId, personId: change.personId,
+              slotIndex: change.slotIndex, from: range.from, to: range.to,
+            }),
+          });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        toast.error(err.error || "Error al guardar");
+        setChange((c) => c ? { ...c, saving: false } : c);
+        return;
+      }
+      const body = await res.json().catch(() => null);
+      const ok = await onSaved(body && body.schedule && body.hours ? { schedule: body.schedule, hours: body.hours } : null);
+      if (ok) toast.success(change.action === "remove" ? "Vuelto a automático" : "Asignación guardada");
+      else toast.error("Guardado, pero no he podido refrescar la pantalla. Recárgala para verlo.");
+      setChange(null);
+    } catch {
+      toast.error("Error de conexión");
+      setChange((c) => c ? { ...c, saving: false } : c);
+    } finally { setSaving(null); }
   }
 
   async function handleAddExtraHours(e: React.FormEvent) {
@@ -386,7 +473,7 @@ function DayEditModal({ day, people, shiftTypes, onClose, onSaved }: {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ personId: parseInt(ehForm.personId), date: day.date, hours: parseFloat(ehForm.hours), comment: ehForm.comment || null }),
       });
-      if (res.ok) { toast.success("Horas extra añadidas"); setEhForm({ personId: "", hours: "", comment: "" }); setShowExtraHours(false); await onSaved(); }
+      if (res.ok) { toast.success("Horas extra añadidas"); setEhForm({ personId: "", hours: "", comment: "" }); setShowExtraHours(false); if (!await onSaved()) toast.error("Guardado, pero no he podido refrescar la pantalla."); }
       else { const err = await res.json().catch(() => ({})); toast.error(err.error || "Error al añadir horas"); }
     } catch { toast.error("Error de conexión"); } finally { setEhSaving(false); }
   }
@@ -395,17 +482,15 @@ function DayEditModal({ day, people, shiftTypes, onClose, onSaved }: {
     e.preventDefault();
     const st = shiftTypes.find((s) => s.id === parseInt(addForm.shiftTypeId));
     if (!st) return;
-    setSaving("add");
-    try {
-      const existing = day.assignments.filter((a) => a.shiftTypeCode === st.code);
-      const nextSlot = existing.length > 0 ? Math.max(...existing.map((a) => a.slotIndex)) + 1 : 0;
-      const res = await fetch("/api/admin/schedule/override", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ date: day.date, shiftTypeId: parseInt(addForm.shiftTypeId), personId: addForm.personId ? parseInt(addForm.personId) : null, slotIndex: nextSlot }),
-      });
-      if (res.ok) { toast.success("Turno añadido"); setShowAddShift(false); setAddForm({ shiftTypeId: "", personId: "" }); await onSaved(); }
-      else { const err = await res.json().catch(() => ({})); toast.error(err.error || "Error al añadir turno"); }
-    } catch { toast.error("Error de conexión"); } finally { setSaving(null); }
+    const existing = day.assignments.filter((a) => a.shiftTypeCode === st.code);
+    const nextSlot = existing.length > 0 ? Math.max(...existing.map((a) => a.slotIndex)) + 1 : 0;
+    const personId = addForm.personId ? parseInt(addForm.personId) : null;
+    setShowAddShift(false);
+    setAddForm({ shiftTypeId: "", personId: "" });
+    await proposeChange({
+      action: "set", label: `${st.label} (turno extra)`, shiftTypeId: st.id, slotIndex: nextSlot,
+      personId, personName: people.find((p) => p.id === personId)?.name || "Sin asignar",
+    });
   }
 
   const dateLabel = new Date(day.date + "T12:00:00").toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
@@ -437,7 +522,9 @@ function DayEditModal({ day, people, shiftTypes, onClose, onSaved }: {
               {day.assignments.map((a, i) => {
                 const si = shiftIcon(a.shiftTypeCode);
                 const Icon = si.icon;
-                const key = `${a.shiftTypeCode}-${a.slotIndex}`;
+                const st = shiftTypes.find((s) => s.code === a.shiftTypeCode);
+                const key = st ? `${st.id}-${a.slotIndex}-set` : `${a.shiftTypeCode}-${a.slotIndex}`;
+                const delKey = st ? `${st.id}-${a.slotIndex}-remove` : "";
                 // Both managers share office slot 0, so the engine cannot tell an override
                 // there apart from the fixed assignment and ignores it: editing this row
                 // would save, notify the employee and change nothing. Show it read-only.
@@ -460,9 +547,16 @@ function DayEditModal({ day, people, shiftTypes, onClose, onSaved }: {
                         </div>
                       ) : (
                         <select
-                          value={pending[key] ?? (a.personId ? String(a.personId) : "")}
-                          onChange={(e) => handleOverride(a.shiftTypeCode, a.slotIndex, e.target.value ? parseInt(e.target.value) : null)}
-                          disabled={!!saving}
+                          value={change?.key === key ? String(change.personId ?? "") : (a.personId ? String(a.personId) : "")}
+                          onChange={(e) => {
+                            if (!st) return;
+                            const pid = e.target.value ? parseInt(e.target.value) : null;
+                            proposeChange({
+                              action: "set", label: a.shiftTypeLabel, shiftTypeId: st.id, slotIndex: a.slotIndex,
+                              personId: pid, personName: people.find((p) => p.id === pid)?.name || "Sin asignar",
+                            });
+                          }}
+                          disabled={!!saving || (!!change && change.key !== key)}
                           className="flex-1 rounded-lg border border-gray-200 px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none disabled:opacity-50 bg-white"
                         >
                           <option value="">Sin asignar</option>
@@ -472,8 +566,15 @@ function DayEditModal({ day, people, shiftTypes, onClose, onSaved }: {
                       <Badge variant={fixedOffice ? "default" : a.source === "override" ? "warning" : a.source === "event" ? "info" : "default"} className="flex-shrink-0">
                         {fixedOffice ? "Fijo" : a.source === "override" ? "Manual" : a.source === "event" ? "Evento" : "Auto"}
                       </Badge>
-                      {a.source === "override" && (
-                        <button onClick={() => handleRemoveOverride(a.shiftTypeCode, a.slotIndex)} disabled={!!saving} className="p-1.5 hover:bg-amber-50 rounded-lg" title="Volver a automático">
+                      {a.source === "override" && st && (
+                        <button
+                          onClick={() => proposeChange({
+                            action: "remove", label: a.shiftTypeLabel, shiftTypeId: st.id,
+                            slotIndex: a.slotIndex, personId: null, personName: "rotación automática",
+                          })}
+                          disabled={!!saving || (!!change && change.key !== delKey)}
+                          className="p-1.5 hover:bg-amber-50 rounded-lg disabled:opacity-40" title="Volver a automático"
+                        >
                           <RotateCcw className="w-3.5 h-3.5 text-amber-500" />
                         </button>
                       )}
@@ -484,6 +585,87 @@ function DayEditModal({ day, people, shiftTypes, onClose, onSaved }: {
               })}
             </div>
           </div>
+
+          {/* Aviso previo: qué va a pasar si se guarda */}
+          {change && (
+            <div className="rounded-xl border border-indigo-200 bg-indigo-50/60 p-4 space-y-3">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 text-indigo-600 flex-shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <p className="text-sm font-bold text-indigo-900">Antes de guardar</p>
+                  <p className="text-xs text-indigo-700 mt-0.5">
+                    {change.action === "remove"
+                      ? `${change.label}: volver a rotación automática`
+                      : `${change.label}: pasa a ${change.personName}`}
+                  </p>
+                </div>
+              </div>
+
+              {change.loading && (
+                <p className="text-xs text-indigo-700 flex items-center gap-2">
+                  <span className="w-3.5 h-3.5 border-2 border-indigo-300 border-t-indigo-600 rounded-full animate-spin" />
+                  Calculando el efecto en el año completo...
+                </p>
+              )}
+
+              {change.error && <p className="text-xs text-rose-700 font-medium">{change.error}</p>}
+
+              {change.preview && (
+                <div className="space-y-3">
+                  {change.preview.noEffect && (
+                    <div className="rounded-lg bg-amber-100 border border-amber-200 px-3 py-2">
+                      <p className="text-xs font-semibold text-amber-900">Este cambio no alteraría el cuadrante.</p>
+                      <p className="text-[11px] text-amber-800 mt-0.5">Se guardaría el registro pero el día quedaría igual, así que mejor no guardarlo.</p>
+                    </div>
+                  )}
+
+                  {change.preview.dayChanges.length > 0 && (
+                    <div>
+                      <p className="text-[10px] font-bold text-indigo-900/70 uppercase tracking-wider mb-1">Ese día queda así</p>
+                      <div className="space-y-1">
+                        {change.preview.dayChanges.map((c, i) => (
+                          <p key={i} className="text-xs text-gray-700">
+                            <span className="font-semibold">{c.label}:</span> {c.before} <span className="text-gray-400">→</span> <span className="font-semibold text-indigo-800">{c.after}</span>
+                          </p>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {change.preview.hourDeltas.length > 0 && (
+                    <div>
+                      <p className="text-[10px] font-bold text-indigo-900/70 uppercase tracking-wider mb-1">Horas del año</p>
+                      <div className="flex flex-wrap gap-2">
+                        {change.preview.hourDeltas.map((h) => (
+                          <span key={h.personId} className="inline-flex items-center gap-1.5 rounded-lg bg-white border border-gray-200 px-2 py-1 text-xs">
+                            <span className="w-2 h-2 rounded-full" style={{ backgroundColor: h.personColor }} />
+                            <span className="font-medium text-gray-800">{h.personName}</span>
+                            <span className={h.delta > 0 ? "text-emerald-600 font-semibold" : "text-rose-600 font-semibold"}>
+                              {h.delta > 0 ? "+" : ""}{h.delta.toFixed(1)}h
+                            </span>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {change.preview.otherDaysChanged > 0 && (
+                    <p className="text-xs text-amber-800">
+                      El motor reordena además <span className="font-bold">{change.preview.otherDaysChanged}</span> {change.preview.otherDaysChanged === 1 ? "día más" : "días más"} del año
+                      {change.preview.otherDaysSample.length > 0 && <> (p. ej. {change.preview.otherDaysSample.slice(0, 4).join(", ")}{change.preview.otherDaysChanged > 4 ? "..." : ""})</>}.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              <div className="flex gap-2 pt-1">
+                <Button size="sm" onClick={commitChange} disabled={change.loading || change.saving || !!change.error}>
+                  {change.saving ? "Guardando..." : <><Check className="w-3.5 h-3.5" /> Guardar cambio</>}
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => setChange(null)} disabled={change.saving}>Cancelar</Button>
+              </div>
+            </div>
+          )}
 
           {/* No trabajan */}
           {((day.offPeople?.length || 0) > 0 || day.timeOffs.length > 0) && (
@@ -544,7 +726,7 @@ function DayEditModal({ day, people, shiftTypes, onClose, onSaved }: {
                 </select>
               </div>
               <div className="flex gap-2">
-                <Button type="submit" size="sm" loading={saving === "add"}><Save className="w-3.5 h-3.5" /> Guardar</Button>
+                <Button type="submit" size="sm"><Save className="w-3.5 h-3.5" /> Ver efecto</Button>
                 <Button type="button" variant="ghost" size="sm" onClick={() => setShowAddShift(false)}>Cancelar</Button>
               </div>
             </form>

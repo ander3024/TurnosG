@@ -1,10 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth";
-import {
-  loadEngineContextForRange,
-  generateScheduleSlice,
-  buildHoursSummary,
-} from "@/lib/engine";
+import { loadEngineContextForRange, generateScheduleSlice } from "@/lib/engine";
+import { summarizeHours } from "@/lib/schedule-state";
 
 export async function GET(request: NextRequest) {
   try {
@@ -24,27 +21,9 @@ export async function GET(request: NextRequest) {
     const ctx = await loadEngineContextForRange(from, to);
     const schedule = generateScheduleSlice(ctx, from, to);
 
-    // Flatten all assignments
-    const allAssignments = schedule.flatMap((d) => d.assignments);
-
-    // Build holiday dates set for vacation counting
-    // If consumeVacationOnHoliday is false, ALL holidays (including working) don't consume vacation days
-    const holidayDates = new Set<string>();
-    for (const [date, h] of ctx.holidays) {
-      if (!ctx.settings.consumeVacationOnHoliday || h.type !== "working") {
-        holidayDates.add(date);
-      }
-    }
-
-    const hours = buildHoursSummary(
-      allAssignments,
-      ctx.extraHours,
-      ctx.timeOffs,
-      ctx.settings.annualTargetHours,
-      ctx.settings.vacationDaysNatural,
-      ctx.people,
-      holidayDates
-    );
+    // Misma funcion que usan el guardado y la simulacion: un solo calculo de
+    // horas para todas las pantallas.
+    const hours = summarizeHours(ctx, schedule);
 
     return NextResponse.json({ hours });
   } catch (error: any) {

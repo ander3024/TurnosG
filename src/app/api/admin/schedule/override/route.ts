@@ -1,13 +1,28 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/auth";
+import { loadScheduleState } from "@/lib/schedule-state";
+
+/**
+ * Cuadrante ya recalculado para devolverlo junto al guardado: un solo viaje, y
+ * la pantalla no puede quedarse pintando lo de antes. `range` es opcional.
+ */
+async function stateFor(range: { from?: string; to?: string } | null) {
+  if (!range?.from || !range?.to) return null;
+  try {
+    return await loadScheduleState(range.from, range.to);
+  } catch (e) {
+    console.error("override: no se pudo recalcular el estado", e);
+    return null;
+  }
+}
 
 export async function POST(request: NextRequest) {
   try {
     const admin = await requireAdmin();
     const body = await request.json();
 
-    const { date, shiftTypeId, personId, slotIndex } = body;
+    const { date, shiftTypeId, personId, slotIndex, from, to } = body;
 
     if (!date || !shiftTypeId) {
       return NextResponse.json(
@@ -103,7 +118,8 @@ export async function POST(request: NextRequest) {
       } catch { /* notification failure shouldn't block */ }
     }
 
-    return NextResponse.json(override);
+    const state = await stateFor({ from, to });
+    return NextResponse.json({ ...override, override, ...(state || {}) });
   } catch (error: any) {
     if (error.message === "Unauthorized")
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -121,6 +137,8 @@ export async function DELETE(request: NextRequest) {
     const date = searchParams.get("date");
     const shiftTypeId = searchParams.get("shiftTypeId");
     const slotIndex = searchParams.get("slotIndex") || "0";
+    const from = searchParams.get("from");
+    const to = searchParams.get("to");
 
     if (!date || !shiftTypeId) {
       return NextResponse.json(
@@ -148,7 +166,8 @@ export async function DELETE(request: NextRequest) {
       },
     });
 
-    return NextResponse.json({ success: true });
+    const state = await stateFor({ from: from || undefined, to: to || undefined });
+    return NextResponse.json({ success: true, ...(state || {}) });
   } catch (error: any) {
     if (error.message === "Unauthorized")
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
