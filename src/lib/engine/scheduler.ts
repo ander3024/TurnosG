@@ -308,6 +308,23 @@ export function generateSchedule(
       let person: EnginePerson | null = null;
       let source: ShiftAssignment["source"] = "rotation";
 
+      // Quien cubriria el sabado SEGUN LA ROTACION, al margen de lo que el admin
+      // haya puesto a mano. El domingo se guia por esto para que cambiar solo el
+      // sabado no arrastre el domingo. Antes solo se fijaba en la rama sin
+      // override, asi que al cambiar un sabado el domingo heredaba el valor
+      // rancio del sabado ANTERIOR y acababa en una tercera persona.
+      if (isSat && !isWH) {
+        let planned = plan.weekendPerson;
+        if (planned && isBlocked(blockedDates, planned.id, date)) {
+          const avail = rotationPeople.filter(
+            (p) => !isBlocked(blockedDates, p.id, date) && p.id !== plan.offPerson?.id
+          );
+          avail.sort(byWeekend);
+          planned = avail[0] || null;
+        }
+        saturdayPerson = planned;
+      }
+
       const ov = dayOverrides.find((o) => o.shiftTypeCode === "weekend" && o.slotIndex === 0);
       if (ov) {
         person = ov.personId ? findPerson(ctx, ov.personId) || null : null;
@@ -337,7 +354,6 @@ export function generateSchedule(
             person = avail[0] || null; source = "balance";
           }
         }
-        if (!isWH) saturdayPerson = person;
       } else {
         person = saturdayPerson || plan.weekendPerson;
         if (person && isBlocked(blockedDates, person.id, date)) {
