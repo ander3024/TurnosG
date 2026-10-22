@@ -169,8 +169,32 @@ function assignmentsOf(day: DaySchedule, personId: number) {
   return day.assignments.filter((a) => a.personId === personId);
 }
 
-/** Comprueba un intercambio contra el cuadrante generado (indexado por fecha). */
-export function checkSwap(s: IntegritySwap, days: Map<string, DaySchedule>): SwapIntegrity {
+/** Hoy, en el mismo formato que las fechas del cuadrante. */
+function todayISO() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+/**
+ * Comprueba un intercambio contra el cuadrante generado (indexado por fecha).
+ *
+ * Qué se exige en cada caso, que no es lo mismo:
+ *  - Cobertura de turno completo: quien pidió el favor NO trabaja y quien lo
+ *    hace SÍ. En qué turno acabe el que cubre da igual, porque el admin puede
+ *    recolocar a la gente ese día sin que el favor deje de hacerse (12-may-2026:
+ *    Miguel entró en su día libre, el admin le puso en Mañana en vez de la
+ *    Tarde de Edu, y el favor se hizo igual).
+ *  - Intercambio de turnos entre dos: cada uno en el turno del otro, comparando
+ *    por familia de turno.
+ *  - Cobertura de horas: solo tiene sentido avisar si el día está por venir.
+ *    En un día ya pasado las horas se pactaron sobre lo que se trabajó de
+ *    verdad, y el cuadrante que se genera hoy puede haber cambiado por otras
+ *    ediciones sin que eso borre el favor.
+ */
+export function checkSwap(
+  s: IntegritySwap,
+  days: Map<string, DaySchedule>,
+  today = todayISO()
+): SwapIntegrity {
   const legs = swapLegs(s);
   // Pendiente o aceptado todavía no obliga a nada, y la parcial no toca el
   // cuadrante: en los dos casos no hay nada que comprobar.
@@ -188,9 +212,21 @@ export function checkSwap(s: IntegritySwap, days: Map<string, DaySchedule>): Swa
 
     const family = familyOfLabel(leg.shiftLabel);
     const mine = assignmentsOf(day, leg.personId);
-    const covers = family
+    // En una cobertura basta con que esa persona trabaje ese día.
+    const byPresence = leg.legKind === "premise" || leg.freedPersonId != null;
+    const covers = !byPresence && family
       ? mine.some((a) => familyOfCode(a.shiftTypeCode) === family)
       : mine.length > 0;
+
+    // Cobertura de horas de un día ya pasado: nada que avisar.
+    if (leg.legKind === "premise" && leg.date < today) continue;
+
+    if (!covers && leg.freedPersonId) {
+      problems.push({
+        date: leg.date,
+        detail: `${leg.personName} ya no tiene turno ese día, así que nadie cubre a ${leg.freedPersonName}.`,
+      });
+    }
 
     if (!covers && leg.legKind === "premise") {
       const horas = leg.hours ? `${leg.hours}h` : "unas horas";
@@ -204,7 +240,7 @@ export function checkSwap(s: IntegritySwap, days: Map<string, DaySchedule>): Swa
       continue;
     }
 
-    if (!covers) {
+    if (!covers && !byPresence) {
       const holders = day.assignments
         .filter((a) => family && familyOfCode(a.shiftTypeCode) === family && a.personName)
         .map((a) => a.personName);
@@ -286,7 +322,11 @@ function when(s: IntegritySwap) {
  * contrario el mismo día, se marca como anulado por ese otro en vez de como
  * descuadre: el segundo pisa el override del primero y la pareja queda a cero.
  */
-export function checkSwaps(swaps: IntegritySwap[], days: Map<string, DaySchedule>): SwapCheckRow[] {
+export function checkSwaps(
+  swaps: IntegritySwap[],
+  days: Map<string, DaySchedule>,
+  today = new Date().toISOString().slice(0, 10)
+): SwapCheckRow[] {
   const rows = swaps.map((s) => ({
     swapId: s.id,
     kind: swapKind(s),
@@ -296,7 +336,7 @@ export function checkSwaps(swaps: IntegritySwap[], days: Map<string, DaySchedule
     toShiftLabel: s.toShiftLabel,
     fromPerson: { name: s.fromPerson.name, color: s.fromPerson.color ?? null },
     toPerson: { name: s.toPerson.name, color: s.toPerson.color ?? null },
-    integrity: checkSwap(s, days),
+    integrity: checkSwap(s, days, today),
   }));
 
   for (const row of rows) {
