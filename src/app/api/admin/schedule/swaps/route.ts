@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth";
 import {
-  loadSwapsInRange, loadApprovedSwaps, scheduleIndexForDates, checkSwaps, swapKind, toSwapNote,
+  loadSwapsInRange, loadApprovedSwaps, scheduleIndexForDates, checkSwaps, toSwapNote,
 } from "@/lib/swap-integrity";
 import type { IntegritySwap } from "@/lib/swap-integrity";
 import type { DaySchedule } from "@/lib/engine";
@@ -26,8 +26,8 @@ export async function GET(request: NextRequest) {
           ["pendiente", "aceptado", "aprobado"].includes(s.status))
       : await loadApprovedSwaps("1900-01-01", "2999-12-31");
 
-    // El cuadrante solo hace falta si hay algo que comprobar de verdad.
-    const checkable = swaps.filter((s) => s.status === "aprobado" && swapKind(s) !== "partial");
+    // El cuadrante solo hace falta si hay algo aprobado que comprobar.
+    const checkable = swaps.filter((s) => s.status === "aprobado");
     const days: Map<string, DaySchedule> = checkable.length
       ? await scheduleIndexForDates(checkable.flatMap((s) => [s.fromDate, s.toDate]))
       : new Map();
@@ -57,7 +57,11 @@ export async function GET(request: NextRequest) {
       };
     });
 
-    return NextResponse.json({ items, broken: items.filter((i) => i.check === "broken").length });
+    return NextResponse.json({
+      items,
+      broken: items.filter((i) => i.check === "broken").length,
+      orphan: items.filter((i) => i.check === "orphan").length,
+    });
   } catch (error: any) {
     if (error.message === "Unauthorized")
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

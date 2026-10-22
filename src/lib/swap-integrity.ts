@@ -68,6 +68,15 @@ export interface SwapLeg {
   /** Solo en coberturas: quien NO debe tener turno ese día porque libra. */
   freedPersonId?: number;
   freedPersonName?: string;
+  /**
+   * cover   = esta persona tiene que estar en ese turno.
+   * premise = la cobertura es solo de horas y no cambia el cuadrante, pero
+   *           cuelga del turno de quien recibe la ayuda: si ese turno
+   *           desaparece, las horas se quedan sin nada a lo que agarrarse.
+   */
+  legKind: "cover" | "premise";
+  /** Horas pactadas, solo en las premisas. */
+  hours?: number | null;
 }
 
 /**
@@ -77,7 +86,20 @@ export interface SwapLeg {
  */
 export function swapLegs(s: IntegritySwap): SwapLeg[] {
   const kind = swapKind(s);
-  if (kind === "partial") return [];
+
+  // Cobertura de unas horas: nadie cambia de turno, así que lo único que hay
+  // que comprobar es que quien recibe la ayuda siga teniendo ESE turno.
+  if (kind === "partial") {
+    return [{
+      date: s.fromDate,
+      personId: s.fromPersonId,
+      personName: s.fromPerson.name,
+      shiftLabel: s.fromShiftLabel,
+      shiftCode: shiftCodeForLabel(s.fromShiftLabel),
+      legKind: "premise",
+      hours: s.hours,
+    }];
+  }
 
   const legs: SwapLeg[] = [{
     date: s.fromDate,
@@ -85,6 +107,7 @@ export function swapLegs(s: IntegritySwap): SwapLeg[] {
     personName: s.toPerson.name,
     shiftLabel: s.fromShiftLabel,
     shiftCode: shiftCodeForLabel(s.fromShiftLabel),
+    legKind: "cover",
     ...(kind === "cover" ? { freedPersonId: s.fromPersonId, freedPersonName: s.fromPerson.name } : {}),
   }];
 
@@ -95,6 +118,7 @@ export function swapLegs(s: IntegritySwap): SwapLeg[] {
       personName: s.fromPerson.name,
       shiftLabel: s.toShiftLabel,
       shiftCode: shiftCodeForLabel(s.toShiftLabel),
+      legKind: "cover",
     });
   }
   return legs;
@@ -168,6 +192,18 @@ export function checkSwap(s: IntegritySwap, days: Map<string, DaySchedule>): Swa
       ? mine.some((a) => familyOfCode(a.shiftTypeCode) === family)
       : mine.length > 0;
 
+    if (!covers && leg.legKind === "premise") {
+      const horas = leg.hours ? `${leg.hours}h` : "unas horas";
+      const whereIsIt = mine.length > 0
+        ? `está en ${mine.map((a) => a.shiftTypeLabel).join(" + ")}`
+        : "ya no trabaja ese día";
+      problems.push({
+        date: leg.date,
+        detail: `La cobertura de ${horas} colgaba de la ${leg.shiftLabel} de ${leg.personName}, y ${whereIsIt}. Las horas siguen apuntadas, pero sin ese turno detrás.`,
+      });
+      continue;
+    }
+
     if (!covers) {
       const holders = day.assignments
         .filter((a) => family && familyOfCode(a.shiftTypeCode) === family && a.personName)
@@ -199,7 +235,11 @@ export function checkSwap(s: IntegritySwap, days: Map<string, DaySchedule>): Swa
   return { ok: problems.length === 0, problems, dates: [...new Set(legs.map((l) => l.date))] };
 }
 
-/** Intercambios aprobados que comprometen algún día del rango. */
+/**
+ * Intercambios aprobados que tocan el rango: los que cambian turnos y también
+ * las coberturas de horas, que no cambian el cuadrante pero cuelgan de un
+ * turno concreto.
+ */
 export async function loadApprovedSwaps(from: string, to: string) {
   const swaps = await prisma.swapRequest.findMany({
     where: {
@@ -215,8 +255,7 @@ export async function loadApprovedSwaps(from: string, to: string) {
     },
     orderBy: { fromDate: "asc" },
   });
-  // Las parciales no comprometen el cuadrante: fuera de la comprobación.
-  return swaps.filter((s) => swapKind(s) !== "partial");
+  return swaps;
 }
 
 /** Índice por fecha del cuadrante. */
@@ -305,8 +344,14 @@ export async function scheduleIndexForDates(dates: string[]) {
   return days;
 }
 
-/** unchecked = no hay nada que comprobar (parcial, o aún sin aprobar). */
-export type SwapNoteStatus = "ok" | "broken" | "superseded" | "unchecked";
+/**
+ * ok         = el cuadrante lo cumple
+ * broken     = se aprobó un cambio de turno que ya no está
+ * orphan     = cobertura de horas cuyo turno de origen ya no existe
+ * superseded = lo anuló otro intercambio contrario del mismo día
+ * unchecked  = todavía no obliga a nada (pendiente o aceptado)
+ */
+export type SwapNoteStatus = "ok" | "broken" | "orphan" | "superseded" | "unchecked";
 
 /** Un intercambio resumido en una línea, para enseñarlo en el calendario. */
 export interface SwapNote {
@@ -329,6 +374,7 @@ export function toSwapNote(row: SwapCheckRow): SwapNote {
     row.integrity.ok === null ? "unchecked"
     : row.integrity.ok ? "ok"
     : row.integrity.supersededBySwapId ? "superseded"
+    : row.kind === "partial" ? "orphan"
     : "broken";
   return {
     swapId: row.swapId,

@@ -33,7 +33,7 @@ interface HoursSummary {
 interface SwapNote {
   swapId: number;
   kind: "partial" | "cover" | "swap";
-  status: "ok" | "broken" | "superseded" | "unchecked";
+  status: "ok" | "broken" | "orphan" | "superseded" | "unchecked";
   people: string;
   dates: string[];
   shift: string;
@@ -49,6 +49,7 @@ interface OverridePreview {
   noEffect: boolean;
   swapsOnDay: SwapNote[];
   swapsBroken: SwapNote[];
+  swapsOrphaned: SwapNote[];
   swapsRestored: SwapNote[];
 }
 interface ScheduleState { schedule: DaySchedule[]; hours: HoursSummary[] }
@@ -76,8 +77,8 @@ interface SwapInfo {
   toPerson: { id: number; name: string; color: string };
   hours: number | null;
   people: string; shift: string;
-  /** ok = en el cuadrante · broken = ya no se cumple · superseded = anulado por otro · pending = aún no obliga */
-  check: "ok" | "broken" | "superseded" | "unchecked";
+  /** ok · broken = ya no se cumple · orphan = cobertura sin su turno · superseded = anulado por otro · unchecked = aún no obliga */
+  check: "ok" | "broken" | "orphan" | "superseded" | "unchecked";
   detail: string | null;
   supersededBySwapId?: number | null;
 }
@@ -254,6 +255,7 @@ export default function AdminCalendarPage() {
               const cellPending = cellSwaps.some(s => s.status === "pendiente" || s.status === "aceptado");
               const cellApproved = cellSwaps.some(s => s.status === "aprobado");
               const cellBroken = cellSwaps.some(s => s.check === "broken");
+              const cellOrphan = cellSwaps.some(s => s.check === "orphan");
               return (
                 <div key={idx} onClick={() => day && setSelectedDate(day.date)} className={cn(
                   "min-h-[130px] border-b border-r border-gray-100 p-1.5 cursor-pointer transition-all duration-150 hover:bg-indigo-50/40",
@@ -262,6 +264,7 @@ export default function AdminCalendarPage() {
                   cellPending && "animate-pulse-subtle ring-1 ring-inset ring-purple-300 bg-purple-50/30",
                   cellApproved && !cellPending && "ring-1 ring-inset ring-cyan-300 bg-cyan-50/20",
                   cellBroken && "ring-2 ring-inset ring-rose-400 bg-rose-50/40",
+                  cellOrphan && !cellBroken && "ring-2 ring-inset ring-amber-400 bg-amber-50/30",
                 )}>
                   <div className="flex items-center justify-between mb-1">
                     <span className={cn("text-[11px] font-bold", isToday ? "bg-indigo-600 text-white rounded-full w-6 h-6 flex items-center justify-center" : isWe ? "text-amber-700" : "text-gray-800")}>{dayNum}</span>
@@ -306,18 +309,20 @@ export default function AdminCalendarPage() {
                     {cellSwaps.map((sw, i) => (
                       <div key={`sw${i}`} title={sw.detail || undefined} className={cn("flex items-center gap-[3px] rounded-md px-1 py-[2px] mt-0.5",
                         sw.check === "broken" ? "bg-rose-50 border border-rose-300"
+                          : sw.check === "orphan" ? "bg-amber-50 border border-amber-300"
                           : sw.check === "superseded" ? "bg-gray-50 border border-gray-200"
                           : sw.status === "aprobado" ? "bg-cyan-50 border border-cyan-200"
                           : "bg-purple-50 border border-purple-200"
                       )}>
-                        {sw.check === "broken"
-                          ? <AlertTriangle className="w-[10px] h-[10px] flex-shrink-0 text-rose-500" />
+                        {sw.check === "broken" || sw.check === "orphan"
+                          ? <AlertTriangle className={cn("w-[10px] h-[10px] flex-shrink-0", sw.check === "broken" ? "text-rose-500" : "text-amber-500")} />
                           : <ArrowLeftRight className={cn("w-[10px] h-[10px] flex-shrink-0",
                               sw.check === "superseded" ? "text-gray-400" : sw.status === "aprobado" ? "text-cyan-500" : "text-purple-500")} />}
                         <span className="text-[9px] font-semibold truncate" style={{ color: sw.fromPerson.color }}>{sw.fromPerson.name.split(" ")[0]}</span>
                         <span className="text-[9px] text-gray-300">↔</span>
                         <span className="text-[9px] font-semibold truncate" style={{ color: sw.toPerson.color }}>{sw.toPerson.name.split(" ")[0]}</span>
                         {sw.check === "broken" && <span className="text-[8px] ml-auto font-bold text-rose-600 flex-shrink-0">ROTO</span>}
+                        {sw.check === "orphan" && <span className="text-[8px] ml-auto font-bold text-amber-600 flex-shrink-0">{sw.hours}h?</span>}
                       </div>
                     ))}
                   </div>
@@ -388,11 +393,12 @@ export default function AdminCalendarPage() {
                     {getSwapsForDate(day.date).map((sw) => (
                       <span key={`sw${sw.id}`} className={cn("inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold",
                         sw.check === "broken" ? "bg-rose-50 text-rose-700"
+                          : sw.check === "orphan" ? "bg-amber-50 text-amber-700"
                           : sw.check === "superseded" ? "bg-gray-100 text-gray-500"
                           : sw.status === "aprobado" ? "bg-cyan-50 text-cyan-700"
                           : "bg-purple-50 text-purple-700")}>
-                        {sw.check === "broken" ? <AlertTriangle className="w-3 h-3" /> : <ArrowLeftRight className="w-3 h-3" />}
-                        {sw.people}{sw.check === "broken" ? " (roto)" : ""}
+                        {sw.check === "broken" || sw.check === "orphan" ? <AlertTriangle className="w-3 h-3" /> : <ArrowLeftRight className="w-3 h-3" />}
+                        {sw.people}{sw.check === "broken" ? " (roto)" : sw.check === "orphan" ? ` (${sw.hours}h sin turno)` : ""}
                       </span>
                     ))}
                   </div>
@@ -571,22 +577,25 @@ function DayEditModal({ day, range, people, shiftTypes, swaps, onClose, onSaved 
               <div className="space-y-2">
                 {swaps.map((sw) => {
                   const broken = sw.check === "broken";
+                  const orphan = sw.check === "orphan";
                   const superseded = sw.check === "superseded";
                   const pending = sw.status !== "aprobado";
                   return (
                     <div key={sw.id} className={cn("rounded-xl border px-3 py-2.5",
                       broken ? "bg-rose-50 border-rose-200"
+                        : orphan ? "bg-amber-50 border-amber-200"
                         : superseded ? "bg-gray-50 border-gray-200"
                         : pending ? "bg-purple-50 border-purple-200"
                         : "bg-cyan-50 border-cyan-200")}>
                       <div className="flex items-center gap-2 flex-wrap">
-                        {broken
-                          ? <AlertTriangle className="w-4 h-4 text-rose-500 flex-shrink-0" />
+                        {broken || orphan
+                          ? <AlertTriangle className={cn("w-4 h-4 flex-shrink-0", broken ? "text-rose-500" : "text-amber-500")} />
                           : <ArrowLeftRight className={cn("w-4 h-4 flex-shrink-0", superseded ? "text-gray-400" : pending ? "text-purple-500" : "text-cyan-500")} />}
                         <span className="text-sm font-semibold text-gray-900">{sw.people}</span>
                         <span className="text-xs text-gray-500">{sw.shift}{sw.kind === "partial" && sw.hours ? ` · ${sw.hours}h` : ""}</span>
-                        <Badge variant={broken ? "danger" : superseded ? "default" : pending ? "info" : "success"} className="ml-auto flex-shrink-0">
+                        <Badge variant={broken ? "danger" : orphan ? "warning" : superseded ? "default" : pending ? "info" : "success"} className="ml-auto flex-shrink-0">
                           {broken ? "Ya no se cumple"
+                            : orphan ? "Horas sin turno"
                             : superseded ? "Anulado por otro"
                             : sw.status === "pendiente" ? "Pendiente"
                             : sw.status === "aceptado" ? "Falta el admin"
@@ -598,12 +607,17 @@ function DayEditModal({ day, range, people, shiftTypes, swaps, onClose, onSaved 
                           {sw.detail} Se aprobó y se les avisó a los dos: o se deja el cuadrante como el acuerdo, o hay que decírselo.
                         </p>
                       )}
+                      {orphan && sw.detail && (
+                        <p className="text-[11px] text-amber-800 mt-1.5 leading-relaxed">
+                          {sw.detail} Conviene confirmar con ellos si esas horas se hicieron de verdad antes de darlas por debidas.
+                        </p>
+                      )}
                       {superseded && (
                         <p className="text-[11px] text-gray-500 mt-1.5">
                           Después pidieron el contrario (intercambio #{sw.supersededBySwapId}) el mismo día, así que los dos se anulan entre sí.
                         </p>
                       )}
-                      {!broken && !superseded && sw.kind === "partial" && (
+                      {!broken && !orphan && !superseded && sw.kind === "partial" && (
                         <p className="text-[11px] text-gray-500 mt-1.5">Solo es una deuda de horas: no cambia ningún turno de este día.</p>
                       )}
                     </div>
@@ -762,6 +776,23 @@ function DayEditModal({ day, range, people, shiftTypes, swaps, onClose, onSaved 
                         </p>
                       ))}
                       <p className="text-[11px] text-rose-700 mt-1.5">Los dos recibieron el aviso de que estaba aprobado. Si lo guardas, avísales.</p>
+                    </div>
+                  )}
+
+                  {change.preview.swapsOrphaned.length > 0 && (
+                    <div className="rounded-lg bg-amber-100 border border-amber-300 px-3 py-2">
+                      <p className="text-xs font-bold text-amber-900 flex items-center gap-1.5">
+                        <Clock className="w-3.5 h-3.5" />
+                        {change.preview.swapsOrphaned.length === 1
+                          ? "Este cambio deja una cobertura de horas sin su turno"
+                          : `Este cambio deja ${change.preview.swapsOrphaned.length} coberturas de horas sin su turno`}
+                      </p>
+                      {change.preview.swapsOrphaned.map((sw) => (
+                        <p key={sw.swapId} className="text-[11px] text-amber-800 mt-1 leading-relaxed">
+                          <span className="font-semibold">{sw.people}</span> ({sw.dates.join(", ")}): {sw.detail}
+                        </p>
+                      ))}
+                      <p className="text-[11px] text-amber-700 mt-1.5">Las horas no se borran solas: seguirán contando en las deudas.</p>
                     </div>
                   )}
 

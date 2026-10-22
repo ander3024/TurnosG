@@ -2,7 +2,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { ArrowLeftRight, Check, X, Loader2, Trash2, Scale, AlertTriangle } from "lucide-react";
+import { ArrowLeftRight, Check, X, Loader2, Trash2, Scale, AlertTriangle, Clock } from "lucide-react";
 import { cn, statusColor, statusLabel } from "@/lib/utils";
 import { useToast } from "@/components/ui/toast";
 
@@ -18,7 +18,8 @@ interface Swap {
 /** Comprobación de un intercambio contra el cuadrante (GET /schedule/swaps). */
 interface SwapCheck {
   id: number;
-  check: "ok" | "broken" | "superseded" | "unchecked";
+  check: "ok" | "broken" | "orphan" | "superseded" | "unchecked";
+  hours?: number | null;
   people: string;
   dates: string[];
   detail: string | null;
@@ -80,6 +81,7 @@ export default function SwapsPage() {
   useEffect(() => { fetchChecks(); }, [fetchChecks]);
 
   const broken = [...checks.values()].filter((c) => c.check === "broken");
+  const orphan = [...checks.values()].filter((c) => c.check === "orphan");
 
   async function handleAction(swapId: number, status: "aprobado" | "rechazado" | "cancelado") {
     setActionLoading(swapId);
@@ -140,6 +142,34 @@ export default function SwapsPage() {
                   {broken.map((b) => (
                     <li key={b.id} className="text-xs text-rose-800">
                       <span className="font-semibold">{b.dates.join(", ")} · {b.people}</span> — {b.detail}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Coberturas de horas que se quedaron sin el turno del que colgaban */}
+      {orphan.length > 0 && (
+        <Card className="border-amber-200 bg-amber-50/40">
+          <CardContent className="!py-3">
+            <div className="flex items-start gap-3">
+              <Clock className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-amber-900">
+                  {orphan.length === 1
+                    ? "Una cobertura de horas se quedó sin su turno"
+                    : `${orphan.length} coberturas de horas se quedaron sin su turno`}
+                </p>
+                <p className="text-xs text-amber-800 mt-0.5">
+                  Las horas siguen contando en las deudas, pero el turno del que colgaban ya no está en el cuadrante. Conviene confirmar con ellos si se hicieron.
+                </p>
+                <ul className="mt-2 space-y-1">
+                  {orphan.map((o) => (
+                    <li key={o.id} className="text-xs text-amber-900">
+                      <span className="font-semibold">{o.dates.join(", ")} · {o.people}</span> — {o.detail}
                     </li>
                   ))}
                 </ul>
@@ -239,6 +269,11 @@ export default function SwapsPage() {
                     if (c.check === "broken") return (
                       <span title={c.detail || undefined} className="inline-flex items-center gap-1 rounded-full bg-rose-100 text-rose-800 px-2.5 py-0.5 text-xs font-medium">
                         <AlertTriangle className="w-3 h-3" /> Ya no se cumple
+                      </span>
+                    );
+                    if (c.check === "orphan") return (
+                      <span title={c.detail || undefined} className="inline-flex items-center gap-1 rounded-full bg-amber-100 text-amber-800 px-2.5 py-0.5 text-xs font-medium">
+                        <Clock className="w-3 h-3" /> Horas sin turno
                       </span>
                     );
                     if (c.check === "superseded") return (

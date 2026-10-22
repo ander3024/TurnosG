@@ -122,6 +122,8 @@ export interface OverridePreview {
   swapsOnDay: SwapNote[];
   /** Intercambios aprobados que este cambio dejaría sin cumplir. */
   swapsBroken: SwapNote[];
+  /** Coberturas de horas que este cambio dejaría sin el turno del que cuelgan. */
+  swapsOrphaned: SwapNote[];
   /** Intercambios ahora incumplidos que este cambio volvería a cumplir. */
   swapsRestored: SwapNote[];
 }
@@ -175,9 +177,13 @@ export async function previewOverride(m: OverrideMutation): Promise<OverridePrev
   const wasBroken = (id: number) =>
     baseById.get(id)?.integrity.ok === false && !baseById.get(id)?.integrity.supersededBySwapId;
 
-  const swapsBroken = modRows
-    .filter((r) => r.integrity.ok === false && !r.integrity.supersededBySwapId && wasOk(r.swapId))
-    .map(toSwapNote);
+  const nowFails = (r: (typeof modRows)[number]) =>
+    r.integrity.ok === false && !r.integrity.supersededBySwapId && wasOk(r.swapId);
+  // Un cambio de turno roto y una cobertura de horas que se queda sin turno no
+  // son lo mismo: el primero deja a alguien sin el turno que le prometieron,
+  // el segundo deja unas horas apuntadas sin nada detrás.
+  const swapsBroken = modRows.filter((r) => nowFails(r) && r.kind !== "partial").map(toSwapNote);
+  const swapsOrphaned = modRows.filter((r) => nowFails(r) && r.kind === "partial").map(toSwapNote);
   const swapsRestored = modRows
     .filter((r) => r.integrity.ok === true && wasBroken(r.swapId))
     .map(toSwapNote);
@@ -199,6 +205,7 @@ export async function previewOverride(m: OverrideMutation): Promise<OverridePrev
     noEffect: dayChanges.length === 0 && hourDeltas.length === 0 && otherDays.length === 0,
     swapsOnDay,
     swapsBroken,
+    swapsOrphaned,
     swapsRestored,
   };
 }
