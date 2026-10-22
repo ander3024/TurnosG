@@ -100,8 +100,12 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Notify the affected employee (only on real change)
-    if (personId && !isNoOp) {
+    // Avisar al empleado, solo si el cambio es real y el día está por venir:
+    // un push de "tu turno del 18-sep ha sido modificado" cinco semanas después
+    // no le sirve para nada y solo le hace dudar de lo que ya trabajó. El cambio
+    // queda igualmente en el registro de auditoría de arriba.
+    const hoy = new Date().toISOString().slice(0, 10);
+    if (personId && !isNoOp && date >= hoy) {
       try {
         const { notify } = await import("@/lib/notifications");
         const person = await prisma.person.findUnique({ where: { id: personId }, include: { user: true } });
