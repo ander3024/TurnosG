@@ -2,7 +2,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { ArrowLeftRight, Check, X, Loader2, Trash2, Scale } from "lucide-react";
+import { ArrowLeftRight, Check, X, Loader2, Trash2, Scale, AlertTriangle } from "lucide-react";
 import { cn, statusColor, statusLabel } from "@/lib/utils";
 import { useToast } from "@/components/ui/toast";
 
@@ -13,6 +13,16 @@ interface Swap {
   fromPerson: SwapPerson; toPerson: SwapPerson;
   fromDate: string; toDate: string; fromShiftLabel: string; toShiftLabel: string;
   status: string; reason: string | null; createdAt: string;
+}
+
+/** Comprobación de un intercambio contra el cuadrante (GET /schedule/swaps). */
+interface SwapCheck {
+  id: number;
+  check: "ok" | "broken" | "superseded" | "unchecked";
+  people: string;
+  dates: string[];
+  detail: string | null;
+  supersededBySwapId?: number | null;
 }
 
 const TABS = [
@@ -31,6 +41,7 @@ export default function SwapsPage() {
   const [activeTab, setActiveTab] = useState("todos");
   const [actionLoading, setActionLoading] = useState<number | null>(null);
   const [debts, setDebts] = useState<DebtPair[]>([]);
+  const [checks, setChecks] = useState<Map<number, SwapCheck>>(new Map());
   const toast = useToast();
 
   const fetchSwaps = useCallback(async () => {
@@ -50,8 +61,25 @@ export default function SwapsPage() {
     } catch {}
   }, []);
 
+  /**
+   * Un intercambio aprobado se puede quedar sin efecto si alguien edita el
+   * cuadrante de ese día después. Aquí se comprueba contra el cuadrante de
+   * verdad para poder avisarlo, en vez de darlo por hecho porque está aprobado.
+   */
+  const fetchChecks = useCallback(async () => {
+    try {
+      const res = await fetch("/api/admin/schedule/swaps", { cache: "no-store" });
+      if (!res.ok) return;
+      const data = await res.json();
+      setChecks(new Map((data.items || []).map((i: SwapCheck) => [i.id, i])));
+    } catch {}
+  }, []);
+
   useEffect(() => { fetchSwaps(); }, [fetchSwaps]);
   useEffect(() => { fetchDebts(); }, [fetchDebts]);
+  useEffect(() => { fetchChecks(); }, [fetchChecks]);
+
+  const broken = [...checks.values()].filter((c) => c.check === "broken");
 
   async function handleAction(swapId: number, status: "aprobado" | "rechazado" | "cancelado") {
     setActionLoading(swapId);
@@ -63,7 +91,7 @@ export default function SwapsPage() {
       if (res.ok) {
         const msgs = { aprobado: "Intercambio aprobado", rechazado: "Intercambio rechazado", cancelado: "Intercambio cancelado" };
         toast.success(msgs[status]);
-        await fetchSwaps();
+        await Promise.all([fetchSwaps(), fetchDebts(), fetchChecks()]);
       } else {
         const err = await res.json().catch(() => ({}));
         toast.error(err.error || "Error al procesar");
@@ -78,7 +106,7 @@ export default function SwapsPage() {
       const res = await fetch(`/api/admin/swaps/${swapId}`, { method: "DELETE" });
       if (res.ok) {
         toast.success("Intercambio eliminado");
-        await fetchSwaps();
+        await Promise.all([fetchSwaps(), fetchDebts(), fetchChecks()]);
       } else {
         const err = await res.json().catch(() => ({}));
         toast.error(err.error || "Error al eliminar");
@@ -92,6 +120,34 @@ export default function SwapsPage() {
         <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Intercambios de turno</h1>
         <p className="text-gray-500 text-sm mt-1">Solicitudes de intercambio entre empleados</p>
       </div>
+
+      {/* Aprobados que el cuadrante ya no cumple */}
+      {broken.length > 0 && (
+        <Card className="border-rose-200 bg-rose-50/40">
+          <CardContent className="!py-3">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="w-5 h-5 text-rose-500 flex-shrink-0 mt-0.5" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-rose-900">
+                  {broken.length === 1
+                    ? "Un intercambio aprobado ya no se cumple"
+                    : `${broken.length} intercambios aprobados ya no se cumplen`}
+                </p>
+                <p className="text-xs text-rose-700 mt-0.5">
+                  Se aprobaron y se avisó a los dos, pero el cuadrante de esos días se editó después y ya no coincide con lo acordado.
+                </p>
+                <ul className="mt-2 space-y-1">
+                  {broken.map((b) => (
+                    <li key={b.id} className="text-xs text-rose-800">
+                      <span className="font-semibold">{b.dates.join(", ")} · {b.people}</span> — {b.detail}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Debt summary */}
       {debts.length > 0 && (
@@ -177,6 +233,25 @@ export default function SwapsPage() {
                   <span className={cn("inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium", statusColor(swap.status))}>
                     {statusLabel(swap.status)}
                   </span>
+                  {(() => {
+                    const c = checks.get(swap.id);
+                    if (!c || c.check === "unchecked") return null;
+                    if (c.check === "broken") return (
+                      <span title={c.detail || undefined} className="inline-flex items-center gap-1 rounded-full bg-rose-100 text-rose-800 px-2.5 py-0.5 text-xs font-medium">
+                        <AlertTriangle className="w-3 h-3" /> Ya no se cumple
+                      </span>
+                    );
+                    if (c.check === "superseded") return (
+                      <span className="inline-flex items-center rounded-full bg-gray-100 text-gray-600 px-2.5 py-0.5 text-xs font-medium">
+                        Anulado por #{c.supersededBySwapId}
+                      </span>
+                    );
+                    return (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-cyan-50 text-cyan-700 px-2.5 py-0.5 text-xs font-medium">
+                        <Check className="w-3 h-3" /> En el cuadrante
+                      </span>
+                    );
+                  })()}
                   <span className="text-xs text-gray-400">
                     {new Date(swap.createdAt).toLocaleDateString("es-ES", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
                   </span>

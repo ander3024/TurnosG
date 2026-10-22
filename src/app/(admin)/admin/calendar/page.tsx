@@ -29,6 +29,17 @@ interface HoursSummary {
   totalHours: number; targetHours: number; delta: number;
   vacationDaysUsed: number; vacationDaysTotal: number;
 }
+/** Un intercambio resumido, con si el cuadrante lo sigue cumpliendo. */
+interface SwapNote {
+  swapId: number;
+  kind: "partial" | "cover" | "swap";
+  status: "ok" | "broken" | "superseded" | "unchecked";
+  people: string;
+  dates: string[];
+  shift: string;
+  detail: string | null;
+  supersededBySwapId?: number | null;
+}
 interface OverridePreview {
   date: string;
   dayChanges: { label: string; before: string; after: string }[];
@@ -36,6 +47,9 @@ interface OverridePreview {
   otherDaysChanged: number;
   otherDaysSample: string[];
   noEffect: boolean;
+  swapsOnDay: SwapNote[];
+  swapsBroken: SwapNote[];
+  swapsRestored: SwapNote[];
 }
 interface ScheduleState { schedule: DaySchedule[]; hours: HoursSummary[] }
 /** Cambio propuesto, pendiente de que el admin lo confirme. */
@@ -54,7 +68,19 @@ interface ProposedChange {
 }
 interface PersonOption { id: number; code: string; name: string; color: string; }
 interface ShiftTypeOption { id: number; code: string; label: string; }
-interface SwapInfo { id: number; fromPerson: { name: string; color: string }; toPerson: { name: string; color: string }; fromDate: string; toDate: string; fromShiftLabel: string; toShiftLabel: string; status: string }
+/** Fila de GET /api/admin/schedule/swaps: el intercambio + su comprobación. */
+interface SwapInfo {
+  id: number; status: string; kind: "partial" | "cover" | "swap";
+  fromDate: string; toDate: string; fromShiftLabel: string; toShiftLabel: string;
+  fromPerson: { id: number; name: string; color: string };
+  toPerson: { id: number; name: string; color: string };
+  hours: number | null;
+  people: string; shift: string;
+  /** ok = en el cuadrante · broken = ya no se cumple · superseded = anulado por otro · pending = aún no obliga */
+  check: "ok" | "broken" | "superseded" | "unchecked";
+  detail: string | null;
+  supersededBySwapId?: number | null;
+}
 
 const monthNames = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
 const dayNames = ["LUN","MAR","MIÉ","JUE","VIE","SÁB","DOM"];
@@ -92,7 +118,10 @@ export default function AdminCalendarPage() {
         fetch(`/api/admin/schedule/hours?from=${year}-01-01&to=${year}-12-31`, nc).then(r => { if (!r.ok) throw new Error(); return r.json(); }),
         fetch("/api/admin/people", nc).then(r => r.json()),
         fetch("/api/admin/shifts", nc).then(r => r.json()),
-        fetch("/api/admin/swaps", nc).then(r => r.ok ? r.json() : { items: [] }),
+        // Los intercambios del mes YA comprobados contra el cuadrante: así se
+        // ve cuáles siguen cumpliéndose. (El listado general viene paginado a
+        // 50, así que para el calendario se dejaban fuera los más antiguos.)
+        fetch(`/api/admin/schedule/swaps?from=${from}&to=${to}`, nc).then(r => r.ok ? r.json() : { items: [] }),
       ]);
       setSchedule(s.schedule || []);
       setHours(h.hours || []);
@@ -112,7 +141,7 @@ export default function AdminCalendarPage() {
   useEffect(() => { fetchData(); }, [fetchData]);
 
   function getSwapsForDate(date: string) {
-    return swaps.filter(s => (s.fromDate === date || s.toDate === date) && ["pendiente", "aceptado", "aprobado"].includes(s.status));
+    return swaps.filter(s => s.fromDate === date || s.toDate === date);
   }
 
   function prevMonth() { if (month === 0) { setMonth(11); setYear(year - 1); } else setMonth(month - 1); }
@@ -224,6 +253,7 @@ export default function AdminCalendarPage() {
               const cellSwaps = getSwapsForDate(dateStr);
               const cellPending = cellSwaps.some(s => s.status === "pendiente" || s.status === "aceptado");
               const cellApproved = cellSwaps.some(s => s.status === "aprobado");
+              const cellBroken = cellSwaps.some(s => s.check === "broken");
               return (
                 <div key={idx} onClick={() => day && setSelectedDate(day.date)} className={cn(
                   "min-h-[130px] border-b border-r border-gray-100 p-1.5 cursor-pointer transition-all duration-150 hover:bg-indigo-50/40",
@@ -231,6 +261,7 @@ export default function AdminCalendarPage() {
                   isToday && "ring-2 ring-inset ring-indigo-500 bg-indigo-50/20",
                   cellPending && "animate-pulse-subtle ring-1 ring-inset ring-purple-300 bg-purple-50/30",
                   cellApproved && !cellPending && "ring-1 ring-inset ring-cyan-300 bg-cyan-50/20",
+                  cellBroken && "ring-2 ring-inset ring-rose-400 bg-rose-50/40",
                 )}>
                   <div className="flex items-center justify-between mb-1">
                     <span className={cn("text-[11px] font-bold", isToday ? "bg-indigo-600 text-white rounded-full w-6 h-6 flex items-center justify-center" : isWe ? "text-amber-700" : "text-gray-800")}>{dayNum}</span>
@@ -273,13 +304,20 @@ export default function AdminCalendarPage() {
                       </div>
                     ))}
                     {cellSwaps.map((sw, i) => (
-                      <div key={`sw${i}`} className={cn("flex items-center gap-[3px] rounded-md px-1 py-[2px] mt-0.5",
-                        sw.status === "aprobado" ? "bg-cyan-50 border border-cyan-200" : "bg-purple-50 border border-purple-200"
+                      <div key={`sw${i}`} title={sw.detail || undefined} className={cn("flex items-center gap-[3px] rounded-md px-1 py-[2px] mt-0.5",
+                        sw.check === "broken" ? "bg-rose-50 border border-rose-300"
+                          : sw.check === "superseded" ? "bg-gray-50 border border-gray-200"
+                          : sw.status === "aprobado" ? "bg-cyan-50 border border-cyan-200"
+                          : "bg-purple-50 border border-purple-200"
                       )}>
-                        <ArrowLeftRight className={cn("w-[10px] h-[10px] flex-shrink-0", sw.status === "aprobado" ? "text-cyan-500" : "text-purple-500")} />
+                        {sw.check === "broken"
+                          ? <AlertTriangle className="w-[10px] h-[10px] flex-shrink-0 text-rose-500" />
+                          : <ArrowLeftRight className={cn("w-[10px] h-[10px] flex-shrink-0",
+                              sw.check === "superseded" ? "text-gray-400" : sw.status === "aprobado" ? "text-cyan-500" : "text-purple-500")} />}
                         <span className="text-[9px] font-semibold truncate" style={{ color: sw.fromPerson.color }}>{sw.fromPerson.name.split(" ")[0]}</span>
                         <span className="text-[9px] text-gray-300">↔</span>
                         <span className="text-[9px] font-semibold truncate" style={{ color: sw.toPerson.color }}>{sw.toPerson.name.split(" ")[0]}</span>
+                        {sw.check === "broken" && <span className="text-[8px] ml-auto font-bold text-rose-600 flex-shrink-0">ROTO</span>}
                       </div>
                     ))}
                   </div>
@@ -347,6 +385,16 @@ export default function AdminCalendarPage() {
                         <BedDouble className="w-3 h-3" /> {op.personName}
                       </span>
                     ))}
+                    {getSwapsForDate(day.date).map((sw) => (
+                      <span key={`sw${sw.id}`} className={cn("inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold",
+                        sw.check === "broken" ? "bg-rose-50 text-rose-700"
+                          : sw.check === "superseded" ? "bg-gray-100 text-gray-500"
+                          : sw.status === "aprobado" ? "bg-cyan-50 text-cyan-700"
+                          : "bg-purple-50 text-purple-700")}>
+                        {sw.check === "broken" ? <AlertTriangle className="w-3 h-3" /> : <ArrowLeftRight className="w-3 h-3" />}
+                        {sw.people}{sw.check === "broken" ? " (roto)" : ""}
+                      </span>
+                    ))}
                   </div>
 
                   <ChevronRight className="w-4 h-4 text-gray-300 flex-shrink-0" />
@@ -378,6 +426,7 @@ export default function AdminCalendarPage() {
       {selectedDay && (
         <DayEditModal
           day={selectedDay} range={{ from, to }} people={people} shiftTypes={shiftTypes}
+          swaps={getSwapsForDate(selectedDay.date)}
           onClose={() => setSelectedDate(null)} onSaved={onScheduleChanged}
         />
       )}
@@ -386,9 +435,9 @@ export default function AdminCalendarPage() {
 }
 
 // ─── DAY EDIT MODAL ────────────────────────────────────────
-function DayEditModal({ day, range, people, shiftTypes, onClose, onSaved }: {
+function DayEditModal({ day, range, people, shiftTypes, swaps, onClose, onSaved }: {
   day: DaySchedule; range: { from: string; to: string };
-  people: PersonOption[]; shiftTypes: ShiftTypeOption[];
+  people: PersonOption[]; shiftTypes: ShiftTypeOption[]; swaps: SwapInfo[];
   onClose: () => void; onSaved: (state?: ScheduleState | null) => Promise<boolean>;
 }) {
   const [saving, setSaving] = useState<string | null>(null);
@@ -514,6 +563,56 @@ function DayEditModal({ day, range, people, shiftTypes, onClose, onSaved }: {
         </div>
 
         <div className="px-6 py-5 space-y-5">
+          {/* Intercambios comprometidos este día: lo primero que hay que ver
+              antes de tocar un turno, porque detrás hay dos personas avisadas. */}
+          {swaps.length > 0 && (
+            <div>
+              <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Intercambios de este día</h4>
+              <div className="space-y-2">
+                {swaps.map((sw) => {
+                  const broken = sw.check === "broken";
+                  const superseded = sw.check === "superseded";
+                  const pending = sw.status !== "aprobado";
+                  return (
+                    <div key={sw.id} className={cn("rounded-xl border px-3 py-2.5",
+                      broken ? "bg-rose-50 border-rose-200"
+                        : superseded ? "bg-gray-50 border-gray-200"
+                        : pending ? "bg-purple-50 border-purple-200"
+                        : "bg-cyan-50 border-cyan-200")}>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {broken
+                          ? <AlertTriangle className="w-4 h-4 text-rose-500 flex-shrink-0" />
+                          : <ArrowLeftRight className={cn("w-4 h-4 flex-shrink-0", superseded ? "text-gray-400" : pending ? "text-purple-500" : "text-cyan-500")} />}
+                        <span className="text-sm font-semibold text-gray-900">{sw.people}</span>
+                        <span className="text-xs text-gray-500">{sw.shift}{sw.kind === "partial" && sw.hours ? ` · ${sw.hours}h` : ""}</span>
+                        <Badge variant={broken ? "danger" : superseded ? "default" : pending ? "info" : "success"} className="ml-auto flex-shrink-0">
+                          {broken ? "Ya no se cumple"
+                            : superseded ? "Anulado por otro"
+                            : sw.status === "pendiente" ? "Pendiente"
+                            : sw.status === "aceptado" ? "Falta el admin"
+                            : sw.kind === "partial" ? "Solo horas" : "En el cuadrante"}
+                        </Badge>
+                      </div>
+                      {broken && sw.detail && (
+                        <p className="text-[11px] text-rose-800 mt-1.5 leading-relaxed">
+                          {sw.detail} Se aprobó y se les avisó a los dos: o se deja el cuadrante como el acuerdo, o hay que decírselo.
+                        </p>
+                      )}
+                      {superseded && (
+                        <p className="text-[11px] text-gray-500 mt-1.5">
+                          Después pidieron el contrario (intercambio #{sw.supersededBySwapId}) el mismo día, así que los dos se anulan entre sí.
+                        </p>
+                      )}
+                      {!broken && !superseded && sw.kind === "partial" && (
+                        <p className="text-[11px] text-gray-500 mt-1.5">Solo es una deuda de horas: no cambia ningún turno de este día.</p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* Assignments */}
           <div>
             <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Turnos asignados</h4>
@@ -649,6 +748,36 @@ function DayEditModal({ day, range, people, shiftTypes, onClose, onSaved }: {
                     </div>
                   )}
 
+                  {change.preview.swapsBroken.length > 0 && (
+                    <div className="rounded-lg bg-rose-100 border border-rose-300 px-3 py-2">
+                      <p className="text-xs font-bold text-rose-900 flex items-center gap-1.5">
+                        <ArrowLeftRight className="w-3.5 h-3.5" />
+                        {change.preview.swapsBroken.length === 1
+                          ? "Este cambio deshace un intercambio aprobado"
+                          : `Este cambio deshace ${change.preview.swapsBroken.length} intercambios aprobados`}
+                      </p>
+                      {change.preview.swapsBroken.map((sw) => (
+                        <p key={sw.swapId} className="text-[11px] text-rose-800 mt-1 leading-relaxed">
+                          <span className="font-semibold">{sw.people}</span> ({sw.dates.join(", ")}): {sw.detail}
+                        </p>
+                      ))}
+                      <p className="text-[11px] text-rose-700 mt-1.5">Los dos recibieron el aviso de que estaba aprobado. Si lo guardas, avísales.</p>
+                    </div>
+                  )}
+
+                  {change.preview.swapsRestored.length > 0 && (
+                    <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2">
+                      <p className="text-xs font-bold text-emerald-900 flex items-center gap-1.5">
+                        <Check className="w-3.5 h-3.5" /> Vuelve a cumplirse un intercambio aprobado
+                      </p>
+                      {change.preview.swapsRestored.map((sw) => (
+                        <p key={sw.swapId} className="text-[11px] text-emerald-800 mt-1">
+                          <span className="font-semibold">{sw.people}</span> ({sw.dates.join(", ")}).
+                        </p>
+                      ))}
+                    </div>
+                  )}
+
                   {change.preview.otherDaysChanged > 0 && (
                     <p className="text-xs text-amber-800">
                       El motor reordena además <span className="font-bold">{change.preview.otherDaysChanged}</span> {change.preview.otherDaysChanged === 1 ? "día más" : "días más"} del año
@@ -659,8 +788,15 @@ function DayEditModal({ day, range, people, shiftTypes, onClose, onSaved }: {
               )}
 
               <div className="flex gap-2 pt-1">
-                <Button size="sm" onClick={commitChange} disabled={change.loading || change.saving || !!change.error}>
-                  {change.saving ? "Guardando..." : <><Check className="w-3.5 h-3.5" /> Guardar cambio</>}
+                <Button
+                  size="sm"
+                  variant={(change.preview?.swapsBroken.length ?? 0) > 0 ? "danger" : "primary"}
+                  onClick={commitChange}
+                  disabled={change.loading || change.saving || !!change.error}
+                >
+                  {change.saving ? "Guardando..." : (change.preview?.swapsBroken.length ?? 0) > 0
+                    ? <><AlertTriangle className="w-3.5 h-3.5" /> Guardar de todos modos</>
+                    : <><Check className="w-3.5 h-3.5" /> Guardar cambio</>}
                 </Button>
                 <Button variant="outline" size="sm" onClick={() => setChange(null)} disabled={change.saving}>Cancelar</Button>
               </div>

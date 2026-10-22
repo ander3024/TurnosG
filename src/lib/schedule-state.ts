@@ -9,6 +9,10 @@ import {
 } from "@/lib/engine";
 import type { DaySchedule, EngineContext, HoursSummary } from "@/lib/engine";
 import type { EngineOverride } from "@/lib/engine/types";
+import {
+  loadApprovedSwaps, checkSwaps, indexByDate, toSwapNote,
+} from "@/lib/swap-integrity";
+import type { IntegritySwap, SwapNote } from "@/lib/swap-integrity";
 
 export interface ScheduleState {
   schedule: DaySchedule[];
@@ -114,6 +118,12 @@ export interface OverridePreview {
   otherDaysSample: string[];
   /** true si el cambio se guardaría pero no alteraría el cuadrante. */
   noEffect: boolean;
+  /** Intercambios aprobados que comprometen ESE día, tal como están ahora. */
+  swapsOnDay: SwapNote[];
+  /** Intercambios aprobados que este cambio dejaría sin cumplir. */
+  swapsBroken: SwapNote[];
+  /** Intercambios ahora incumplidos que este cambio volvería a cumplir. */
+  swapsRestored: SwapNote[];
 }
 
 /**
@@ -154,6 +164,27 @@ export async function previewOverride(m: OverrideMutation): Promise<OverridePrev
     .filter((d) => Math.abs(d.delta) > 0.01)
     .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
 
+  // Un intercambio aprobado es un compromiso con dos personas y una edición
+  // manual lo puede deshacer sin que nadie se entere (pasó el 18-sep-2026).
+  // Se comprueban contra los dos cuadrantes: el de ahora y el simulado.
+  const approved = (await loadApprovedSwaps(from, to)) as unknown as IntegritySwap[];
+  const baseRows = checkSwaps(approved, indexByDate(base));
+  const modRows = checkSwaps(approved, indexByDate(mod));
+  const baseById = new Map(baseRows.map((r) => [r.swapId, r]));
+  const wasOk = (id: number) => baseById.get(id)?.integrity.ok === true;
+  const wasBroken = (id: number) =>
+    baseById.get(id)?.integrity.ok === false && !baseById.get(id)?.integrity.supersededBySwapId;
+
+  const swapsBroken = modRows
+    .filter((r) => r.integrity.ok === false && !r.integrity.supersededBySwapId && wasOk(r.swapId))
+    .map(toSwapNote);
+  const swapsRestored = modRows
+    .filter((r) => r.integrity.ok === true && wasBroken(r.swapId))
+    .map(toSwapNote);
+  const swapsOnDay = baseRows
+    .filter((r) => r.integrity.dates.includes(m.date))
+    .map(toSwapNote);
+
   const baseSig = new Map(base.map((d) => [d.date, daySignature(d)]));
   const otherDays = mod
     .filter((d) => d.date !== m.date && baseSig.get(d.date) !== daySignature(d))
@@ -166,5 +197,8 @@ export async function previewOverride(m: OverrideMutation): Promise<OverridePrev
     otherDaysChanged: otherDays.length,
     otherDaysSample: otherDays.slice(0, 8),
     noEffect: dayChanges.length === 0 && hourDeltas.length === 0 && otherDays.length === 0,
+    swapsOnDay,
+    swapsBroken,
+    swapsRestored,
   };
 }

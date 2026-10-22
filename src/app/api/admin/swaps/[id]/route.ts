@@ -3,6 +3,7 @@ import { requireAdmin } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { notify } from "@/lib/notifications";
 import { loadEngineContextForRange, generateScheduleSlice } from "@/lib/engine";
+import { shiftCodeForLabel } from "@/lib/swap-integrity";
 
 // PATCH /api/admin/swaps/[id] — admin approves or rejects an accepted swap
 export async function PATCH(
@@ -308,16 +309,9 @@ async function deleteSwapOverride(date: string, personId: number, shiftLabel: st
 }
 
 async function shiftTypeForLabel(shiftLabel: string) {
-  const l = (shiftLabel || "").toLowerCase();
-  let code = "";
-  if (l.includes("finde") || l.includes("fin de semana")) code = "weekend";
-  else if (l.includes("refuerzo") && l.includes("tarde")) code = "refuerzo_afternoon";
-  else if (l.includes("refuerzo") && (l.includes("mañana") || l.includes("manana"))) code = "refuerzo_morning";
-  else if (l.includes("refuerzo")) code = "refuerzo_ofi";
-  else if (l.includes("oficina") && l.includes("viernes")) code = "office_friday";
-  else if (l.includes("oficina")) code = "office";
-  else if (l.includes("tarde")) code = "afternoon";
-  else if (l.includes("mañana") || l.includes("manana")) code = "morning";
+  // La traduccion etiqueta -> turno vive en un solo sitio (swap-integrity),
+  // que es el mismo que usa la comprobacion de intercambios del calendario.
+  const code = shiftCodeForLabel(shiftLabel);
   if (!code) return null;
   return prisma.shiftType.findUnique({ where: { code } });
 }

@@ -422,15 +422,3 @@ export async function DELETE(
     return NextResponse.json({ error: "Error interno" }, { status: 500 });
   }
 }
-
-async function findShiftType(shiftLabel: string) {
-  const l = shiftLabel.toLowerCase();
-  let code = "morning";
-  if (l.includes("finde") || l.includes("fin")) code = "weekend";
-  else if (l.includes("refuerzo") && l.includes("tarde")) code = "refuerzo_afternoon";
-  else if (l.includes("refuerzo") && l.includes("mañana")) code = "refuerzo_morning";
-  else if (l.includes("refuerzo")) code = "refuerzo_ofi";
-  else if (l.includes("tarde")) code = "afternoon";
-
-  return prisma.shiftType.findUnique({ where: { code } });
-}
