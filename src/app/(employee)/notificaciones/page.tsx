@@ -66,15 +66,19 @@ export default function NotificacionesPage() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [filter, setFilter] = useState<Filter>("all");
   const [loading, setLoading] = useState(true);
+  const [total, setTotal] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   const fetchNotifications = useCallback(async () => {
     try {
-      const res = await fetch("/api/employee/notifications");
+      const res = await fetch("/api/employee/notifications", { cache: "no-store" });
       if (res.ok) {
         const data = await res.json();
-        setNotifications(
-          Array.isArray(data) ? data : data.notifications || []
-        );
+        const list = Array.isArray(data) ? data : data.notifications || [];
+        setNotifications(list);
+        setHasMore(Boolean(data.hasMore));
+        setTotal(typeof data.total === "number" ? data.total : list.length);
       }
     } catch {
       // silently fail
@@ -82,6 +86,26 @@ export default function NotificacionesPage() {
       setLoading(false);
     }
   }, []);
+
+  /** Trae las anteriores a la más vieja que ya se tiene, y las añade. */
+  const loadMore = async () => {
+    const oldest = notifications[notifications.length - 1];
+    if (!oldest || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const res = await fetch(`/api/employee/notifications?before=${oldest.id}`, { cache: "no-store" });
+      if (res.ok) {
+        const data = await res.json();
+        const list: Notification[] = data.notifications || [];
+        setNotifications((prev) => [...prev, ...list.filter((n) => !prev.some((p) => p.id === n.id))]);
+        setHasMore(Boolean(data.hasMore));
+      }
+    } catch {
+      // silently fail
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   useEffect(() => {
     fetchNotifications();
@@ -99,25 +123,27 @@ export default function NotificacionesPage() {
   };
 
   const markAllAsRead = async () => {
-    const unreadIds = notifications.filter((n) => !n.read).map((n) => n.id);
-    if (unreadIds.length === 0) return;
+    if (!notifications.some((n) => !n.read)) return;
     setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    // `all` marca también las que no están cargadas en pantalla.
     await fetch("/api/employee/notifications", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ids: unreadIds }),
+      body: JSON.stringify({ all: true }),
     });
   };
 
   const deleteRead = async () => {
-    const readIds = notifications.filter((n) => n.read).map((n) => n.id);
-    if (readIds.length === 0) return;
+    if (!notifications.some((n) => n.read)) return;
     setNotifications((prev) => prev.filter((n) => !n.read));
+    // Antes se enviaba { ids: [...] }, que esta ruta no entiende: la pantalla
+    // las quitaba y al recargar seguían ahí.
     await fetch("/api/employee/notifications", {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ids: readIds }),
+      body: JSON.stringify({ deleteAllRead: true }),
     });
+    await fetchNotifications();
   };
 
   const filtered = notifications.filter((n) => {
@@ -263,6 +289,25 @@ export default function NotificacionesPage() {
               </Card>
             );
           })}
+
+          {hasMore && filter === "all" && (
+            <div className="pt-1 text-center">
+              <button
+                onClick={loadMore}
+                disabled={loadingMore}
+                className="text-sm font-medium text-indigo-600 hover:text-indigo-700 px-4 py-2 rounded-xl hover:bg-indigo-50 transition-colors disabled:opacity-50"
+              >
+                {loadingMore
+                  ? "Cargando..."
+                  : `Ver más antiguas (${Math.max(total - notifications.length, 0)} sin mostrar)`}
+              </button>
+            </div>
+          )}
+          {hasMore && filter !== "all" && (
+            <p className="text-xs text-gray-400 text-center pt-1">
+              Quedan {Math.max(total - notifications.length, 0)} notificaciones más antiguas: míralas en &quot;Todas&quot;.
+            </p>
+          )}
         </div>
       )}
     </div>

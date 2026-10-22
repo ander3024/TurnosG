@@ -2,20 +2,42 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
-// GET /api/employee/notifications — own notifications
-export async function GET() {
+/**
+ * GET /api/employee/notifications — las propias, de la más nueva a la más vieja.
+ *
+ * Antes devolvía las 50 últimas y punto: el resto del historial era
+ * inalcanzable desde la app. A Miguel le cortaba justo el 8-ago-2026 y no podía
+ * comprobar cuándo cubrió unas horas, que es precisamente para lo que se mira.
+ * Ahora se pagina con cursor (`before` = id de la última que ya tienes).
+ */
+export async function GET(request: NextRequest) {
   const user = await getCurrentUser();
   if (!user) {
     return NextResponse.json({ error: "No autorizado" }, { status: 401 });
   }
 
-  const notifications = await prisma.notification.findMany({
-    where: { userId: user.id },
-    orderBy: { createdAt: "desc" },
-    take: 50,
-  });
+  const { searchParams } = new URL(request.url);
+  const limit = Math.min(Math.max(Number(searchParams.get("limit")) || 50, 1), 200);
+  const before = Number(searchParams.get("before")) || null;
 
-  return NextResponse.json({ notifications });
+  const [rows, total, unread] = await Promise.all([
+    prisma.notification.findMany({
+      where: { userId: user.id, ...(before ? { id: { lt: before } } : {}) },
+      // Por id: es autoincremental, así que el orden es el de creación y el
+      // cursor no se puede descolocar si dos caen en el mismo milisegundo.
+      orderBy: { id: "desc" },
+      take: limit + 1,
+    }),
+    prisma.notification.count({ where: { userId: user.id } }),
+    // Sin leer de verdad, no solo entre las que se devuelven: la campana
+    // contaba sobre las 50 cargadas y se dejaba fuera las más antiguas.
+    prisma.notification.count({ where: { userId: user.id, read: false } }),
+  ]);
+
+  const hasMore = rows.length > limit;
+  const notifications = hasMore ? rows.slice(0, limit) : rows;
+
+  return NextResponse.json({ notifications, hasMore, total, unread });
 }
 
 // PATCH /api/employee/notifications — mark as read

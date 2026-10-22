@@ -41,14 +41,18 @@ export function NotificationBell() {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
-  const unreadCount = notifications.filter((n) => !n.read).length;
+  // El contador lo da el servidor sobre TODAS las notificaciones; aquí solo se
+  // traen las últimas para la lista desplegable.
+  const [unreadTotal, setUnreadTotal] = useState<number | null>(null);
+  const unreadCount = unreadTotal ?? notifications.filter((n) => !n.read).length;
 
   const fetchNotifications = useCallback(async () => {
     try {
-      const res = await fetch("/api/employee/notifications");
+      const res = await fetch("/api/employee/notifications?limit=15", { cache: "no-store" });
       if (res.ok) {
         const data = await res.json();
         setNotifications(Array.isArray(data) ? data : data.notifications || []);
+        setUnreadTotal(typeof data.unread === "number" ? data.unread : null);
       }
     } catch {
       // silently fail
@@ -78,6 +82,7 @@ export function NotificationBell() {
     setNotifications((prev) =>
       prev.map((n) => (n.id === id ? { ...n, read: true } : n))
     );
+    setUnreadTotal((u) => (u === null ? u : Math.max(u - 1, 0)));
     await fetch("/api/employee/notifications", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -86,13 +91,13 @@ export function NotificationBell() {
   };
 
   const markAllAsRead = async () => {
-    const unreadIds = notifications.filter((n) => !n.read).map((n) => n.id);
-    if (unreadIds.length === 0) return;
+    if (unreadCount === 0) return;
     setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    setUnreadTotal(0);
     await fetch("/api/employee/notifications", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ids: unreadIds }),
+      body: JSON.stringify({ all: true }),
     });
   };
 
