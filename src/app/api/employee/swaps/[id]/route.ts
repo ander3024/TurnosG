@@ -3,6 +3,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { notify } from "@/lib/notifications";
 import { loadEngineContextForRange, generateScheduleSlice } from "@/lib/engine";
+import { settleAgainstOpposite } from "@/lib/swap-debts";
 
 // Validate if a swap can be auto-approved
 function validateSwap(fromShift: string, toShift: string): {
@@ -140,23 +141,9 @@ export async function PATCH(
           data: { status: "aprobado", resolvedAt: new Date() },
         });
 
-        // Check if this settles an existing debt
-        const existingDebt = await prisma.swapRequest.findFirst({
-          where: {
-            fromPersonId: swap.toPersonId,
-            toPersonId: swap.fromPersonId,
-            settled: false,
-            status: "aprobado",
-            hours: { not: null },
-          },
-          orderBy: { createdAt: "asc" },
-        });
-        if (existingDebt) {
-          await prisma.swapRequest.updateMany({
-            where: { id: { in: [existingDebt.id, swapId] } },
-            data: { settled: true },
-          });
-        }
+        // Liquida contra la deuda contraria solo si es de las mismas horas.
+        // Si no coinciden, las dos siguen vivas y el saldo neto sale correcto.
+        await settleAgainstOpposite(swapId);
 
         await prisma.auditLog.create({
           data: {
@@ -254,29 +241,10 @@ export async function PATCH(
         }
       }
 
-      // For one-way swaps, check if this settles an existing debt (reverse direction)
+      // Igual que en las parciales: solo se da por devuelta una cobertura si la
+      // contraria vale las mismas horas (un finde son 12h, no 8).
       if (isOneWay) {
-        const existingDebt = await prisma.swapRequest.findFirst({
-          where: {
-            fromPersonId: swap.toPersonId,
-            toPersonId: swap.fromPersonId,
-            isOneWay: true,
-            settled: false,
-            status: "aprobado",
-          },
-          orderBy: { createdAt: "asc" },
-        });
-        if (existingDebt) {
-          await prisma.swapRequest.update({
-            where: { id: existingDebt.id },
-            data: { settled: true, settledBySwapId: swapId },
-          });
-          // Also mark this new swap as settled (it's the return)
-          await prisma.swapRequest.update({
-            where: { id: swapId },
-            data: { settled: true, settledBySwapId: existingDebt.id },
-          });
-        }
+        await settleAgainstOpposite(swapId);
       }
 
       await prisma.swapRequest.update({

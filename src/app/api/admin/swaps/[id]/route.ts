@@ -53,13 +53,9 @@ export async function PATCH(
 
     // If reverting an approved swap, clean up overrides and timeoffs
     if ((status === "cancelado" || status === "rechazado") && swap.status === "aprobado") {
-      await prisma.override.deleteMany({
-        where: { date: swap.fromDate, personId: swap.toPersonId },
-      });
+      await deleteSwapOverride(swap.fromDate, swap.toPersonId, swap.fromShiftLabel);
       if (!swap.isOneWay && swap.toDate !== swap.fromDate) {
-        await prisma.override.deleteMany({
-          where: { date: swap.toDate, personId: swap.fromPersonId },
-        });
+        await deleteSwapOverride(swap.toDate, swap.fromPersonId, swap.toShiftLabel);
       }
       if (swap.isOneWay) {
         await prisma.timeOffRequest.deleteMany({
@@ -253,14 +249,10 @@ export async function DELETE(
     if (swap.status === "aprobado") {
       // Delete overrides created for this swap's dates
       // Find the override on fromDate that assigns toPerson
-      await prisma.override.deleteMany({
-        where: { date: swap.fromDate, personId: swap.toPersonId },
-      });
+      await deleteSwapOverride(swap.fromDate, swap.toPersonId, swap.fromShiftLabel);
       // For two-way swaps, also delete the reverse override
       if (!swap.isOneWay && swap.toDate !== swap.fromDate) {
-        await prisma.override.deleteMany({
-          where: { date: swap.toDate, personId: swap.fromPersonId },
-        });
+        await deleteSwapOverride(swap.toDate, swap.fromPersonId, swap.toShiftLabel);
       }
       // Delete the intercambio timeoff that blocked fromPerson
       if (swap.isOneWay) {
@@ -296,4 +288,36 @@ export async function DELETE(
     console.error("PATCH /api/admin/swaps/[id] error:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
+}
+
+/**
+ * Borra el override que creo el intercambio, y solo ese. Antes se borraba por
+ * (fecha, persona), asi que al revertir tambien se llevaba cualquier ajuste
+ * manual que el admin tuviera ese dia para esa persona.
+ */
+async function deleteSwapOverride(date: string, personId: number, shiftLabel: string) {
+  const type = await shiftTypeForLabel(shiftLabel);
+  if (type) {
+    const deleted = await prisma.override.deleteMany({ where: { date, personId, shiftTypeId: type.id } });
+    if (deleted.count > 0) return deleted.count;
+  }
+  // Etiqueta que no corresponde a ningun turno conocido: se cae al
+  // comportamiento de antes para no dejar el intercambio aplicado.
+  const fallback = await prisma.override.deleteMany({ where: { date, personId } });
+  return fallback.count;
+}
+
+async function shiftTypeForLabel(shiftLabel: string) {
+  const l = (shiftLabel || "").toLowerCase();
+  let code = "";
+  if (l.includes("finde") || l.includes("fin de semana")) code = "weekend";
+  else if (l.includes("refuerzo") && l.includes("tarde")) code = "refuerzo_afternoon";
+  else if (l.includes("refuerzo") && (l.includes("mañana") || l.includes("manana"))) code = "refuerzo_morning";
+  else if (l.includes("refuerzo")) code = "refuerzo_ofi";
+  else if (l.includes("oficina") && l.includes("viernes")) code = "office_friday";
+  else if (l.includes("oficina")) code = "office";
+  else if (l.includes("tarde")) code = "afternoon";
+  else if (l.includes("mañana") || l.includes("manana")) code = "morning";
+  if (!code) return null;
+  return prisma.shiftType.findUnique({ where: { code } });
 }

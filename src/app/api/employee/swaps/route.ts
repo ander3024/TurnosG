@@ -127,7 +127,12 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    if (!isOneWay) {
+    // Las validaciones de abajo son para INTERCAMBIOS de turno completo: miran
+    // que las horas de los dos turnos cuadren. Una cobertura parcial no cambia
+    // ningun turno (solo apunta las horas que se deben), asi que no le aplican:
+    // se puede pedir "cubreme 2h" aunque los dos tengais el mismo turno o aunque
+    // uno este de finde y el otro entre semana.
+    if (!isOneWay && !isPartial) {
       // Validate: no point swapping same shift type on same date
       if (fromDate === toDate && fromShiftLabel === toShiftLabel) {
         return NextResponse.json(

@@ -100,12 +100,13 @@ export default function IntercambiosPage() {
     const p = people.find((pp) => pp.code === personCode);
     if (!p) return;
 
-    // Validate: can't swap finde (12h) with weekday (8h)
+    // Un intercambio completo necesita que las horas cuadren (finde 12h vs
+    // entre semana 8h). Como cobertura de unas horas sí vale, así que se avisa
+    // y se deja continuar marcando "Solo unas horas".
     const myIsFinde = pendingShift.shift.toLowerCase().includes("finde") || pendingShift.shift.toLowerCase().includes("fin");
     const theirIsFinde = shift.toLowerCase().includes("finde") || shift.toLowerCase().includes("fin");
     if (myIsFinde !== theirIsFinde) {
-      toast.warning(`No puedes intercambiar un turno de ${myIsFinde ? "fin de semana (12h)" : "entre semana (8h)"} por uno de ${theirIsFinde ? "fin de semana (12h)" : "entre semana (8h)"}. Las horas son diferentes.`);
-      return;
+      toast.warning(`Un turno de ${myIsFinde ? "fin de semana (12h)" : "entre semana (8h)"} y uno de ${theirIsFinde ? "fin de semana (12h)" : "entre semana (8h)"} no tienen las mismas horas: esto solo se puede pedir como cobertura de unas horas. Marca "Solo unas horas" antes de enviarlo.`);
     }
 
     setPairs([...pairs, { myDate: pendingShift.date, myShift: pendingShift.shift, theirDate: date, theirShift: shift, person: p }]);
